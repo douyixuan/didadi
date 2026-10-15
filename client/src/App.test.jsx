@@ -236,7 +236,7 @@ it('keeps the fixed document identity while an unsaved H1 changes',async()=>{
  await screen.findByRole('heading',{name:'Team handbook'});
  const current=screen.getByRole('button',{name:'demo.md, current document'});
  expect(current).toHaveAttribute('aria-current','page');
- expect(current).toHaveTextContent('demo.md');expect(current).toHaveTextContent('Title: Team handbook');
+ expect(current).toHaveTextContent('demo.md');await waitFor(()=>expect(current).toHaveTextContent('Title: Team handbook'));
  fireEvent.click(screen.getByRole('button',{name:'Edit',exact:true}));
  fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# DRAFT-QA changed title'}});
  await waitFor(()=>expect(current).toHaveTextContent('Draft title: DRAFT-QA changed title'));
