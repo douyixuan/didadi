@@ -1,0 +1,5 @@
+# Issue #22 serializer latency
+
+Issue #22 remains open without a competing implementation PR. Use an isolated worktree based on the repository-client draft. Preserve existing Markdown spelling and provenance. Ignore existing derived heading IDs/list labels for semantic equivalence, reuse immutable-node source pieces, retain adjacent source separators and cache immutable document results. Invalidate a document result when track assigns transaction provenance. Keep immediate React Markdown updates: do not add delayed-draft/save races or change IME semantics.
+
+Benchmark the exact pinned 760-line CUTLASS and 910-line VS Code documents through real Crepe/view edits, with paragraph and available table targets. Record uncached first serialization, same-document cache hits and ten successive new-document edit serializations. Budget mean untouched <5ms and mean edited serialization <16ms, without claiming DOM/dispatch/IME latency. Re-run complete source/structural/undo and pinned 33-file/1586-edit byte preservation corpus. Independent review and final-head CI before integration; integration remains blocked by draft/merge authorization auto-review.
