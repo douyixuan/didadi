@@ -1,5 +1,5 @@
 import React,{forwardRef,useEffect,useImperativeHandle,useRef,useState} from 'react';
-import {unsupportedMarkdown} from './markdown';
+import {sourceNode,boundaryNode,sourcePreservation} from './sourcePlugin';
 import {Crepe} from '@milkdown/crepe';
 import {editorViewCtx,serializerCtx} from '@milkdown/kit/core';
 import {$prose} from '@milkdown/kit/utils';
@@ -19,9 +19,10 @@ const RichBlockEditor=forwardRef(function RichBlockEditor({value,onChange,disabl
   useEffect(()=>{
     let disposed=false;
     const crepe=new Crepe({root:root.current,defaultValue:initial.current,features:{
-      [Crepe.Feature.ImageBlock]:false,[Crepe.Feature.Table]:false,[Crepe.Feature.Latex]:false,
+      [Crepe.Feature.ImageBlock]:false,[Crepe.Feature.Table]:true,[Crepe.Feature.Latex]:false,
       [Crepe.Feature.AI]:false,[Crepe.Feature.TopBar]:true,
-    },featureConfigs:{[Crepe.Feature.BlockEdit]:{advancedGroup:{image:null,table:null,math:null}},[Crepe.Feature.TopBar]:{buildTopBar(builder){for(const group of builder.build())for(const item of group.items){if(item.icon){const label=item.key.replaceAll('-',' ');item.icon=item.icon.replace('<svg',`<svg role="img" aria-label="${label}"`);}}}}}});
+    },featureConfigs:{[Crepe.Feature.BlockEdit]:{advancedGroup:{image:null,math:null}},[Crepe.Feature.TopBar]:{buildTopBar(builder){for(const group of builder.build())for(const item of group.items){if(item.icon){const label=item.key.replaceAll('-',' ');item.icon=item.icon.replace('<svg',`<svg role="img" aria-label="${label}"`);}}}}}});
+    crepe.editor.use(sourceNode).use(boundaryNode).use(sourcePreservation());
     crepe.editor.config(ctx=>ctx.update(uploadConfig.key,config=>({...config,uploader:async()=>[]})));
     crepe.editor.use($prose(ctx=>new Plugin({view:()=>({update(view,previous){
       if(!disposed&&instance.current===crepe&&!view.state.doc.eq(previous.doc)){touched.current=true;change.current(ctx.get(serializerCtx)(view.state.doc));}
@@ -51,10 +52,4 @@ const RichBlockEditor=forwardRef(function RichBlockEditor({value,onChange,disabl
   </div>;
 });
 
-export const BlockEditor=forwardRef(function BlockEditor({value,onChange,disabled,onComposingChange},ref){
-  const unsupported=useRef(unsupportedMarkdown(value));
-  const source=useRef(value),rich=useRef(null);
-  useImperativeHandle(ref,()=>({markdown:()=>unsupported.current?source.current:(rich.current?.markdown()??value)}));
-  if(unsupported.current)return <div><p className="state-banner warning" role="note">This document contains {unsupported.current}, outside this block editor’s supported Markdown subset. Source mode preserves it without conversion.</p><textarea className="source-fallback" aria-label="Markdown source (unsupported blocks)" disabled={disabled} value={value} onChange={event=>{source.current=event.target.value;onChange(event.target.value)}}/></div>;
-  return <RichBlockEditor ref={rich} value={value} onChange={onChange} disabled={disabled} onComposingChange={onComposingChange}/>;
-});
+export const BlockEditor=RichBlockEditor;
