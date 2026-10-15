@@ -181,3 +181,51 @@ it('cancels an accepted save without losing its draft and displays persistent ex
  await screen.findByRole('list',{name:'Task execution history'});
  expect(screen.getByText('Accepted')).toBeInTheDocument();expect(api.audit).toHaveBeenCalledWith('!room','$saved');
 },7000);
+
+it('sends only the selected granted source request and retries a rejection as a read',async()=>{
+ const api=fixture();api.session.repositoryReads=[{repository:'fixture',path:'main.py',commit:'a'.repeat(40),room:'!room'},
+  {repository:'other-room',path:'private.py',commit:'b'.repeat(40),room:'!other'}];
+ api.task.mockResolvedValue({task:{status:'done',body:'Repository request rejected: no matching read grant, file or supported action.'}});
+ render(<Documents api={api} room="!room" onSent={idle}/>);
+ await screen.findByRole('heading',{name:'Team handbook'});
+ expect(screen.getByLabelText('Granted source file')).toHaveTextContent('fixture / main.py');
+ expect(screen.getByLabelText('Granted source file')).not.toHaveTextContent('private.py');
+ fireEvent.click(screen.getByRole('button',{name:'Read source in discussion'}));
+ await screen.findByText(/Repository request rejected:/);
+ expect(api.send.mock.calls[0][1]['org.didadi.repository']).toEqual({action:'read',repository:'fixture',path:'main.py'});
+ fireEvent.click(screen.getByRole('button',{name:'Retry',exact:true}));
+ await waitFor(()=>expect(api.send).toHaveBeenCalledTimes(2));
+ expect(api.send.mock.calls[1][1]['org.didadi.repository'].action).toBe('read');
+ expect(api.send.mock.calls[1][1]['org.didadi.document']).toBeUndefined();
+});
+
+it('protects an unsaved draft and uses the current blob for explicit report replacement',async()=>{
+ const api=fixture();api.session.repositoryReads=[{repository:'fixture',path:'main.py',commit:'a'.repeat(40),room:'!room'}];
+ api.task.mockResolvedValue({task:{status:'done',body:'Saved demo.md\nGit commit: '+'c'.repeat(40)}});
+ const view=render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);
+ await screen.findByLabelText('Markdown document');
+ fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# Unsaved source report draft'}});
+ expect(screen.getByRole('button',{name:'Replace document with file report'})).toBeDisabled();
+ expect(api.send).not.toHaveBeenCalled();
+ fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:doc.content}});
+ const report=screen.getByRole('button',{name:'Replace document with file report'});
+ await waitFor(()=>expect(report).toBeEnabled());fireEvent.click(report);
+ await waitFor(()=>expect(api.send).toHaveBeenCalledTimes(1));
+ expect(api.send.mock.calls[0][1]['org.didadi.repository']).toEqual({action:'report',repository:'fixture',path:'main.py',base_blob:doc.blob});
+});
+
+it('retains a preserved draft and blocks report replacement after loading latest',async()=>{
+ const api=fixture();api.session.repositoryReads=[{repository:'fixture',path:'main.py',commit:'a'.repeat(40),room:'!room'}];
+ render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);
+ await screen.findByLabelText('Markdown document');
+ fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# Keep my recovered draft'}});
+ fireEvent.click(screen.getByRole('button',{name:'Load latest',exact:true}));
+ await screen.findByLabelText('Preserved draft');
+ expect(screen.getByLabelText('Markdown document')).toHaveValue(doc.content);
+ expect(screen.getByRole('button',{name:'Replace document with file report'})).toBeDisabled();
+ fireEvent.click(screen.getByRole('button',{name:'Replace document with file report'}));
+ expect(api.send).not.toHaveBeenCalled();
+ expect(screen.getByLabelText('Preserved draft')).toHaveValue('# Keep my recovered draft');
+ fireEvent.click(screen.getByRole('button',{name:'Restore previous draft'}));
+ expect(screen.getByLabelText('Markdown document')).toHaveValue('# Keep my recovered draft');
+});

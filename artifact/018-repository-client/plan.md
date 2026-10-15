@@ -1,0 +1,5 @@
+# Repository actions in the document workspace
+
+Expose only configured fixed-revision source choices for the current fixture identity and allowed rooms. Omit local repository locations and credentials. The external runtime independently enforces the actual read grant. Add source read and explicit document replacement with deterministic report to the existing document task flow, preserving original-thread receipts, task controls, stale-blob safety and draft preservation. Disable replacement for dirty or historical documents. Retry must retain the original command rather than turning a failed source read into a document write. No synthetic claims of a real backend, no LLM claim, no new enrollment/production grant UI.
+
+Test source command shape, wrong-room choice exclusion, rejection retry remaining read, dirty-draft replacement protection, current base_blob, backend identity/room metadata filtering, all existing frontend/corpus and Python regressions. No GUI window is currently authorized; keep actual native click acceptance separate.

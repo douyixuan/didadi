@@ -22,7 +22,7 @@ class ClientError(Exception):
 
 
 class Workspace:
-    def __init__(self, state, token, repo, metadata, matrix_url, gateway_url):
+    def __init__(self, state, token, repo, metadata, matrix_url, gateway_url, repositories=None):
         for base in [matrix_url, gateway_url]:
             url = urlsplit(base)
             if url.scheme != 'http' or url.hostname not in {'127.0.0.1', 'localhost'}:
@@ -32,6 +32,12 @@ class Workspace:
         self.docs, self.metadata = GitDocs(repo), str(metadata)
         self.csrf = secrets.token_urlsafe(32)
         self.user_id = self.api('GET', '/account/whoami')['user_id']
+        self.repository_reads = []
+        if repositories is not None:
+            for alias, grant in repositories.grants.items():
+                if self.user_id in grant['senders']:
+                    self.repository_reads.extend({'repository': alias, 'path': name, 'commit': grant['commit'], 'room': room}
+                        for name in sorted(grant['files']) for room in sorted(grant['rooms']))
         with sqlite3.connect(self.metadata) as db:
             db.execute('CREATE TABLE IF NOT EXISTS rooms (id TEXT PRIMARY KEY, operation TEXT UNIQUE)')
             db.execute('INSERT OR IGNORE INTO rooms VALUES (?,?)', (state['room'], 'seed'))
@@ -43,6 +49,11 @@ class Workspace:
         with sqlite3.connect(self.metadata) as db:
             if db.execute('SELECT 1 FROM rooms WHERE id=?', (room,)).fetchone() is None:
                 raise ClientError(403, 'This room is not part of the local demo.')
+
+    def repository_choices(self):
+        with sqlite3.connect(self.metadata) as db:
+            rooms = {row[0] for row in db.execute('SELECT id FROM rooms')}
+        return [source for source in self.repository_reads if source['room'] in rooms]
 
     def task_event(self, room, task_id):
         self.allowed(room)
@@ -179,7 +190,8 @@ def handler(workspace, dist, port):
                     body = json.loads(self.rfile.read(size))
                 if parsed.path == '/api/session' and method == 'GET':
                     result = {'csrf': workspace.csrf, 'userId': workspace.user_id, 'agentId': AGENT,
-                              'initialRoom': workspace.state['room'], 'qa': getattr(workspace, 'qa', None), 'agentLabel': 'Example echo agent · no LLM'}
+                              'initialRoom': workspace.state['room'], 'qa': getattr(workspace, 'qa', None), 'agentLabel': 'Example echo agent · no LLM',
+                              'repositoryReads': workspace.repository_choices()}
                 elif parsed.path == '/api/task/cancel' and method == 'POST':
                     result = workspace.cancel_task(body['room'],body['id'])
                 elif parsed.path == '/api/task/audit' and method == 'GET':
@@ -246,13 +258,16 @@ if __name__ == '__main__':
     parser.add_argument('--state-file', required=True)
     parser.add_argument('--token-file', required=True)
     parser.add_argument('--repo', required=True)
+    parser.add_argument('--repository-grants', help='advertise explicitly configured read choices; runtime independently enforces grants')
     parser.add_argument('--metadata', required=True)
     parser.add_argument('--dist', default='client/dist')
     parser.add_argument('--matrix-url', default='http://127.0.0.1:8009')
     parser.add_argument('--gateway-url', default='http://127.0.0.1:9001')
     parser.add_argument('--port', type=int, default=8767)
     args = parser.parse_args()
+    from src.repository_read import RepositoryReader
+    repositories = RepositoryReader.from_file(args.repository_grants) if args.repository_grants else None
     workspace = Workspace(json.loads(Path(args.state_file).read_text()), Path(args.token_file).read_text().strip(),
-                          args.repo, args.metadata, args.matrix_url, args.gateway_url)
+                          args.repo, args.metadata, args.matrix_url, args.gateway_url, repositories)
     print(f'React workspace http://127.0.0.1:{args.port}', flush=True)
     ThreadingHTTPServer(('127.0.0.1', args.port), handler(workspace, Path(args.dist), args.port)).serve_forever()
