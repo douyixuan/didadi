@@ -116,3 +116,30 @@ it('restores legacy bytes after typing and undo in the real Crepe view',()=>{
   expect(model.serialize(view.state.doc)).toBe(source);
  });
 });
+
+it('keeps the single-newline table boundary check when a heading becomes a pipe paragraph',()=>{
+ const table='| A | B |\n| - | - |\n| one | two |',source=table+'\n# After\n',doc=model.parse(source);
+ expect(doc.childCount).toBe(2);const pos=doc.firstChild.nodeSize;
+ const tr=EditorState.create({doc}).tr.setNodeMarkup(pos,doc.type.schema.nodes.paragraph)
+  .replaceWith(pos+1,pos+doc.lastChild.nodeSize-1,doc.type.schema.text('| three | four |'));
+ model.track(tr,doc);const saved=model.serialize(tr.doc),reopened=model.parse(saved);
+ expect(saved.startsWith(table+'\n\n')).toBe(true);expect(reopened.lastChild.textContent).toBe('| three | four |');
+ expect(reopened.childCount).toBe(2);expect(reopened.lastChild.type.name).toBe('paragraph');
+ expect(reopened.firstChild.childCount).toBe(doc.firstChild.childCount);
+});
+
+it('keeps blank-separated code boundaries through cached structural changes and unclosed fences',()=>{
+ const doc=model.parse('Before\n\nAfter\n'),pos=doc.firstChild.nodeSize;
+ model.serialize(doc);
+ const tr=EditorState.create({doc}).tr.setNodeMarkup(pos,doc.type.schema.nodes.code_block);
+ model.track(tr,doc);const saved=model.serialize(tr.doc),reopened=model.parse(saved);
+ expect(reopened.childCount).toBe(2);expect(reopened.lastChild.type.name).toBe('code_block');
+ const indented='    indented code\n\nAfter\n',original=model.parse(indented);
+ expect(model.serialize(original)).toBe(indented);
+ const edited=EditorState.create({doc:original}).tr.insertText('x',original.firstChild.nodeSize+2);model.track(edited,original);
+ expect(model.parse(model.serialize(edited.doc)).childCount).toBe(2);
+ const unclosed=model.parse('```js\nx()\n');
+ const appended=EditorState.create({doc:unclosed}).tr.insert(unclosed.content.size,unclosed.type.schema.nodes.paragraph.create(null,unclosed.type.schema.text('New block')));
+ model.track(appended,unclosed);const completed=model.parse(model.serialize(appended.doc));
+ expect(completed.childCount).toBe(2);expect(completed.lastChild.textContent).toBe('New block');
+});

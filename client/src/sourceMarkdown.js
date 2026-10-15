@@ -6,6 +6,7 @@ import {diffChars,diffArrays} from 'diff';
 const parser=unified().use(remarkParse).use(remarkGfm);
 const emptyParagraph='<!-- didadi:empty-paragraph -->';
 const supported=new Set(['paragraph','heading','list','listItem','blockquote','code','thematicBreak','text','strong','emphasis','delete','inlineCode','link','break','table','tableRow','tableCell']);
+const blankSeparated=new Set(['paragraph','heading','table','code_block','hr']);
 function needsSource(node){
   return !supported.has(node.type)||(node.type==='code'&&node.meta)||node.children?.some(needsSource);
 }
@@ -238,7 +239,10 @@ export class SourceDocument {
         const adjacent=piece.origin&&next.origin&&piece.origin.end+piece.origin.after.length===next.origin.start;
         let separator=adjacent?piece.origin.after:'\n\n';
         const unchanged=adjacent&&piece.unchanged&&next.unchanged;
-        if(!unchanged){
+        // These rich block types cannot join across an existing blank line.
+        // Lists, quotes, raw source and single-newline boundaries still reparse.
+        const separated=adjacent&&/\r?\n[ \t]*\r?\n/.test(separator)&&blankSeparated.has(piece.node.type.name)&&blankSeparated.has(next.node.type.name);
+        if(!unchanged&&!separated){
           const left=sourceBlocks(piece.text).blocks,right=sourceBlocks(next.text).blocks;
           if(sourceBlocks(piece.text+separator+next.text).blocks.length<left.length+right.length){
             separator='\n\n';
