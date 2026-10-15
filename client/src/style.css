@@ -13,3 +13,5 @@
 .document-properties{margin:0 0 24px;color:var(--muted,#667085);font-size:13px}
 .document-properties summary{cursor:pointer}
 .document-properties pre{white-space:pre-wrap;overflow-wrap:anywhere}
+.document-bottom{flex-wrap:wrap;justify-content:flex-start;gap:8px 16px}
+.document-bottom>span:first-child{margin-right:auto}

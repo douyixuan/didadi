@@ -90,6 +90,52 @@ it('unlocks a failed save task and keeps the draft for an explicit new retry',as
  expect(api.send.mock.calls[0][2]).not.toBe(api.send.mock.calls[1][2]);
 });
 
+it('opens a receipt version without losing a draft and returns to its original discussion',async()=>{
+ const api=fixture(),commit='c'.repeat(40);
+ const receipt={id:'$receipt',sender:'@agent',time:1,content:{body:'Saved demo.md\nGit commit: '+commit+'\nBlob: '+'d'.repeat(40),'m.relates_to':{rel_type:'m.thread',event_id:'$original'},'org.didadi.task':{id:'$original'}}};
+ api.timeline.mockResolvedValue([receipt,{id:'$unrelated',sender:'@user:local',content:{body:'Unrelated message'}}]);
+ api.document.mockImplementation(async(room,version)=>version?{...doc,commit:version,content:'# Referenced document\n\nImmutable body.'}:doc);
+ render(<App connector={async()=>api}/>);
+ await screen.findByRole('heading',{name:'Team handbook'});
+ fireEvent.click(screen.getByRole('button',{name:'Edit',exact:true}));
+ fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# Unsaved current draft'}});
+ fireEvent.click(screen.getByRole('button',{name:'Discussion',exact:true}));
+ fireEvent.click(await screen.findByRole('button',{name:'Open document version'}));
+ await screen.findByRole('heading',{name:'Referenced document'});
+ expect(api.document).toHaveBeenLastCalledWith('!room',commit);
+ expect(screen.getByLabelText('Preserved draft')).toHaveValue('# Unsaved current draft');
+ const back=screen.getByRole('button',{name:'View version discussion'});await waitFor(()=>expect(back).toBeEnabled());fireEvent.click(back);
+ expect(screen.getByText('Thread $original')).toBeInTheDocument();
+ expect(screen.queryByText('Unrelated message')).toBeNull();
+});
+
+it('does not invent a discussion for an empty Git repository or an ordinary message',async()=>{
+ const api=fixture();api.document.mockResolvedValue({...doc,content:'',commit:null,blob:null});
+ api.timeline.mockResolvedValue([{id:'$plain',sender:'@human',content:{body:'Ordinary discussion'}}]);
+ render(<App connector={async()=>api}/>);
+ await screen.findByRole('heading',{name:'Untitled document'});
+ expect(screen.getByRole('button',{name:'View version discussion'})).toBeDisabled();
+ expect(screen.queryByRole('button',{name:'Open document version'})).toBeNull();
+});
+
+it('retries a failed receipt read as the same immutable read and never saves the draft',async()=>{
+ const api=fixture(),commit='c'.repeat(40);let reads=0;
+ api.timeline.mockResolvedValue([{id:'$receipt',sender:'@agent',content:{body:'Saved demo.md\nGit commit: '+commit,'m.relates_to':{rel_type:'m.thread',event_id:'$root'},'org.didadi.task':{id:'$root'}}}]);
+ api.document.mockImplementation(async(room,version)=>{
+  if(version&&++reads===1)throw new Error('Historical read unavailable');
+  return version?{...doc,commit:version,content:'# Recovered version'}:doc;
+ });
+ render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Team handbook'});
+ fireEvent.click(screen.getByRole('button',{name:'Edit',exact:true}));
+ fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# Do not save my draft'}});
+ fireEvent.click(screen.getByRole('button',{name:'Discussion',exact:true}));
+ fireEvent.click(await screen.findByRole('button',{name:'Open document version'}));
+ await screen.findByText('Historical read unavailable');
+ fireEvent.click(screen.getByRole('button',{name:'Retry',exact:true}));
+ await screen.findByRole('heading',{name:'Recovered version'});
+ expect(api.document).toHaveBeenLastCalledWith('!room',commit);
+ expect(api.send).not.toHaveBeenCalled();expect(screen.getByLabelText('Preserved draft')).toHaveValue('# Do not save my draft');
+});
 
 it('exports the full current draft, including front matter, without saving or rendering HTML',async()=>{
  const api=fixture();const source='---\ntitle: Export\n---\n# Export\n\n<details>raw source</details>\n';

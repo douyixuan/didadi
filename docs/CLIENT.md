@@ -71,3 +71,11 @@ Tests use real Milkdown for semantic block round-trip, direct editor changes, bl
 ## Export standard Markdown
 
 Use **Export Markdown** below the document to download `demo.md`. It includes the current editor contents, including unsaved changes, or the exact historical snapshot currently open. It retains headings, front matter, code and original source spelling; it does not export rendered HTML or trigger a Git save. Export is disabled during a pending save/read or composition. The hosted synthetic preview downloads only browser-local sample content.
+
+## Follow document versions through discussion
+
+A managed Agent's task reply can offer **Open document version**. It opens the fixed Git snapshot through the same local document grant. Unsaved text is kept in **Preserved draft**. A failed historical read retries that same read; it cannot turn into a save.
+
+**View version discussion** returns to the original receipt thread for the open version. It is enabled only when that receipt is present in the currently loaded timeline. This bounded timeline is not a repository-wide discussion index. A missing receipt is not replaced by an invented link.
+
+Real Git receipts require the managed sender identity, task metadata, thread relation and a fixed 40-character commit ID. The synthetic preview recognizes browser snapshot receipts separately. Ordinary messages cannot impersonate actionable Agent version receipts. These controls do not replace production grants, a multi-document identity model or cryptographic attestation.
