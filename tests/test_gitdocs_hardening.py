@@ -100,13 +100,19 @@ class GitDocsHardeningTests(unittest.TestCase):
         self.assertEqual(changed.read('demo.md'), 'saved')
 
     def test_unicode_dots_spaces_and_normalized_names_round_trip(self):
-        for name in ['设计/编辑器选型.md', 'README.zh.md', 'Meeting notes.md', 'café.md']:
+        for name in ['设计/编辑器选型.md', 'README.zh.md', 'Meeting notes.md', 'v1.2-release.md', 'café.md', '中' * 79 + '.md']:
             with self.subTest(name=name):
                 item = self.store.write(name, 'first')
                 self.assertEqual(self.store.read(name), 'first')
                 self.store.write(name, 'second', item['blob'])
                 self.assertEqual(self.store.read(name, item['commit']), 'first')
                 self.assertEqual(len(self.store.history(name)), 2)
+
+    def test_names_use_literal_git_pathspecs(self):
+        first = self.store.write('[draft].md', 'literal')
+        self.store.write('d.md', 'different')
+        self.assertEqual(self.store.read('[draft].md'), 'literal')
+        self.assertEqual(self.store.history('[draft].md'), [first['commit']])
 
     def test_names_reject_unsafe_nonportable_and_noncanonical_paths(self):
         names = ['../x.md', '.git/x.md', 'a/./b.md', 'a/../b.md', '/a.md',
