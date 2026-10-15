@@ -105,7 +105,7 @@ function patchRawSource(original,next){
 }
 
 export class SourceDocument {
-  constructor(parse,serialize,rawType,schema){this.parseRich=parse;this.serializeRich=serialize;this.rawType=rawType;this.schema=schema;this.origins=new WeakMap();this.documents=new WeakMap();this.richCache=new Map();}
+  constructor(parse,serialize,rawType,schema){this.parseRich=parse;this.serializeRich=serialize;this.rawType=rawType;this.schema=schema;this.origins=new WeakMap();this.documents=new WeakMap();this.richCache=new Map();this.pieces=new WeakMap();this.results=new WeakMap();}
   documentAttrs(node){
     const attrs={...node.attrs};
     if(node.type.name==='list_item')delete attrs.label;
@@ -114,12 +114,12 @@ export class SourceDocument {
   }
   layout(node){return {type:node.type.name,children:Array.from({length:node.childCount},(_,index)=>this.layout(node.child(index)))}}
   equivalent(left,right){
-    const clean=node=>{
-      // List labels and heading slugs are derived by Milkdown view plugins.
-      const attrs=this.documentAttrs(node);
-      return {type:node.type.name,attrs,text:node.text,marks:node.marks.map(mark=>mark.toJSON()),children:Array.from({length:node.childCount},(_,i)=>clean(node.child(i)))};
-    };
-    return JSON.stringify(clean(left))===JSON.stringify(clean(right));
+    if(left===right)return true;
+    if(left.type!==right.type||left.text!==right.text||left.childCount!==right.childCount||left.marks.length!==right.marks.length)return false;
+    if(JSON.stringify(this.documentAttrs(left))!==JSON.stringify(this.documentAttrs(right)))return false;
+    if(left.marks.some((mark,index)=>!mark.eq(right.marks[index])))return false;
+    for(let index=0;index<left.childCount;index++)if(!this.equivalent(left.child(index),right.child(index)))return false;
+    return true;
   }
   canonical(node){return this.serializeRich(this.schema.topNodeType.create(null,[node])).replace(/\n$/,'');}
   parse(source){
@@ -165,6 +165,7 @@ export class SourceDocument {
   }
   track(transaction,previous){
     if(!transaction.docChanged)return;
+    this.results.delete(transaction.doc);
     const info=this.documents.get(previous);
     if(info)this.documents.set(transaction.doc,info);
     previous.forEach((node,pos)=>{
@@ -185,6 +186,7 @@ export class SourceDocument {
     });
   }
   serialize(doc){
+    if(this.results.has(doc))return this.results.get(doc);
     const info=this.documents.get(doc);
     if(info?.source.includes(emptyParagraph)){
       const nodes=[];doc.forEach(node=>nodes.push(node));
@@ -197,10 +199,13 @@ export class SourceDocument {
       // Crepe adds a final empty typing paragraph. A real original blank file
       // remains represented by document metadata; typed/deleted content does not.
       if(node.type.name==='paragraph'&&!node.content.size)return;
+      const cached=this.pieces.get(node);
+      const unchanged=origin&&this.equivalent(node,origin.node);
       let text;
-      if(node.type.name==='didadi_boundary')text='<!-- -->';
+      if(cached&&cached.origin===origin)text=cached.text;
+      else if(node.type.name==='didadi_boundary')text='<!-- -->';
       else if(node.type===this.rawType)text=origin?patchRawSource(origin.source,node.textContent):node.textContent;
-      else if(origin&&node.eq(origin.node))text=origin.source;
+      else if(unchanged)text=origin.source;
       else {
         const canonical=this.canonical(node);
         const valid=source=>{
@@ -215,7 +220,8 @@ export class SourceDocument {
         }else text=null;
         text??=canonical;
       }
-      pieces.push({text,after:origin?.after,origin,node});
+      this.pieces.set(node,{text,origin});
+      pieces.push({text,after:origin?.after,origin,node,unchanged});
     });
     let result=info?.before||'';
     pieces.forEach((piece,index)=>{
@@ -231,7 +237,7 @@ export class SourceDocument {
       if(next){
         const adjacent=piece.origin&&next.origin&&piece.origin.end+piece.origin.after.length===next.origin.start;
         let separator=adjacent?piece.origin.after:'\n\n';
-        const unchanged=adjacent&&piece.node.eq(piece.origin.node)&&next.node.eq(next.origin.node);
+        const unchanged=adjacent&&piece.unchanged&&next.unchanged;
         if(!unchanged){
           const left=sourceBlocks(piece.text).blocks,right=sourceBlocks(next.text).blocks;
           if(sourceBlocks(piece.text+separator+next.text).blocks.length<left.length+right.length){
@@ -242,6 +248,6 @@ export class SourceDocument {
         result+=separator;
       }else result+=piece.after??(piece.text?'\n':'');
     });
-    return result;
+    this.results.set(doc,result);return result;
   }
 }
