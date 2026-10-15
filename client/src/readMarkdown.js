@@ -13,7 +13,10 @@ function plainText(node){
 export function readMarkdown(source){
   const properties=frontMatter(source);
   const content=source.slice(properties.length);
-  const heading=parser.parse(content).children.find(node=>node.type==='heading'&&node.depth===1);
-  return {title:heading?plainText(heading):'Untitled document',properties,
-    body:heading?content.slice(0,heading.position.start.offset)+content.slice(heading.position.end.offset):content};
+  const nodes=parser.parse(content).children;
+  const heading=nodes.find(node=>node.type==='heading'&&node.depth===1);
+  const hidden=nodes.filter(node=>node===heading||node.type==='html'&&node.value==='<!-- didadi:empty-paragraph -->');
+  let body=content;
+  for(const node of hidden.reverse())body=body.slice(0,node.position.start.offset)+body.slice(node.position.end.offset);
+  return {title:heading?plainText(heading):'Untitled document',properties,body};
 }

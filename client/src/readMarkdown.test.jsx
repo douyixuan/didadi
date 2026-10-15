@@ -31,3 +31,9 @@ it('keeps no-front-matter documents and inert HTML intact for safe rendering',()
  expect(readMarkdown('No title\n\n<script>bad()</script>').body).toContain('<script>bad()</script>');
  expect(readMarkdown('No title').title).toBe('Untitled document');
 });
+
+it('hides only the exact legacy editor marker without changing fenced or ordinary comments',()=>{
+ const source='# Title\n\n<!-- didadi:empty-paragraph -->\n\n<!-- user comment -->\n\n```html\n<!-- didadi:empty-paragraph -->\n```';
+ const view=readMarkdown(source);expect(view.body).toContain('<!-- user comment -->');
+ expect(view.body.match(/didadi:empty-paragraph/g)).toHaveLength(1);
+});
