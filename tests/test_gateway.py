@@ -85,10 +85,10 @@ class GatewayTests(unittest.TestCase):
         self.gateway.accept('encrypted', [self.event])
         self.assertIsNone(self.gateway.claim())
         self.agent.api.side_effect = MatrixError(500, {})
-        with self.assertRaises(MatrixError):
-            self.gateway.accept('unavailable', [self.event])
+        self.gateway.accept('unavailable', [self.event])
         with self.gateway.db() as db:
-            self.assertIsNone(db.execute("SELECT * FROM transactions WHERE id='unavailable'").fetchone())
+            self.assertIsNotNone(db.execute("SELECT * FROM transactions WHERE id='unavailable'").fetchone())
+            self.assertEqual(db.execute('SELECT status FROM tasks').fetchone()[0], 'unverified')
         self.agent.api.side_effect = self.api
         self.gateway.accept('valid', [self.event])
         task = self.gateway.claim()

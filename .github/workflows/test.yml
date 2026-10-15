@@ -55,6 +55,8 @@ jobs:
           docker compose up -d --wait --wait-timeout 240
           docker compose --profile test run --rm smoke python -u -m scripts.matrix_smoke --check-persistence
           docker compose --profile test run --rm smoke
+      - name: Revoked room isolation and terminal task recovery
+        run: docker compose --profile test run --rm smoke python -u -m scripts.gateway_lifecycle_smoke
       - name: Real Matrix Git document loop and worker crash recovery
         run: |
           mkdir -p .local

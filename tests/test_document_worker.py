@@ -35,12 +35,16 @@ class DocumentWorkerTests(unittest.TestCase):
                 return {'task': self.task}
             if path == '/agent/status':
                 return {'task': {'status': 'done' if done else 'pending'}}
+            if path == '/agent/validate':
+                return {'allowed': True}
+            if path == '/agent/fail':
+                return {'status': 'pending'}
             if path == '/agent/complete':
                 done = True
                 sent.append(data)
                 return {'event_id': '$reply'}
             raise AssertionError(path)
-        with patch('scripts.document_worker.request', side_effect=api):
+        with patch('scripts.document_worker.request', side_effect=api), patch('scripts.agent_worker.request', side_effect=api):
             with patch.object(self.store, 'acknowledge', side_effect=RuntimeError('crash')):
                 with self.assertRaises(RuntimeError):
                     once('unused', 'token', self.store)
