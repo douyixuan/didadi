@@ -310,6 +310,23 @@ class GitDocs:
                 raise ValueError('unknown operation')
             self._git('update-ref', opref.replace('/operations/', '/notified/'), item['commit'])
 
+    def abandon(self, operation, reason='task_failed'):
+        """Keep the committed version, but durably close its notification outbox item."""
+        if reason not in {'task_failed','runtime_error','room_forbidden','room_unavailable',
+                          'delivery_forbidden','attempts_exhausted'}:
+            raise ValueError('invalid abandonment reason')
+        with self._locked():
+            opref = self._operation_ref(operation)
+            item = self._operation(opref)
+            if item is None:
+                raise ValueError('unknown operation')
+            receipt = opref.replace('/operations/', '/notified/')
+            if self._ref(receipt):
+                return
+            record = {'status':'abandoned', 'reason':reason, 'operation':operation, 'commit':item['commit']}
+            blob = self._git('hash-object', '-w', '--stdin', input=json.dumps(record, sort_keys=True)).strip()
+            self._git('update-ref', receipt, blob)
+
     def flush(self, send):
         """Send pending notifications; callback must use the stable operation ID to deduplicate."""
         for item in self.pending():

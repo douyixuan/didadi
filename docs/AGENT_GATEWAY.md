@@ -55,3 +55,18 @@ The independent worker token is generated once in `config/agent-token` (existing
 Rooms must explicitly invite the managed agent and it must be joined. Any local user can invite it, as in Phase 0. Only plaintext text messages with structured mentions create tasks. Encryption-state lookup fails closed; joined membership and no encryption are checked again before sending. Encrypted events are ignored; no keys are requested or room settings changed. There is no production room-grant UI or E2EE rejection notice yet.
 
 The new `gateway` volume contains the SQLite transaction/task/result ledger and must be retained with the existing config, Synapse and PostgreSQL volumes. `down` keeps all volumes; `down -v` destroys all development data. AS port 9000 is now exposed only on host loopback for outbound local runtimes. Do not expose it or the preview publicly. SQLite is single-node metadata, not document storage: Git remains the only authority for Markdown content, with the subsequent [Issue #3 document spike](GIT_DOCUMENTS.md) providing a separate Git editor, runtime and recovery tests.
+
+## Per-event eligibility and terminal failures
+
+AS transactions persist each valid mention independently. A forbidden room is skipped; a transient room lookup creates an `unverified` task. Other rooms continue. The legacy echo path is best effort and cannot reject the transaction because of one room.
+
+Tasks have `attempts`, `last_error`, and terminal `failed` status. Existing databases migrate in place. `GATEWAY_MAX_ATTEMPTS` defaults to 8; leases and explicit transient failure retries use bounded exponential delays. A terminated task is never leased again. `/agent/status` reports its terminal reason; the client keeps the draft and unlocks on failure.
+
+Authenticated worker endpoints:
+- `POST /agent/validate {id, lease}` checks room eligibility and revalidates the lease after the network lookup. The document worker calls this before reading/writing Git.
+- `POST /agent/fail {id, lease, reason, retryable?}` reports runtime failure. Only fixed non-sensitive reason codes are accepted. `retryable` defaults to false.
+- `/agent/complete` returns `{error: "room_forbidden", retryable: false}` for revoked access and `{error: "invalid_lease", retryable: true}` for a stale lease. Results remain fixed across transient delivery failures.
+
+Failed document operations receive a durable Git abandonment receipt, including the reason. This removes the notification from `pending()` and retains the committed document version. It does not undo an existing commit or silently publish into a forbidden room.
+
+Boundary: Matrix membership checks and Git writes do not share a transaction. Claim, pre-write validation and completion checks reduce the revocation window; they cannot guarantee that membership will remain unchanged between a successful validation and a Git operation. Production authorization/grants and cancel/audit are separate work.
