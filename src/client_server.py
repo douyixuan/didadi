@@ -112,6 +112,13 @@ class Workspace:
         if mentions and mentions != [AGENT]:
             raise ClientError(400, 'Only the explicitly labeled example agent is available.')
         command = data.get('org.didadi.document')
+        repository = data.get('org.didadi.repository')
+        if repository is not None:
+            if (command is not None or not isinstance(repository, dict) or mentions != [AGENT] or
+                repository.get('action') not in {'read', 'report'} or
+                not isinstance(repository.get('repository'), str) or not isinstance(repository.get('path'), str) or
+                set(repository) - {'action', 'repository', 'path', 'base_blob'}):
+                raise ClientError(400, 'Invalid repository request. Runtime read grants are required.')
         if command is not None:
             if not isinstance(command, dict) or command.get('action') not in {'read', 'write'} or mentions != [AGENT]:
                 raise ClientError(400, 'Invalid document request.')
@@ -125,6 +132,8 @@ class Workspace:
         content = {'msgtype': 'm.text', 'body': data['body'], 'm.mentions': {'user_ids': mentions}}
         if command:
             content['org.didadi.document'] = command
+        if repository is not None:
+            content['org.didadi.repository'] = repository
         relation = data.get('m.relates_to')
         if relation:
             if not isinstance(relation, dict) or relation.get('rel_type') != 'm.thread' or not isinstance(relation.get('event_id'), str):
