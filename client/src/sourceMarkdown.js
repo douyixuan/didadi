@@ -10,9 +10,12 @@ function needsSource(node){
   return !supported.has(node.type)||(node.type==='code'&&node.meta)||node.children?.some(needsSource);
 }
 // Offsets are UTF-16, as are JS slicing and remark positions. Keep every gap byte.
-export function sourceBlocks(source){
+export function frontMatter(source){
   const front=/^(?:\uFEFF)?---[ \t]*\r?\n[\s\S]*?\r?\n(?:---|\.\.\.)[ \t]*(?=\r?\n|$)/.exec(source);
-  const prefix=front?.[0]||'';
+  return front?.[0]||'';
+}
+export function sourceBlocks(source){
+  const prefix=frontMatter(source);
   const tree=parser.parse(source.slice(prefix.length));
   const blocks=tree.children.map(node=>({start:node.position.start.offset+prefix.length,end:node.position.end.offset+prefix.length,raw:!!needsSource(node),kind:node.type}));
   if(prefix)blocks.unshift({start:0,end:prefix.length,raw:true,kind:'front matter'});
