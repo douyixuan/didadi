@@ -210,6 +210,23 @@ class GitDocs:
         return next((item for item in self._operations()
                      if self._operation_ref(item['operation']) == ref), None)
 
+    def _portable_name(self, name, head):
+        """Reject case-folding collisions before they can make a clone lose a file."""
+        if not head:
+            return
+        parts = name.split('/')
+        fold = lambda value: unicodedata.normalize('NFC', value.casefold())
+        for existing in self._git('ls-tree', '-r', '-z', '--name-only', head).split('\0'):
+            if not existing:
+                continue
+            old = existing.split('/')
+            for index, (left, right) in enumerate(zip(parts, old)):
+                if fold(left) != fold(right):
+                    break
+                if left != right:
+                    raise InvalidPath('name collides with existing ' + '/'.join(old[:index + 1]) +
+                                      ' on case-insensitive file systems')
+
     def write(self, name, content, base_blob=None, *, operation=None, notification=None):
         self._name(name)
         if not isinstance(content, str) or len(content.encode()) > 65536:
@@ -238,6 +255,7 @@ class GitDocs:
             head = self._ref(self.branch)
             if self._version(name, head) != base_blob:
                 raise Conflict('document changed; refresh and merge')
+            self._portable_name(name, head)
             blob = self._git('hash-object', '-w', '--stdin', input=content).strip()
             # A private index prevents shared-index corruption; no checkout means no symlink TOCTOU.
             with tempfile.TemporaryDirectory(prefix='didadi-index-') as temporary:
