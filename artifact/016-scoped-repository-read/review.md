@@ -1,0 +1,7 @@
+# Review and evidence
+
+Independent reviewer found a P1: Git missing objects could trigger lazy fetch and source-side effects. Fixed with --no-lazy-fetch, protocol.allow=never and sanitized Git environment/global/system config. Added a synthetic missing-promisor-blob regression asserting rejection and unchanged source object directory, plus inherited-environment redirection regression. Seven scoped tests pass. Follow-up independent review was interrupted twice by the review service risk detector; do not claim independent approval of the fix.
+
+Full Python suite: 71 tests PASS after normal permission rerun (initial sandbox run had three loopback-bind fixture errors). Real Matrix acceptance PASS: scoped synthetic source -> deterministic Markdown report -> document Git commit -> original Matrix thread; denied file does not write document; source refs/worktree unchanged. Logs: /tmp/didadi-repository-read-tests-final.log and /tmp/didadi-repository-read-smoke-final.log. Existing frontend was unchanged and not rerun locally for this slice; CI runs it.
+
+Parent task-control PR #31 remains draft. Automatic review rejected its ready/merge twice, including after coordinator supplied authorization text; no workaround or further retry. This slice must remain a stacked draft until that dependency and independent review are resolved. No production authorization or LLM analysis claim. No new GUI acceptance.
