@@ -145,7 +145,7 @@ export class SourceDocument {
       this.origins.set(node,{...block,node,canonical:node.type===this.rawType?block.source:(this.richCache.get(block.source)?.canonical??this.canonical(node))});nodes.push(node);
     }
     if(!nodes.length)nodes.push(this.schema.nodes.paragraph.create());
-    const doc=this.schema.topNodeType.create(null,nodes);this.documents.set(doc,{before:parts.before,source,blank:!parts.blocks.length});return doc;
+    const doc=this.schema.topNodeType.create(null,nodes);this.documents.set(doc,{before:parts.before,source,blank:!parts.blocks.length,original:doc});return doc;
   }
   patchText(origin,node){
     const before=[],after=[];
@@ -186,15 +186,19 @@ export class SourceDocument {
   }
   serialize(doc){
     const info=this.documents.get(doc);
+    if(info?.source.includes(emptyParagraph)){
+      const nodes=[];doc.forEach(node=>nodes.push(node));
+      while(nodes.length&&nodes.at(-1).type.name==='paragraph'&&!nodes.at(-1).content.size&&!this.origins.has(nodes.at(-1)))nodes.pop();
+      if(this.equivalent(doc.type.create(doc.attrs,nodes,doc.marks),info.original))return info.source;
+    }
     if(doc.childCount===1&&doc.firstChild.type.name==='paragraph'&&!doc.firstChild.content.size)return info?.blank?info.source:'';
     const pieces=[];doc.forEach((node,pos,index)=>{
       const origin=this.origins.get(node);
       // Crepe adds a final empty typing paragraph. A real original blank file
       // remains represented by document metadata; typed/deleted content does not.
-      if(!origin&&node.type.name==='paragraph'&&!node.content.size&&pieces.length&&index===doc.childCount-1)return;
+      if(node.type.name==='paragraph'&&!node.content.size)return;
       let text;
       if(node.type.name==='didadi_boundary')text='<!-- -->';
-      else if(node.type.name==='paragraph'&&!node.content.size&&!origin)text=emptyParagraph;
       else if(node.type===this.rawType)text=origin?patchRawSource(origin.source,node.textContent):node.textContent;
       else if(origin&&node.eq(origin.node))text=origin.source;
       else {

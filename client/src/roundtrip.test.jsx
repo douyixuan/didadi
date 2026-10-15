@@ -6,6 +6,7 @@ import {diffLines} from 'diff';
 import {Crepe} from '@milkdown/crepe';
 import {editorViewCtx} from '@milkdown/kit/core';
 import {EditorState} from '@milkdown/kit/prose/state';
+import {undo} from '@milkdown/kit/prose/history';
 import {sourceNode,boundaryNode,sourcePreservation} from './sourcePlugin';
 import {sourceBlocks} from './sourceMarkdown';
 const manifest=JSON.parse(readFileSync(resolve('test-corpus/manifest.json'),'utf8')).filter(item=>/\/\d\d\.md$/.test(item.file));
@@ -60,11 +61,20 @@ it('restores whitespace-only source after typing and undo',()=>{
  const source=' \r\n\t\r\n';const doc=model.parse(source),state=EditorState.create({doc});
  const typed=state.tr.insertText('x',1);model.track(typed,doc);const cleared=EditorState.create({doc:typed.doc}).tr.delete(1,2);model.track(cleared,typed.doc);expect(model.serialize(cleared.doc)).toBe(source);
 });
-it('retains user-created internal empty paragraphs after save and reopen',()=>{
- const doc=model.parse('A\n\nB\n'),empty=doc.type.schema.nodes.paragraph.create();
- const tr=EditorState.create({doc}).tr.insert(doc.firstChild.nodeSize,empty);model.track(tr,doc);
- const saved=model.serialize(tr.doc),reopened=model.parse(saved);
- expect(saved).toContain('<!-- didadi:empty-paragraph -->');expect(reopened.childCount).toBe(3);expect(reopened.child(1).type.name).toBe('paragraph');expect(reopened.child(1).content.size).toBe(0);expect(model.serialize(reopened)).toBe(saved);
+it('keeps empty paragraphs in the view without writing editor markers',()=>{
+ const source='A\n\nB\n',doc=model.parse(source),empty=doc.type.schema.nodes.paragraph.create();
+ for(const count of [1,2,5]){
+  const tr=EditorState.create({doc}).tr.insert(doc.firstChild.nodeSize,Array(count).fill(empty));model.track(tr,doc);
+  const saved=model.serialize(tr.doc);expect(saved).toBe(source);expect(saved).not.toContain('didadi:');
+  expect(model.parse(saved).childCount).toBe(2);
+ }
+});
+it('reads legacy empty markers unchanged but removes them after a real edit',()=>{
+ const source='A\n\n<!-- didadi:empty-paragraph -->\n\nB\n',doc=model.parse(source);
+ expect(doc.childCount).toBe(3);expect(model.serialize(doc)).toBe(source);
+ const tr=EditorState.create({doc}).tr.insertText(' edit',2);model.track(tr,doc);
+ const saved=model.serialize(tr.doc);expect(saved).not.toContain('didadi:');expect(saved).toBe('A edit\n\nB\n');
+ expect(model.serialize(model.parse(saved))).toBe(saved);
 });
 it.each(['~~~js','~~~js title=keep'])('closes an originally unclosed fence %s before a newly appended block',fence=>{
  const doc=model.parse(fence+'\nx()'),paragraph=doc.type.schema.nodes.paragraph.create(null,doc.type.schema.text('Outside'));
@@ -93,4 +103,16 @@ it('retains the container source when deleting its first list item',()=>{
  const source='+ one\n+ two  \n+ three\n',doc=model.parse(source),list=doc.firstChild;
  const tr=EditorState.create({doc}).tr.delete(1,1+list.firstChild.nodeSize);model.track(tr,doc);
  expect(model.serialize(tr.doc)).toBe('+ two  \n+ three\n');
+});
+
+it('restores legacy bytes after typing and undo in the real Crepe view',()=>{
+ const source='A\n\n<!-- didadi:empty-paragraph -->\n\n~~~js\nx()\n~~~\n';
+ crepe.editor.action(ctx=>{
+  const view=ctx.get(editorViewCtx),doc=model.parse(source);
+  view.updateState(EditorState.create({doc,plugins:view.state.plugins}));
+  view.dispatch(view.state.tr.insertText(' EDIT',2));
+  expect(model.serialize(view.state.doc)).not.toContain('didadi:empty-paragraph');
+  expect(undo(view.state,view.dispatch)).toBe(true);
+  expect(model.serialize(view.state.doc)).toBe(source);
+ });
 });

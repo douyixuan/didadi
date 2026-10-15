@@ -3,6 +3,8 @@ import {act,fireEvent,render,screen,waitFor} from '@testing-library/react';
 import {describe,it,expect,vi} from 'vitest';
 vi.mock('./api',()=>({connect:vi.fn(),errorText:error=>error.message}));
 vi.mock('./BlockEditor',()=>({BlockEditor:React.forwardRef(function TestEditor({value,onChange,disabled},ref){React.useImperativeHandle(ref,()=>({markdown:()=>value}));return <textarea aria-label="Markdown document" disabled={disabled} value={value} onChange={e=>onChange(e.target.value)}/>})}));
+vi.mock('./downloadMarkdown',()=>({downloadMarkdown:vi.fn()}));
+import {downloadMarkdown} from './downloadMarkdown';
 import {App,Composer,Documents} from './App';
 const doc={name:'demo.md',content:'# Team handbook\n\nA real document.',blob:'a'.repeat(40),commit:'b'.repeat(40)};
 function fixture(){return {session:{agentId:'@agent',userId:'@user:local',initialRoom:'!room'},
@@ -86,4 +88,27 @@ it('unlocks a failed save task and keeps the draft for an explicit new retry',as
  fireEvent.click(screen.getByRole('button',{name:'Save changes'}));
  await waitFor(()=>expect(api.send).toHaveBeenCalledTimes(2));
  expect(api.send.mock.calls[0][2]).not.toBe(api.send.mock.calls[1][2]);
+});
+
+
+it('exports the full current draft, including front matter, without saving or rendering HTML',async()=>{
+ const api=fixture();const source='---\ntitle: Export\n---\n# Export\n\n<details>raw source</details>\n';
+ api.document.mockResolvedValue({...doc,content:source});
+ render(<Documents api={api} room="!room" onSent={idle} mode="edit"/>);
+ await screen.findByLabelText('Markdown document');
+ const edited=source+'\nUnsaved 中文 draft.\n';
+ fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:edited}});
+ fireEvent.click(screen.getByRole('button',{name:'Export Markdown'}));
+ expect(downloadMarkdown).toHaveBeenLastCalledWith(edited);expect(api.send).not.toHaveBeenCalled();
+ expect(screen.getByLabelText('Markdown document')).toHaveValue(edited);
+});
+it('exports the exact historical Markdown instead of the title-stripped read presentation',async()=>{
+ const api=fixture();const source='---\nkey: value\n---\n# Historical\n\nBody.\n';
+ api.document.mockResolvedValue({...doc,content:source});
+ render(<Documents api={api} room="!room" onSent={idle} historyOpen/>);
+ await screen.findByRole('heading',{name:'Historical'});
+ fireEvent.click(screen.getByRole('button',{name:/Previous version/}));
+ await screen.findByText('Historical version');
+ fireEvent.click(screen.getByRole('button',{name:'Export Markdown'}));
+ expect(downloadMarkdown).toHaveBeenLastCalledWith(source);expect(api.send).not.toHaveBeenCalled();
 });
