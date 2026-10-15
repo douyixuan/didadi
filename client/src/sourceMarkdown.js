@@ -103,13 +103,17 @@ function patchRawSource(original,next){
 
 export class SourceDocument {
   constructor(parse,serialize,rawType,schema){this.parseRich=parse;this.serializeRich=serialize;this.rawType=rawType;this.schema=schema;this.origins=new WeakMap();this.documents=new WeakMap();this.richCache=new Map();}
+  documentAttrs(node){
+    const attrs={...node.attrs};
+    if(node.type.name==='list_item')delete attrs.label;
+    if(node.type.name==='heading')delete attrs.id;
+    return attrs;
+  }
   layout(node){return {type:node.type.name,children:Array.from({length:node.childCount},(_,index)=>this.layout(node.child(index)))}}
   equivalent(left,right){
     const clean=node=>{
-      const attrs={...node.attrs};
-      // Milkdown derives labels from list position on parse. A PM split keeps
-      // the previous label until reparse; it is not document content.
-      if(node.type.name==='list_item')delete attrs.label;
+      // List labels and heading slugs are derived by Milkdown view plugins.
+      const attrs=this.documentAttrs(node);
       return {type:node.type.name,attrs,text:node.text,marks:node.marks.map(mark=>mark.toJSON()),children:Array.from({length:node.childCount},(_,i)=>clean(node.child(i)))};
     };
     return JSON.stringify(clean(left))===JSON.stringify(clean(right));
@@ -143,7 +147,7 @@ export class SourceDocument {
   patchText(origin,node){
     const before=[],after=[];
     const shape=value=>{
-      const walk=n=>{if(n.isText){value.push(n.text);return {type:'text',marks:n.marks.map(m=>m.toJSON())}}return {type:n.type.name,attrs:n.attrs,children:Array.from({length:n.childCount},(_,i)=>walk(n.child(i)))}};
+      const walk=n=>{if(n.isText){value.push(n.text);return {type:'text',marks:n.marks.map(m=>m.toJSON())}}return {type:n.type.name,attrs:this.documentAttrs(n),children:Array.from({length:n.childCount},(_,i)=>walk(n.child(i)))}};
       return walk;
     };
     if(JSON.stringify(shape(before)(origin.node))!==JSON.stringify(shape(after)(node)))return null;
@@ -162,11 +166,19 @@ export class SourceDocument {
     if(info)this.documents.set(transaction.doc,info);
     previous.forEach((node,pos)=>{
       const origin=this.origins.get(node);if(!origin)return;
-      const mapped=transaction.mapping.mapResult(pos+Math.min(1,node.nodeSize-1),1);
-      if(mapped.deleted)return;
-      const resolved=transaction.doc.resolve(Math.min(mapped.pos,transaction.doc.content.size));
-      const candidate=resolved.depth?resolved.node(1):transaction.doc.nodeAt(mapped.pos);
-      if(candidate&&!this.origins.has(candidate))this.origins.set(candidate,origin);
+      // Map the block boundary, not its first content token. Replacing the
+      // first text or deleting the first list item leaves the block alive.
+      const mapped=transaction.mapping.mapResult(pos,1);
+      const candidate=transaction.doc.nodeAt(mapped.pos);
+      if(!candidate||this.origins.has(candidate))return;
+      if(mapped.deleted){
+        // DOM reconciliation can replace the entire block token, including
+        // its opening boundary. Keep provenance only for an unclaimed block
+        // of the same type inside that replacement, never the following block.
+        const end=transaction.mapping.map(pos+node.nodeSize,-1);
+        if(candidate.type!==node.type||end<mapped.pos+candidate.nodeSize)return;
+      }
+      this.origins.set(candidate,origin);
     });
   }
   serialize(doc){

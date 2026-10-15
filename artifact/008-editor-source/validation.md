@@ -17,3 +17,9 @@
 内嵌浏览器不可用；遵守本次不争用共享Chrome要求，未做新的物理浏览器操作/截图。真实editor DOM交互不等于物理OS IME或跨浏览器验证。未操作Vercel，没有新增公网部署。本次没有在本机重跑Python/真实Synapse全套；最终CI仍会运行原有Python和真实Matrix集成检查。
 
 范围与普遍性：该33份固定语料不是 #13 原始未固定的1010文件调查；不宣称任意Markdown、任意结构变换均字节保真。未知inline构造保守保留其整个顶层块为源码；必要结构标记/新行允许引入，未实现持久化block IDs或实时协作。
+
+## 关闭前补查版本
+
+#20 的精确提交 a2bc763 与主线 c171f3e 的三项 CI 均通过（主线运行 https://github.com/douyixuan/didadi/actions/runs/38722500433）。之后补查发现并修复了 review.md 记录的两个删除/派生属性问题，Issue 继续保持打开。
+
+该小修本地完整 `npm --prefix client test`：41 passed / 6 files / 37.29s；33份真实 editor-view 语料、1586次独立编辑仍为0整页回退、0未编辑行改写、0不稳定重开。正常与synthetic构建通过。独立真实DOM针对回归两项通过。小修精确提交与最终 main CI 将以其 PR/Issue 的远端记录为准；不把 c171f3e 的绿色结果冒充尚未提交的小修结果。

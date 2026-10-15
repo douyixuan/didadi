@@ -89,3 +89,8 @@ it.each(['+','-','*','01)','1.'])('preserves unedited sibling source in %s lists
  const saved=model.serialize(split.doc);expect(saved).toContain(marker+' two  \n'+marker+' three\n');expect(model.parse(saved).firstChild.childCount).toBe(4);
  const join=EditorState.create({doc:split.doc}).tr.join(6,2);model.track(join,split.doc);const joined=model.serialize(join.doc);expect(joined).toContain(marker+' two  \n'+marker+' three\n');expect(model.parse(joined).firstChild.childCount).toBe(3);
 });
+it('retains the container source when deleting its first list item',()=>{
+ const source='+ one\n+ two  \n+ three\n',doc=model.parse(source),list=doc.firstChild;
+ const tr=EditorState.create({doc}).tr.delete(1,1+list.firstChild.nodeSize);model.track(tr,doc);
+ expect(model.serialize(tr.doc)).toBe('+ two  \n+ three\n');
+});

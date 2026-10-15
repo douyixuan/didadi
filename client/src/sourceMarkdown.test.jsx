@@ -41,3 +41,8 @@ describe('Markdown structural boundaries',()=>{
   const saved=ref.current.markdown();expect(saved).toContain('<!-- -->');unmount();const reopened=await open(saved);expect(reopened.dom.querySelectorAll('ol')).toHaveLength(2);expect(reopened.dom.querySelectorAll('ol')[1].getAttribute('start')||'1').toBe('1');expect(reopened.ref.current.markdown()).toBe(saved);
  });
 });
+
+it('retains a setext heading underline after replacing its text through the DOM',async()=>{
+ const source='Original\n========\n\nUnchanged.\n';const {ref,dom}=await open(source);
+ await edit(dom.querySelector('h1'),'Replaced');await waitFor(()=>expect(ref.current.markdown()).toContain('Replaced'));expect(ref.current.markdown()).toBe(source.replace('Original','Replaced'));
+});
