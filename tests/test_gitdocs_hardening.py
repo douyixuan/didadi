@@ -231,3 +231,26 @@ class GitDocsHardeningTests(unittest.TestCase):
         with self.assertRaises(Conflict):
             store.read('demo.md')
         self.assertEqual(origin.read('demo.md'), 'first')
+
+    def test_casefold_file_directory_and_unicode_collisions_reject_without_changes(self):
+        first=self.store.write('Design.md','first')
+        for name in ['design.md','DESIGN.md']:
+            with self.assertRaises(InvalidPath):self.store.write(name,'colliding')
+        self.assertEqual(self.store.snapshot('Design.md')['commit'],first['commit'])
+        second=self.store.write('Design.md','updated',first['blob'])
+        self.assertEqual(self.store.read('Design.md'),'updated')
+        self.store.write('Docs/a.md','nested')
+        with self.assertRaises(InvalidPath):self.store.write('docs/b.md','collision')
+        with self.assertRaises(InvalidPath):self.store.write('docs/a.md','collision')
+        self.store.write('Straße.md','unicode')
+        with self.assertRaises(InvalidPath):self.store.write('STRASSE.md','collision')
+        self.store.write('Docs/b.md','allowed')
+        self.assertEqual(self.store.read('Docs/b.md'),'allowed')
+
+    def test_remote_synced_path_collision_is_checked_before_commit(self):
+        remote=self.root/'portable-remote.git';origin=GitDocs(remote)
+        local=GitDocs(self.root/'portable-local.git',remote)
+        first=origin.write('Remote.md','remote')
+        with self.assertRaises(InvalidPath):local.write('remote.md','collision')
+        self.assertEqual(local.snapshot('Remote.md')['commit'],first['commit'])
+        self.assertEqual(origin.snapshot('Remote.md')['commit'],first['commit'])
