@@ -9,3 +9,7 @@
 .block-editor .milkdown .ProseMirror :is(h1,h2,h3,h4,h5,h6){font-family:inherit}.block-editor .milkdown .cm-editor{font-family:ui-monospace,SFMono-Regular,monospace}
 
 .raw-source-block,.source-properties pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f5f5f7;border:1px solid #dedde3;border-radius:8px;padding:12px;font:13px/1.6 ui-monospace,monospace}.source-properties{border:1px solid #dedde3;border-radius:8px;padding:10px;margin:12px 0}.source-properties summary{cursor:pointer;color:#76727e;font-size:13px}.source-properties pre{margin-bottom:0}
+
+.document-properties{margin:0 0 24px;color:var(--muted,#667085);font-size:13px}
+.document-properties summary{cursor:pointer}
+.document-properties pre{white-space:pre-wrap;overflow-wrap:anywhere}

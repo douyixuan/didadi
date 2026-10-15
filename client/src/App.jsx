@@ -1,8 +1,9 @@
-import React, {useEffect, useRef, useState} from 'react';
+import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {connect, errorText} from './api';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {BlockEditor} from './BlockEditor';
+import {readMarkdown} from './readMarkdown';
 import {BookOpen, Search, ChevronDown, ChevronRight, FileText, MessageSquare, Bot, History, Plus, ArrowUp, X, Check, AlertCircle, RefreshCw, Bold, Italic, Heading2, List, Code2} from 'lucide-react';
 const short = value => value?.slice(0,10) || 'not created';
 
@@ -46,7 +47,8 @@ export function Documents({api,room,onSent,mode='read',setMode=()=>{},historyOpe
   const editor=useRef(null);
   const [editorRevision,setEditorRevision]=useState(0),[composing,setComposing]=useState(false);
   useEffect(()=>setComposing(false),[mode,editorRevision]);
-  const title=snapshot?(draft.match(/^# +(.+)$/m)?.[1]||'Untitled document'):'demo.md';
+  const presentation=useMemo(()=>readMarkdown(draft),[draft]);
+  const title=snapshot?presentation.title:'demo.md';
   useEffect(()=>onMeta({title,dirty:Boolean(snapshot&&draft!==(snapshot.content||'')),busy,historical}),[title,draft,snapshot,busy,historical]);
   const roomRef=useRef(room);roomRef.current=room;
   async function load(commit, preserveDraft=false) {
@@ -87,7 +89,7 @@ export function Documents({api,room,onSent,mode='read',setMode=()=>{},historyOpe
     catch(e){setError(errorText(e));setBusy(false);lock.current=false;}
   }
   const dirty=snapshot&&draft!==(snapshot.content||'');
-  const bodyMarkdown=draft.replace(/^# +.+\n?/, '');
+  const bodyMarkdown=presentation.body;
   return <section className="document-surface" aria-label="Git document editor">
     <div className="document-statusbar"><span className={historical?'historical-label':'save-state'}>
       {!snapshot?(error?'Document unavailable':'Loading document…'):reading?'Loading version…':historical?<><History size={14}/> Historical version</>:busy?<><RefreshCw size={14} className="spin"/> Saving through example Agent…</>:dirty?'Unsaved changes':<><Check size={14}/> All changes saved</>}</span>
@@ -103,7 +105,7 @@ export function Documents({api,room,onSent,mode='read',setMode=()=>{},historyOpe
         <div className="page-byline"><span className="tiny-avatar">D</span><span>Shared workspace</span><span className="byline-dot"/><span>{api.session.synthetic?'Browser-only snapshot':'Stored in Git'}</span></div>
         {mode==='edit'?<><BlockEditor key={editorRevision} ref={editor} value={draft} onChange={setDraft} onComposingChange={setComposing} disabled={busy||reading}/>
           <div className="editor-foot"><span>{draft.length} / 6000 characters · Markdown-backed blocks</span><button onClick={()=>load(undefined,true)} disabled={busy}>Load latest</button></div>
-        </>:<div className="markdown-body">{draft?<ReactMarkdown remarkPlugins={[remarkGfm]}>{bodyMarkdown}</ReactMarkdown>:<div className="empty-document"><p>A quiet space for your first document.</p><button className="primary" onClick={()=>setMode('edit')}>Start writing</button></div>}</div>}
+        </>:<div className="markdown-body">{presentation.properties&&<details className="document-properties"><summary>Properties · Markdown front matter</summary><pre>{presentation.properties}</pre></details>}{draft?<ReactMarkdown remarkPlugins={[remarkGfm]}>{bodyMarkdown}</ReactMarkdown>:<div className="empty-document"><p>A quiet space for your first document.</p><button className="primary" onClick={()=>setMode('edit')}>Start writing</button></div>}</div>}
         <div className="document-bottom"><span><BookOpen size={14}/> demo.md</span><button onClick={()=>submit('read')} disabled={busy}>Ask example Agent to read</button></div>
       </>:error?<div className="document-unavailable"><FileText size={30}/><h2>This document is temporarily unavailable</h2><p>Your workspace is still open. Retry above to load the document.</p></div>:<div className="document-skeleton" role="status" aria-label="Loading document"><div/><div/><div/><div/><p>Loading document…</p></div>}
     </div></div>
