@@ -5,7 +5,7 @@ vi.mock('./api',()=>({connect:vi.fn(),errorText:error=>error.message}));
 vi.mock('./BlockEditor',()=>({BlockEditor:React.forwardRef(function TestEditor({value,onChange,disabled},ref){React.useImperativeHandle(ref,()=>({markdown:()=>value}));return <textarea aria-label="Markdown document" disabled={disabled} value={value} onChange={e=>onChange(e.target.value)}/>})}));
 vi.mock('./downloadMarkdown',()=>({downloadMarkdown:vi.fn()}));
 import {downloadMarkdown} from './downloadMarkdown';
-import {App,Composer,Documents} from './App';
+import {App,Composer,Documents,PreservedDraft} from './App';
 const doc={name:'demo.md',content:'# Team handbook\n\nA real document.',blob:'a'.repeat(40),commit:'b'.repeat(40)};
 function fixture(){return {session:{agentId:'@agent',userId:'@user:local',initialRoom:'!room'},
   rooms:vi.fn().mockResolvedValue([{id:'!room',name:'Workspace',agentJoined:true}]),timeline:vi.fn().mockResolvedValue([]),
@@ -228,4 +228,93 @@ it('retains a preserved draft and blocks report replacement after loading latest
  expect(screen.getByLabelText('Preserved draft')).toHaveValue('# Keep my recovered draft');
  fireEvent.click(screen.getByRole('button',{name:'Restore previous draft'}));
  expect(screen.getByLabelText('Markdown document')).toHaveValue('# Keep my recovered draft');
+});
+
+
+it('keeps the fixed document identity while an unsaved H1 changes',async()=>{
+ const api=fixture();render(<App connector={async()=>api}/>);
+ await screen.findByRole('heading',{name:'Team handbook'});
+ const current=screen.getByRole('button',{name:'demo.md, current document'});
+ expect(current).toHaveAttribute('aria-current','page');
+ expect(current).toHaveTextContent('demo.md');expect(current).toHaveTextContent('Title: Team handbook');
+ fireEvent.click(screen.getByRole('button',{name:'Edit',exact:true}));
+ fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# DRAFT-QA changed title'}});
+ await waitFor(()=>expect(current).toHaveTextContent('Draft title: DRAFT-QA changed title'));
+ expect(current.querySelector('strong')).toHaveTextContent('demo.md');
+ expect(document.querySelector('.breadcrumbs strong')).toHaveTextContent('demo.md');
+ expect(api.send).not.toHaveBeenCalled();
+});
+
+it('treats cancellation as a separate status and starts one explicit new save',async()=>{
+ const api=fixture();api.task.mockResolvedValue({task:{status:'cancelled',last_error:'task_cancelled'}});
+ render(<Documents api={api} room="!room" onSent={idle} mode="edit"/>);
+ await screen.findByLabelText('Markdown document');
+ const source='# Keep cancelled draft';
+ fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:source}});
+ fireEvent.click(screen.getByRole('button',{name:'Save changes'}));
+ await screen.findByText('Task cancelled');
+ expect(screen.getByRole('status')).toHaveTextContent('Choose Save changes to start a new save task.');
+ expect(screen.queryByRole('alert')).toBeNull();expect(screen.queryByRole('button',{name:'Retry',exact:true})).toBeNull();
+ expect(screen.getByLabelText('Markdown document')).toHaveValue(source);
+ let resolve;api.send.mockImplementationOnce(()=>new Promise(r=>resolve=r));
+ const save=screen.getByRole('button',{name:'Save changes'});fireEvent.click(save);fireEvent.click(save);
+ expect(api.send).toHaveBeenCalledTimes(2);expect(screen.queryByText('Task cancelled')).toBeNull();
+ expect(api.send.mock.calls[1][2]).not.toBe(api.send.mock.calls[0][2]);
+ expect(api.send.mock.calls[1][1]['org.didadi.document'].content).toBe(source);
+ await act(async()=>resolve({event_id:'$new'}));
+});
+
+it.each([['read','Read source in discussion','Choose Read source in discussion'],['report','Replace document with file report','Choose Replace document with file report']])('explains the explicit next action after a cancelled source %s',async(action,button,hint)=>{
+ const api=fixture();api.session.repositoryReads=[{repository:'fixture',path:'main.py',commit:'a'.repeat(40),room:'!room'}];
+ api.task.mockResolvedValue({task:{status:'cancelled',last_error:'task_cancelled'}});
+ render(<Documents api={api} room="!room" onSent={idle}/>);await screen.findByRole('heading',{name:'Team handbook'});
+ fireEvent.click(screen.getByRole('button',{name:button}));await screen.findByText('Task cancelled');
+ expect(screen.getByRole('status')).toHaveTextContent(hint);expect(screen.queryByRole('button',{name:'Retry',exact:true})).toBeNull();
+ expect(api.send).toHaveBeenCalledTimes(1);expect(api.send.mock.calls[0][1]['org.didadi.repository'].action).toBe(action);
+});
+
+it('previews recovered syntax safely but restores and exports the original bytes',async()=>{
+ const api=fixture();render(<Documents api={api} room="!room" onSent={idle} mode="edit"/>);
+ await screen.findByLabelText('Markdown document');
+ const source='---\r\nkey: exact\r\n---\r\n# &#x20;Draft title\r\n\r\nKeep &#x20; spacing.\r\n\r\n<script>window.bad=1</script>\r\n';
+ fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:source}});
+ // DOM textarea input normalizes line endings; capture the exact state the editor emitted.
+ const preserved=screen.getByLabelText('Markdown document').value;
+ fireEvent.click(screen.getByRole('button',{name:'Load latest',exact:true}));
+ await screen.findByLabelText('Preserved draft recovery');
+ const recovery=screen.getByLabelText('Preserved draft recovery');
+ expect(recovery.closest('.document-scroll')).not.toBeNull();
+ expect(recovery.querySelector('.recovery-source')).not.toHaveAttribute('open');
+ expect(recovery.querySelector('.recovery-preview')).toHaveAttribute('open');
+ expect(recovery.querySelector('.markdown-body')).toHaveTextContent('Keep spacing.');
+ expect(recovery.querySelector('script')).toBeNull();
+ expect(recovery.querySelector('.recovery-source textarea').value).toBe(preserved);
+ fireEvent.click(screen.getByRole('button',{name:'Restore previous draft'}));
+ expect(screen.getByLabelText('Markdown document')).toHaveValue(preserved);
+ fireEvent.click(screen.getByRole('button',{name:'Export Markdown'}));
+ expect(downloadMarkdown).toHaveBeenLastCalledWith(preserved);expect(api.send).not.toHaveBeenCalled();
+});
+
+
+it('passes preserved CRLF, Unicode, entities and escapes to restore byte for byte',()=>{
+ const source='---\r\nkey: exact\r\n---\r\n# &#x20;草稿\r\n\r\nLiteral &#x20; and \\*escaped\\* spaces.\r\n';
+ const restore=vi.fn();render(<PreservedDraft value={source} onRestore={restore}/>);
+ fireEvent.click(screen.getByRole('button',{name:'Restore previous draft'}));
+ expect(restore).toHaveBeenCalledWith(source);
+ expect(new TextEncoder().encode(restore.mock.calls[0][0])).toEqual(new TextEncoder().encode(source));
+});
+
+it('does not restore a preserved draft during a version load',async()=>{
+ const api=fixture();render(<Documents api={api} room="!room" onSent={idle} mode="edit"/>);
+ await screen.findByLabelText('Markdown document');
+ fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# Preserved before load'}});
+ fireEvent.click(screen.getByRole('button',{name:'Load latest',exact:true}));await screen.findByLabelText('Preserved draft recovery');
+ let resolve;api.document.mockImplementationOnce(()=>new Promise(r=>resolve=r));
+ fireEvent.click(screen.getByRole('button',{name:'Load latest',exact:true}));
+ expect(screen.getByRole('button',{name:'Restore previous draft'})).toBeDisabled();
+ fireEvent.click(screen.getByRole('button',{name:'Restore previous draft'}));
+ expect(screen.getByLabelText('Markdown document')).toHaveValue(doc.content);
+ await act(async()=>resolve(doc));
+ expect(screen.getByRole('button',{name:'Restore previous draft'})).toBeEnabled();
+ expect(screen.getByLabelText('Preserved draft')).toHaveValue('# Preserved before load');
 });

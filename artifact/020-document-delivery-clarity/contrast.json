@@ -1,0 +1,48 @@
+{
+  "method": "WCAG sRGB relative luminance of declared CSS solid colors; not browser-computed or full-page certification; disabled controls excluded",
+  "minimum": 4.5,
+  "checks": [
+    {
+      "surface": "document links",
+      "foreground": "#41485f",
+      "background": "#ffffff",
+      "contrast_ratio": 9.06
+    },
+    {
+      "surface": "thread / task controls",
+      "foreground": "#41485f",
+      "background": "#fafafb",
+      "contrast_ratio": 8.69
+    },
+    {
+      "surface": "history metadata",
+      "foreground": "#596175",
+      "background": "#fafafd",
+      "contrast_ratio": 5.94
+    },
+    {
+      "surface": "task history",
+      "foreground": "#596175",
+      "background": "#fafafb",
+      "contrast_ratio": 5.94
+    },
+    {
+      "surface": "selected file title",
+      "foreground": "#596175",
+      "background": "#e9e9ef",
+      "contrast_ratio": 5.12
+    },
+    {
+      "surface": "recovery text",
+      "foreground": "#41485f",
+      "background": "#f7f8fb",
+      "contrast_ratio": 8.53
+    },
+    {
+      "surface": "cancelled status",
+      "foreground": "#41485f",
+      "background": "#f2f4f8",
+      "contrast_ratio": 8.23
+    }
+  ]
+}
