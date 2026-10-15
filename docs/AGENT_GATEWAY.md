@@ -69,4 +69,14 @@ Authenticated worker endpoints:
 
 Failed document operations receive a durable Git abandonment receipt, including the reason. This removes the notification from `pending()` and retains the committed document version. It does not undo an existing commit or silently publish into a forbidden room.
 
-Boundary: Matrix membership checks and Git writes do not share a transaction. Claim, pre-write validation and completion checks reduce the revocation window; they cannot guarantee that membership will remain unchanged between a successful validation and a Git operation. Production authorization/grants and cancel/audit are separate work.
+Boundary: Matrix membership checks and Git writes do not share a transaction. Claim, pre-write validation and completion checks reduce the revocation window; they cannot guarantee that membership will remain unchanged between a successful validation and a Git operation. Production authorization/grants and active runtime interruption remain separate work.
+
+## Cancel tasks and inspect execution history
+
+`POST /agent/cancel {id}` uses the existing fixed Agent credential. It moves pending/unverified tasks to terminal `cancelled`, invalidates the lease and records the transition atomically. Repeated cancellation is idempotent; a completed task remains completed. Validate/complete reject cancelled tasks with `task_cancelled`, `retryable: false`.
+
+`GET /agent/audit?id=...` returns persistent transition metadata: sequence, action, time, attempt and a fixed reason. It does not contain message text, results, credentials or leases. Existing databases migrate in place; older tasks can have partial or no recorded history. This is development execution history, not immutable or compliance-grade audit.
+
+The local client exposes cancellation only for the current fixture user's original request in an explicitly allowed room, behind the existing CSRF/Origin/Host checks. Room-visible execution history requires visibility of the source Matrix event. Cancelled document saves keep the draft and unlock the editor. Git operations already committed are retained; cancelled notification outbox items receive abandonment receipts.
+
+Cancellation is cooperative. It cannot undo a completed Git write or retract external IO already in progress. Runtimes must still check their lease before side effects and deduplicate by task ID. Production user/grant authorization and active runtime interruption require separate design.

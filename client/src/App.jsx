@@ -67,10 +67,10 @@ export function Documents({api,room,onSent,mode='read',setMode=()=>{},historyOpe
     let cancelled=false, checking=false;
     async function check(){if(checking)return;checking=true;
       try {const result=await api.task(pending.room,pending.id);
-        if(!cancelled&&result.task?.status==='failed'){
+        if(!cancelled&&['failed','cancelled'].includes(result.task?.status)){
           setPending(null);setBusy(false);lock.current=false;attempt.current=null;
-          const reasons={room_forbidden:'The Agent no longer has access to this room.',delivery_forbidden:'The Agent cannot reply to this room.',attempts_exhausted:'The task reached its retry limit.',room_unavailable:'The room could not be verified.',runtime_error:'The external runtime could not finish the task.'};
-          setError((reasons[result.task.last_error]||'The task stopped before completion.')+' Your draft is kept. Restore access or fix the runtime, then retry.');
+          const reasons={task_cancelled:'The task was cancelled.',room_forbidden:'The Agent no longer has access to this room.',delivery_forbidden:'The Agent cannot reply to this room.',attempts_exhausted:'The task reached its retry limit.',room_unavailable:'The room could not be verified.',runtime_error:'The external runtime could not finish the task.'};
+          setError((reasons[result.task.last_error]||'The task stopped before completion.')+(result.task.status==='cancelled'?' Your draft is kept. Save again to start a new task.':' Your draft is kept. Restore access or fix the runtime, then retry.'));
         }else if(!cancelled&&result.task?.status==='done'){
           setPending(null);setBusy(false);lock.current=false;
           const body=result.task.body||'';
@@ -146,10 +146,23 @@ export function App({connector=connect}) {
     refresh();const timer=setInterval(refresh,2000);return()=>{stopped=true;clearInterval(timer)};
   },[api,room]);
   useEffect(()=>{if(!api)return;const timer=setInterval(refreshRooms,10000);return()=>clearInterval(timer)},[api]);
-  useEffect(()=>{if(!api||!tasks.some(t=>!['done','failed'].includes(t.status)))return;let cancelled=false;
-    const timer=setInterval(async()=>{const next=await Promise.all(tasks.map(async t=>{if(['done','failed'].includes(t.status))return t;try{const result=await api.task(t.room,t.id);return {...t,status:result.task?.status||'queued',body:result.task?.body};}catch{return {...t,status:'reconnecting'};}}));if(!cancelled)setTasks(next);},1500);
+  useEffect(()=>{if(!api||!tasks.some(t=>!['done','failed','cancelled'].includes(t.status)))return;let cancelled=false;
+    const timer=setInterval(async()=>{const next=await Promise.all(tasks.map(async t=>{if(['done','failed','cancelled'].includes(t.status))return t;try{const result=await api.task(t.room,t.id);return {...t,status:result.task?.status||'queued',body:result.task?.body};}catch{return {...t,status:'reconnecting'};}}));if(!cancelled)setTasks(next);},1500);
     return()=>{cancelled=true;clearInterval(timer)};
   },[api,tasks]);
+  function updateTask(id,patch){setTasks(old=>old.map(task=>task.id===id?{...task,...patch}:task))}
+  async function cancelTask(task){
+    updateTask(task.id,{cancelling:true,controlError:''});
+    try{const result=await api.cancel(task.room,task.id);updateTask(task.id,{status:result.status})}
+    catch(error){updateTask(task.id,{controlError:errorText(error)})}
+    finally{updateTask(task.id,{cancelling:false})}
+  }
+  async function taskHistory(task){
+    updateTask(task.id,{historyBusy:true,controlError:''});
+    try{const result=await api.audit(task.room,task.id);updateTask(task.id,{history:result.events})}
+    catch(error){updateTask(task.id,{controlError:errorText(error)})}
+    finally{updateTask(task.id,{historyBusy:false})}
+  }
   function sent(id,mentioned,sourceRoom=roomCurrent.current){if(mentioned)setTasks(old=>[{id,room:sourceRoom,status:'queued'},...old.filter(t=>t.id!==id)].slice(0,8));}
   async function createRoom(e){e.preventDefault();if(createLock.current||!newName.trim())return;createLock.current=true;setCreating(true);setError('');
     if(createAttempt.current?.name!==newName)createAttempt.current={name:newName,id:crypto.randomUUID()};
@@ -186,7 +199,11 @@ export function App({connector=connect}) {
           const root=relation?.rel_type==='m.thread'?relation.event_id:event.id;
           return <article className={'message '+(agent?'agent':'')} key={event.id}><span className={'avatar '+(agent?'agent-avatar':'')}>{agent?<Bot size={15}/>:'Y'}</span><div className="message-main"><div className="message-meta"><strong>{agent?'Example Agent':event.sender===api.session.userId?'You':event.sender.split(':')[0]}</strong><time>{new Date(event.time||Date.now()).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</time></div>{relation?.rel_type==='m.thread'&&<button className="thread-link" onClick={()=>setFilter(root)}>Reply in thread</button>}<MessageBody body={event.content.body} version={documentVersion(event,api.session.agentId,api.session.synthetic)} disabled={docMeta.busy||docMeta.reading||docMeta.composing} onOpenVersion={commit=>{setRequestedVersion({commit});setMode('read');setHistoryOpen(true)}}/><div className="message-actions"><button onClick={()=>setReplyTo(root)}>Reply</button><button onClick={()=>setFilter(root)}>View thread</button></div></div></article>;
         })}</div>
-        <details className="task-details"><summary>Agent activity {tasks.filter(t=>t.room===room).length?`(${tasks.filter(t=>t.room===room).length})`:''}</summary>{tasks.filter(t=>t.room===room).map(t=><div key={t.id} className="task">{t.status==='done'?<Check size={13}/>:t.status==='failed'?<AlertCircle size={13}/>:<RefreshCw size={13}/>}<span>{t.status==='done'?'Completed':t.status}</span><code>{short(t.id)}</code></div>)}{!tasks.filter(t=>t.room===room).length&&<p>No tasks sent in this session.</p>}</details>
+        <details className="task-details"><summary>Agent activity {tasks.filter(t=>t.room===room).length?`(${tasks.filter(t=>t.room===room).length})`:''}</summary>{tasks.filter(t=>t.room===room).map(t=><div key={t.id} className="task-control"><div className="task">{t.status==='done'?<Check size={13}/>:['failed','cancelled'].includes(t.status)?<AlertCircle size={13}/>:<RefreshCw size={13}/>}<span>{t.status==='done'?'Completed':t.status==='cancelled'?'Cancelled':t.status}</span><code>{short(t.id)}</code></div>
+          {!api.session.synthetic&&<div className="message-actions"><button disabled={t.cancelling||!['pending','unverified'].includes(t.status)} onClick={()=>cancelTask(t)}>{t.cancelling?'Cancelling…':'Cancel task'}</button><button disabled={t.historyBusy} onClick={()=>taskHistory(t)}>View execution history</button></div>}
+          {t.controlError&&<p role="alert">{t.controlError}</p>}
+          {t.history&&<ol aria-label="Task execution history">{t.history.length?t.history.map(entry=><li key={entry.sequence}><span>{({accepted:'Accepted',leased:'Runtime started',result_ready:'Result recorded',completed:'Reply delivered',retry_scheduled:'Retry scheduled',failed:'Failed',cancelled:'Cancelled'})[entry.action]||entry.action}</span>{({room_forbidden:'Room access revoked',delivery_forbidden:'Reply permission revoked',task_cancelled:'Cancelled by request',attempts_exhausted:'Retry limit reached',runtime_error:'Runtime error',room_unavailable:'Room temporarily unavailable'})[entry.reason]&&<span> · {({room_forbidden:'Room access revoked',delivery_forbidden:'Reply permission revoked',task_cancelled:'Cancelled by request',attempts_exhausted:'Retry limit reached',runtime_error:'Runtime error',room_unavailable:'Room temporarily unavailable'})[entry.reason]}</span>}<time> · {new Date(entry.at*1000).toLocaleTimeString()}</time></li>):<li>This task has no recorded execution history.</li>}</ol>}
+        </div>)}{!tasks.filter(t=>t.room===room).length&&<p>No tasks sent in this session.</p>}</details>
         <Composer busyRoom={room} agentId={api.session.agentId} onSend={(content,id)=>api.send(room,content,id)} onSent={sent} replyTo={replyTo} clearReply={()=>setReplyTo(null)} defaultMention={panel==='agent'}/>
       </aside>
     </div>

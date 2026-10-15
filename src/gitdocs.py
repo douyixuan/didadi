@@ -313,7 +313,7 @@ class GitDocs:
     def abandon(self, operation, reason='task_failed'):
         """Keep the committed version, but durably close its notification outbox item."""
         if reason not in {'task_failed','runtime_error','room_forbidden','room_unavailable',
-                          'delivery_forbidden','attempts_exhausted'}:
+                          'delivery_forbidden','attempts_exhausted','task_cancelled'}:
             raise ValueError('invalid abandonment reason')
         with self._locked():
             opref = self._operation_ref(operation)

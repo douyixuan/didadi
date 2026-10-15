@@ -65,6 +65,12 @@ jobs:
           docker compose cp appservice:/config/smoke-state.json .local/smoke-state.json
           chmod 600 .local/*
           python3 -m scripts.document_smoke --state-file .local/smoke-state.json --token-file .local/agent-token --repo .local/documents.git
+      - name: Requester cancellation and persistent execution history
+        run: |
+          python3 -m scripts.task_control_smoke --state-file .local/smoke-state.json --token-file .local/agent-token --record .local/task-control-proof.json
+          docker compose restart appservice
+          docker compose up -d --wait --wait-timeout 60 appservice
+          python3 -m scripts.task_control_smoke --state-file .local/smoke-state.json --token-file .local/agent-token --record .local/task-control-proof.json --check-persistence
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
