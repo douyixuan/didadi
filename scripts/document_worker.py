@@ -46,7 +46,7 @@ def reconcile(base, token, store):
                        query={'id': item['notification']['task_id']})['task']
         if task and task['status'] == 'done':
             store.acknowledge(item['operation'])
-        elif task and task['status'] == 'failed':
+        elif task and task['status'] in {'failed','cancelled'}:
             store.abandon(item['operation'], task.get('last_error') or 'task_failed')
 
 

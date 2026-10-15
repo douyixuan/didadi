@@ -79,3 +79,9 @@ A managed Agent's task reply can offer **Open document version**. It opens the f
 **View version discussion** returns to the original receipt thread for the open version. It is enabled only when that receipt is present in the currently loaded timeline. This bounded timeline is not a repository-wide discussion index. A missing receipt is not replaced by an invented link.
 
 Real Git receipts require the managed sender identity, task metadata, thread relation and a fixed 40-character commit ID. The synthetic preview recognizes browser snapshot receipts separately. Ordinary messages cannot impersonate actionable Agent version receipts. These controls do not replace production grants, a multi-document identity model or cryptographic attestation.
+
+## Control accepted Agent tasks
+
+Open **Agent activity** in the discussion panel. Accepted pending tasks offer **Cancel task**. A cancelled document save keeps the draft and lets you save again as a new task. **View execution history** shows recorded transitions across gateway restarts. These controls are omitted from the browser-only synthetic preview, which has no persistent gateway.
+
+Only the original requester can cancel through this trusted local session. Cancellation stops further cooperative processing; it does not remove existing Git commits or undo external work already under way. The current client is still a local fixture identity, not a production login system.

@@ -47,5 +47,7 @@ export async function connect() {
     document:(room, commit)=>api('/api/document?room='+encodeURIComponent(room)+(commit?'&commit='+encodeURIComponent(commit):'')),
     history:room=>api('/api/history?room='+encodeURIComponent(room)),
     task:(room,id)=>api('/api/task?room='+encodeURIComponent(room)+'&id='+encodeURIComponent(id)),
+    cancel:(room,id)=>api('/api/task/cancel',{room,id}),
+    audit:(room,id)=>api('/api/task/audit?room='+encodeURIComponent(room)+'&id='+encodeURIComponent(id)),
   };
 }

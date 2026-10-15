@@ -158,3 +158,26 @@ it('exports the exact historical Markdown instead of the title-stripped read pre
  fireEvent.click(screen.getByRole('button',{name:'Export Markdown'}));
  expect(downloadMarkdown).toHaveBeenLastCalledWith(source);expect(api.send).not.toHaveBeenCalled();
 });
+
+it('cancels an accepted save without losing its draft and displays persistent execution history',async()=>{
+ const api=fixture();let cancelled=false;
+ api.task.mockImplementation(async()=>({task:{status:cancelled?'cancelled':'pending',last_error:cancelled?'task_cancelled':null}}));
+ api.cancel=vi.fn(async()=>{cancelled=true;return {status:'cancelled',cancelled:true}});
+ api.audit=vi.fn(async()=>({events:[{sequence:1,action:'accepted',at:1,attempt:0},{sequence:2,action:'cancelled',at:2,attempt:1,reason:'task_cancelled'}]}));
+ render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Team handbook'});
+ fireEvent.click(screen.getByRole('button',{name:'Edit',exact:true}));
+ fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# Cancel keeps this draft'}});
+ fireEvent.click(screen.getByRole('button',{name:'Save changes'}));
+ fireEvent.click(screen.getByRole('button',{name:'Discussion',exact:true}));
+ fireEvent.click(screen.getByText(/Agent activity/));
+ const cancel=await screen.findByRole('button',{name:'Cancel task'});
+ await waitFor(()=>expect(cancel).toBeEnabled(),{timeout:4000});fireEvent.click(cancel);
+ await screen.findByText(/The task was cancelled/,{}, {timeout:4000});
+ expect(api.cancel).toHaveBeenCalledWith('!room','$saved');
+ expect(screen.getByLabelText('Markdown document')).toHaveValue('# Cancel keeps this draft');
+ expect(screen.getByRole('button',{name:'Save changes'})).toBeEnabled();
+ expect(screen.getByRole('button',{name:'Cancel task'})).toBeDisabled();
+ fireEvent.click(screen.getByRole('button',{name:'View execution history'}));
+ await screen.findByRole('list',{name:'Task execution history'});
+ expect(screen.getByText('Accepted')).toBeInTheDocument();expect(api.audit).toHaveBeenCalledWith('!room','$saved');
+},7000);

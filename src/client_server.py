@@ -44,6 +44,18 @@ class Workspace:
             if db.execute('SELECT 1 FROM rooms WHERE id=?', (room,)).fetchone() is None:
                 raise ClientError(403, 'This room is not part of the local demo.')
 
+    def task_event(self, room, task_id):
+        self.allowed(room)
+        if not isinstance(task_id,str) or not 0<len(task_id)<=1000:
+            raise ClientError(400,'Invalid task reference.')
+        return self.api('GET','/rooms/'+segment(room)+'/event/'+segment(task_id))
+
+    def cancel_task(self, room, task_id):
+        event=self.task_event(room,task_id)
+        if event.get('sender')!=self.user_id:
+            raise ClientError(403,'Only the original requester can cancel this task.')
+        return request(self.gateway_url,'POST','/agent/cancel',self.token,{'id':task_id})
+
     def create_room(self, operation, name):
         if (not isinstance(operation, str) or not re.fullmatch(r'[a-zA-Z0-9-]{8,80}', operation) or
             not isinstance(name, str) or not 1 <= len(name.strip()) <= 60):
@@ -159,6 +171,12 @@ def handler(workspace, dist, port):
                 if parsed.path == '/api/session' and method == 'GET':
                     result = {'csrf': workspace.csrf, 'userId': workspace.user_id, 'agentId': AGENT,
                               'initialRoom': workspace.state['room'], 'qa': getattr(workspace, 'qa', None), 'agentLabel': 'Example echo agent · no LLM'}
+                elif parsed.path == '/api/task/cancel' and method == 'POST':
+                    result = workspace.cancel_task(body['room'],body['id'])
+                elif parsed.path == '/api/task/audit' and method == 'GET':
+                    room=query.get('room',[''])[0];task_id=query.get('id',[''])[0]
+                    workspace.task_event(room,task_id)
+                    result=request(workspace.gateway_url,'GET','/agent/audit',workspace.token,query={'id':task_id})
                 elif parsed.path == '/api/rooms' and method == 'POST':
                     result = workspace.create_room(body['operation'], body['name'])
                 elif parsed.path == '/matrix/_matrix/client/versions' and method == 'GET':

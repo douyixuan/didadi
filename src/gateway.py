@@ -26,6 +26,9 @@ class Gateway:
         with self.db() as db:
             db.executescript('''
                 CREATE TABLE IF NOT EXISTS transactions (id TEXT PRIMARY KEY);
+                CREATE TABLE IF NOT EXISTS task_events (sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id TEXT NOT NULL, action TEXT NOT NULL, at REAL NOT NULL, attempt INTEGER NOT NULL, reason TEXT);
+                CREATE INDEX IF NOT EXISTS task_event_lookup ON task_events(task_id,sequence);
                 CREATE TABLE IF NOT EXISTS tasks (
                     id TEXT PRIMARY KEY, event TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
                     lease TEXT, until REAL DEFAULT 0, result TEXT, reply TEXT);
@@ -46,6 +49,27 @@ class Gateway:
                 yield db
         finally:
             db.close()
+
+    def _record(self, db, task_id, action, attempt=0, reason=None):
+        db.execute('INSERT INTO task_events(task_id,action,at,attempt,reason) VALUES (?,?,?,?,?)',
+                   (task_id,action,time.time(),attempt,reason))
+
+    def audit(self, task_id):
+        with self.db() as db:
+            return [dict(row) for row in db.execute(
+                'SELECT sequence,action,at,attempt,reason FROM task_events WHERE task_id=? ORDER BY sequence', (task_id,))]
+
+    def cancel(self, task_id):
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row=db.execute('SELECT * FROM tasks WHERE id=?',(task_id,)).fetchone()
+            if row is None:
+                raise TaskError('task_not_found',retryable=True)
+            if row['status'] not in {'pending','unverified'}:
+                return {'status':row['status'],'cancelled':row['status']=='cancelled'}
+            db.execute("UPDATE tasks SET status='cancelled',last_error='task_cancelled',lease=NULL,until=0 WHERE id=?",(task_id,))
+            self._record(db,task_id,'cancelled',row['attempts'],'task_cancelled')
+        return {'status':'cancelled','cancelled':True}
 
     def allowed(self, room):
         return allowed(self.agent.api, room, AGENT)
@@ -83,8 +107,9 @@ class Gateway:
         # Commit both transaction and task before ACK; uniqueness also handles concurrent callbacks.
         with self.db() as db:
             for event, status in candidates:
-                db.execute('INSERT OR IGNORE INTO tasks(id,event,status) VALUES (?,?,?)',
-                           (event['event_id'], json.dumps(event), status))
+                inserted=db.execute('INSERT OR IGNORE INTO tasks(id,event,status) VALUES (?,?,?)',
+                           (event['event_id'], json.dumps(event), status)).rowcount
+                if inserted:self._record(db,event['event_id'],'accepted',reason=status)
             db.execute('INSERT OR IGNORE INTO transactions VALUES (?)', (txn,))
 
     def status(self, task_id):
@@ -108,6 +133,7 @@ class Gateway:
                     continue
                 if row['attempts'] >= self.max_attempts:
                     db.execute("UPDATE tasks SET status='failed',last_error='attempts_exhausted',lease=NULL WHERE id=?", (task_id,))
+                    self._record(db,task_id,'failed',row['attempts'],'attempts_exhausted')
                     continue
                 lease = secrets.token_hex(24)
                 db.execute('UPDATE tasks SET lease=?,until=?,attempts=attempts+1 WHERE id=?',
@@ -126,6 +152,7 @@ class Gateway:
                 updated = db.execute("UPDATE tasks SET status='pending' WHERE id=? AND lease=? AND status IN ('pending','unverified') AND until > ?", (task_id, lease, time.time())).rowcount
                 if not updated:
                     continue
+                self._record(db,task_id,'leased',row['attempts']+1)
             return {'id': task_id, 'event': event, 'lease': lease,
                     'result': row['result'], 'agent': AGENT, 'attempts': row['attempts'] + 1}
         return None
@@ -143,6 +170,7 @@ class Gateway:
             terminal = not retryable or row['attempts'] >= self.max_attempts
             delay = min(300, self.retry_seconds * 2 ** min(row['attempts'] - 1, 8))
             status = 'failed' if terminal else 'pending'
+            self._record(db,task_id,'failed' if terminal else 'retry_scheduled',row['attempts'],reason)
             db.execute('UPDATE tasks SET status=?,last_error=?,lease=NULL,until=0,available=? WHERE id=?',
                        (status, reason, time.time() + delay, task_id))
         return {'status': status, 'retryable': not terminal}
@@ -151,6 +179,8 @@ class Gateway:
         """Recheck the current lease and room immediately before a runtime side effect."""
         with self.db() as db:
             row = db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone()
+        if row is not None and row['status']=='cancelled':
+            raise TaskError('task_cancelled')
         if (row is None or row['status'] in {'done', 'failed'} or row['until'] < time.time()
                 or not secrets.compare_digest(row['lease'] or '', lease)):
             raise TaskError('invalid_lease', retryable=True)
@@ -171,6 +201,8 @@ class Gateway:
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
             row = db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone()
+            if row is not None and row['status']=='cancelled':
+                raise TaskError('task_cancelled')
             if row is None or not secrets.compare_digest(row['lease'] or '', lease):
                 raise TaskError('invalid_lease', retryable=True)
             if row['status'] == 'done':
@@ -181,6 +213,7 @@ class Gateway:
                 raise TaskError('invalid_lease', retryable=True)
             if row['result'] is not None and row['result'] != result:
                 raise ValueError('result already fixed')
+            if row['result'] is None:self._record(db,task_id,'result_ready',row['attempts'])
             db.execute('UPDATE tasks SET result=? WHERE id=?', (result, task_id))
         event = json.loads(row['event'])
         self.validate(task_id, lease)
@@ -203,4 +236,5 @@ class Gateway:
                                  (reply['event_id'], task_id, lease)).rowcount
             if not updated:
                 raise TaskError('invalid_lease', retryable=True)
+            self._record(db,task_id,'completed',row['attempts'])
         return reply
