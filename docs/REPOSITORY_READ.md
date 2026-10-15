@@ -27,3 +27,9 @@ python3 -m scripts.repository_read_smoke --state-file .local/smoke-state.json --
 ```
 
 The smoke creates a temporary synthetic source repository and separate document repository. It verifies an allowed report, a denied file, unchanged source refs/worktree and a document receipt in the original Matrix thread. Do not run a competing continuous worker during this test. It does not prove semantic analysis or production authorization.
+
+## Local workspace controls
+
+Pass the same `--repository-grants` file to the loopback client adapter to advertise allowed source choices. The document footer shows “Read-only source repository” only when choices match the active room and fixture user. The browser receives aliases, file paths and fixed commits; it never receives local repository locations or the Agent credential. This advertisement does not authorize a read: the external runtime independently checks its configuration.
+
+“Read source in discussion” posts a structured mention. “Replace document with file report” explicitly replaces `demo.md` through the existing stale-blob-protected Git write flow. The control is disabled for unsaved drafts and historical versions. Previous Git versions remain available. Source reports contain deterministic file metadata, not LLM analysis. Requests appear in the existing Agent task activity and post their result to the original Matrix thread. Runtime rejection preserves the document; Retry repeats the same type of request.

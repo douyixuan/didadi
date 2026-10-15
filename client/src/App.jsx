@@ -44,7 +44,11 @@ export function Documents({api,room,onSent,mode='read',setMode=()=>{},historyOpe
   const [snapshot,setSnapshot]=useState(null),[draft,setDraft]=useState(''),[history,setHistory]=useState([]);
   const [error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[historical,setHistorical]=useState(false),[readRetry,setReadRetry]=useState(null);
   const [pending,setPending]=useState(null),[conflict,setConflict]=useState(false),[recoveryDraft,setRecoveryDraft]=useState(null);
+  const [sourceChoice,setSourceChoice]=useState('');
+  const sources=(api.session.repositoryReads||[]).filter(source=>source.room===room);
+  const source=sources.find(item=>JSON.stringify([item.repository,item.path,item.commit])===sourceChoice)||sources[0];
   const lock=useRef(false),attempt=useRef(null), mounted=useRef(true),loadSequence=useRef(0);
+  const lastCommand=useRef({action:'write',repository:null});
   const [reading,setReading]=useState(false);
   const editor=useRef(null);
   const [editorRevision,setEditorRevision]=useState(0),[composing,setComposing]=useState(false);
@@ -75,21 +79,22 @@ export function Documents({api,room,onSent,mode='read',setMode=()=>{},historyOpe
           setPending(null);setBusy(false);lock.current=false;
           const body=result.task.body||'';
           if(body.startsWith('Document conflict:')){setConflict(true);setError('A newer document version exists. Your edits are preserved. Load latest to merge.');}
-          else if(body.startsWith('Document request rejected:'))setError(body);
+          else if(body.startsWith('Document request rejected:')||body.startsWith('Repository request rejected:'))setError(body);
           else {if(body.startsWith('Saved'))setRecoveryDraft(null);await load(undefined,!body.startsWith('Saved'));setNotice(body.startsWith('Saved')?(api.session.synthetic?'Saved in this browser. No Git backend is connected.':'Saved to Git. The Agent posted a version receipt in the room.'):(api.session.synthetic?'Example Agent read the browser snapshot.':'Agent read the Git version. See the room timeline.'));}
         }
       }catch(e){if(!cancelled)setError(errorText(e)+' Waiting to reconnect; your draft is kept.');}
       finally{checking=false;}}
     check();const timer=setInterval(check,1200);return()=>{cancelled=true;clearInterval(timer)};
   },[pending,api]);
-  async function submit(action){
+  async function submit(action,repository=null){
     const latestDraft=mode==='edit'?(editor.current?.markdown()??draft):draft;
     if(action==='write'&&latestDraft.length>6000){setError('Document text must contain at most 6000 characters. Your draft is kept.');return;}
     if(action==='write')setDraft(latestDraft);
-    if(lock.current||!snapshot||composing)return;lock.current=true;setBusy(true);setError('');setReadRetry(null);setNotice('');
-    const command=action==='write'?{action,content:latestDraft,base_blob:snapshot.blob}:{action, ...(historical?{commit:snapshot.commit}:{})};
-    const content={msgtype:'m.text',body:action==='write'?'Save demo.md from workspace':'Read demo.md from Git',
-      'm.mentions':{user_ids:[api.session.agentId]},'org.didadi.document':command};
+    if(lock.current||!snapshot||composing||(repository&&action==='report'&&(historical||recoveryDraft!==null||latestDraft!==(snapshot.content||''))))return;lock.current=true;setBusy(true);setError('');setReadRetry(null);setNotice('');
+    lastCommand.current={action,repository};
+    const command=repository?{action,repository:repository.repository,path:repository.path,...(action==='report'?{base_blob:snapshot.blob}:{})}:action==='write'?{action,content:latestDraft,base_blob:snapshot.blob}:{action, ...(historical?{commit:snapshot.commit}:{})};
+    const content={msgtype:'m.text',body:repository?(action==='report'?'Replace demo.md with a deterministic source file report; no LLM.':'Read an explicitly granted source file; no LLM.'):action==='write'?'Save demo.md from workspace':'Read demo.md from Git',
+      'm.mentions':{user_ids:[api.session.agentId]},[repository?'org.didadi.repository':'org.didadi.document']:command};
     const key=JSON.stringify([room,content]);if(attempt.current?.key!==key)attempt.current={key,id:crypto.randomUUID()};
     try {const result=await api.send(room,content,attempt.current.id);attempt.current=null;
       setPending({room,id:result.event_id});onSent(result.event_id,true,room);}
@@ -103,7 +108,7 @@ export function Documents({api,room,onSent,mode='read',setMode=()=>{},historyOpe
       <div>{mode==='edit'&&<button className="primary compact" onClick={()=>submit('write')} disabled={busy||reading||composing||!snapshot}>Save changes</button>}</div>
     </div>
     {historical&&<div className="state-banner historical-banner"><History size={17}/><span>You’re viewing an earlier version. Editing it may return a conflict.</span><button onClick={()=>load(undefined,true)}>Back to latest</button></div>}
-    {error&&<div className="state-banner warning" role="alert"><AlertCircle size={18}/><div><strong>{conflict?'This document has a newer version':'Couldn’t complete the request'}</strong><p>{error}</p></div>{conflict?<button onClick={()=>load(undefined,true)}>Load latest to merge</button>:<button onClick={()=>readRetry?load(readRetry.commit,readRetry.preserveDraft):snapshot?submit('write'):load()}>Retry</button>}</div>}
+    {error&&<div className="state-banner warning" role="alert"><AlertCircle size={18}/><div><strong>{conflict?'This document has a newer version':'Couldn’t complete the request'}</strong><p>{error}</p></div>{conflict?<button onClick={()=>load(undefined,true)}>Load latest to merge</button>:<button onClick={()=>readRetry?load(readRetry.commit,readRetry.preserveDraft):snapshot?submit(lastCommand.current.action,lastCommand.current.repository):load()}>Retry</button>}</div>}
     {notice&&<div className="state-banner success" role="status"><Check size={17}/><span>{notice}</span></div>}
     {pending&&<p className="quiet-status" role="status">Your request is queued. The example runtime will post the result in the room.</p>}
     {recoveryDraft!==null&&<div className="state-banner warning"><div><strong>Your previous draft is preserved</strong><p>Compare it with the latest version below, then merge your changes.</p><textarea aria-label="Preserved draft" readOnly value={recoveryDraft}/></div><button onClick={()=>{setDraft(recoveryDraft);setEditorRevision(v=>v+1);setMode('edit')}}>Restore previous draft</button></div>}
@@ -114,6 +119,7 @@ export function Documents({api,room,onSent,mode='read',setMode=()=>{},historyOpe
           <div className="editor-foot"><span>{draft.length} / 6000 characters · Markdown-backed blocks</span><button onClick={()=>load(undefined,true)} disabled={busy}>Load latest</button></div>
         </>:<div className="markdown-body">{presentation.properties&&<details className="document-properties"><summary>Properties · Markdown front matter</summary><pre>{presentation.properties}</pre></details>}{draft?<ReactMarkdown remarkPlugins={[remarkGfm]}>{bodyMarkdown}</ReactMarkdown>:<div className="empty-document"><p>A quiet space for your first document.</p><button className="primary" onClick={()=>setMode('edit')}>Start writing</button></div>}</div>}
         <div className="document-bottom"><span><BookOpen size={14}/> demo.md</span><button onClick={()=>onDiscussVersion(snapshot.commit)} disabled={busy||reading||!canDiscussVersion} title={canDiscussVersion?'Open the thread containing this version receipt':'No receipt for this version in the loaded discussion'}>View version discussion</button><button title="Download the current Markdown, including unsaved edits" onClick={()=>downloadMarkdown(mode==='edit'?(editor.current?.markdown()??draft):draft)} disabled={busy||reading||composing}>Export Markdown</button><button onClick={()=>submit('read')} disabled={busy}>Ask example Agent to read</button></div>
+        {sources.length>0&&<details className="document-properties"><summary>Read-only source repository</summary><p>Explicitly granted files at a fixed Git commit. Deterministic inventory; no LLM analysis.</p><label>Source file <select aria-label="Granted source file" value={source?JSON.stringify([source.repository,source.path,source.commit]):''} onChange={event=>setSourceChoice(event.target.value)} disabled={busy||reading}>{sources.map(item=><option key={JSON.stringify([item.repository,item.path,item.commit])} value={JSON.stringify([item.repository,item.path,item.commit])}>{item.repository} / {item.path}</option>)}</select></label><p>Source commit: <code>{source?.commit}</code></p><div className="document-bottom"><button disabled={busy||reading||composing} onClick={()=>submit('read',source)}>Read source in discussion</button><button disabled={busy||reading||composing||dirty||historical||recoveryDraft!==null} onClick={()=>submit('report',source)}>Replace document with file report</button></div>{(dirty||historical||recoveryDraft!==null)&&<p>Resolve and save any preserved draft, then return to the latest version before replacing this document. Earlier Git versions remain available.</p>}</details>}
       </>:error?<div className="document-unavailable"><FileText size={30}/><h2>This document is temporarily unavailable</h2><p>Your workspace is still open. Retry above to load the document.</p></div>:<div className="document-skeleton" role="status" aria-label="Loading document"><div/><div/><div/><div/><p>Loading document…</p></div>}
     </div></div>
     {historyOpen&&<aside className="history-panel" aria-label="Version history"><header><h2>Version history</h2><button aria-label="Close history" onClick={onCloseHistory}><X size={17}/></button></header><p>{api.session.synthetic?'Sample snapshots stored in this browser.':'Every version is a fixed Git snapshot.'}</p>{history.length?history.map((commit,i)=><button className="history-row" key={commit} onClick={()=>load(commit,true)} disabled={busy||reading}><span className="version-dot"/><div><strong>{i===0?'Current version':'Previous version'}</strong><code>{short(commit)}</code></div><ChevronRight size={15}/></button>):<div className="panel-empty">Your first save creates the first version.</div>}</aside>}
