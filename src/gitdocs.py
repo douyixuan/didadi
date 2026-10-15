@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import unicodedata
 
 
 class Conflict(Exception):
@@ -70,7 +71,7 @@ class GitDocs:
 
     def _git(self, *args, input=None, env=None, check=True):
         process_env = {k: v for k, v in os.environ.items() if not k.startswith('GIT_')}
-        process_env.update({'GIT_NO_REPLACE_OBJECTS': '1', 'GIT_TERMINAL_PROMPT': '0',
+        process_env.update({'GIT_LITERAL_PATHSPECS': '1', 'GIT_NO_REPLACE_OBJECTS': '1', 'GIT_TERMINAL_PROMPT': '0',
                             'GIT_AUTHOR_NAME': 'Doc Service', 'GIT_AUTHOR_EMAIL': 'docs@localhost',
                             'GIT_COMMITTER_NAME': 'Doc Service', 'GIT_COMMITTER_EMAIL': 'docs@localhost'})
         process_env.update(env or {})
@@ -86,9 +87,25 @@ class GitDocs:
         return value if re.fullmatch(r'[0-9a-f]{40}', value) else None
 
     def _name(self, name):
-        if (not isinstance(name, str) or len(name) > 240 or
-            not re.fullmatch(r'[a-zA-Z0-9_-]+(?:/[a-zA-Z0-9_-]+)*\.md', name)):
+        if not isinstance(name, str):
             raise InvalidPath(name)
+        try:
+            size = len(name.encode('utf-8'))
+        except UnicodeEncodeError:
+            raise InvalidPath(name) from None
+        if (not 0 < size <= 240 or not name.endswith('.md') or
+                unicodedata.normalize('NFC', name) != name):
+            raise InvalidPath(name)
+        for part in name.split('/'):
+            stem = part.split('.', 1)[0].upper()
+            if (not part or part in {'.', '..'} or part.casefold().startswith('.git') or
+                    part != part.strip() or part.endswith('.') or
+                    any(character in '\\<>:"|?*' or unicodedata.category(character).startswith('C')
+                        for character in part) or
+                    stem in {'CON', 'PRN', 'AUX', 'NUL', 'COM1', 'COM2', 'COM3', 'COM4',
+                             'COM5', 'COM6', 'COM7', 'COM8', 'COM9', 'LPT1', 'LPT2',
+                             'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9'}):
+                raise InvalidPath(name)
         return name
 
     def _version(self, name, commit):
