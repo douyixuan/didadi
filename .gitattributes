@@ -1,0 +1,2 @@
+# Upstream regression inputs retain exact bytes, including Markdown hard breaks.
+client/test-corpus/real/** -text -whitespace

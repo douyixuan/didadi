@@ -30,6 +30,13 @@ jobs:
           cache-dependency-path: client/package-lock.json
       - run: npm ci --prefix client
       - run: npm --prefix client test
+      - name: Preserve pinned Markdown corpus report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: markdown-roundtrip
+          path: client/.local/markdown-roundtrip.json
+          if-no-files-found: error
       - run: npm --prefix client run build
   matrix-smoke:
     runs-on: ubuntu-latest

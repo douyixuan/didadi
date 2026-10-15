@@ -1,0 +1,20 @@
+import React from 'react';
+import {render,screen,act,fireEvent,waitFor} from '@testing-library/react';
+import {it,expect} from 'vitest';
+import {Documents} from './App';
+import {createDemo} from './demo-api';
+it('saves through the document workflow and reopens mixed Markdown without unrelated changes',async()=>{
+ const values=new Map(),api=createDemo({getItem:key=>values.get(key),setItem:(key,value)=>values.set(key,value)}),room=api.session.initialRoom;
+ const original=(await api.document(room)).content,expected=original.replace('# Getting started with Didadi','# 中文保存验证');
+ const mounted=render(<Documents api={api} room={room} mode="edit" onSent={()=>{}}/>);
+ const body=await screen.findByRole('textbox',{name:'Document body'});
+ expect(body.querySelector('table')).not.toBeNull();expect(body.querySelector('pre[data-didadi-source]')).not.toBeNull();
+ await act(async()=>{body.querySelector('h1').textContent='中文保存验证';fireEvent.input(body,{inputType:'insertText',data:'中文保存验证'})});
+ await waitFor(()=>expect(screen.getByRole('button',{name:'Save changes'})).toBeEnabled());
+ fireEvent.click(screen.getByRole('button',{name:'Save changes'}));
+ await waitFor(async()=>expect((await api.document(room)).content).toBe(expected));
+ mounted.unmount();render(<Documents api={api} room={room} mode="edit" onSent={()=>{}}/>);
+ const reopened=await screen.findByRole('textbox',{name:'Document body'});expect(reopened.querySelector('h1')).toHaveTextContent('中文保存验证');expect(reopened.querySelector('table')).not.toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'Save changes'}));
+ await waitFor(async()=>expect((await api.document(room)).content).toBe(expected));
+},10000);
