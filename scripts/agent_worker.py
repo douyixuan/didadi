@@ -11,12 +11,12 @@ def render(task):
     return 'External agent received: ' + task['event']['content']['body']
 
 
-def report_failure(base, token, task, error):
+def report_failure(base, token, task, error, transport=None):
     # Permanent completion errors are already terminal or refer to an obsolete lease.
     if isinstance(error, MatrixError) and error.body.get('retryable') is False:
         return
     try:
-        request(base, 'POST', '/agent/fail', token,
+        (transport or request)(base, 'POST', '/agent/fail', token,
                 {'id': task['id'], 'lease': task['lease'], 'reason': 'runtime_error', 'retryable': True})
     except MatrixError as failure:
         if failure.body.get('retryable') is not False:
