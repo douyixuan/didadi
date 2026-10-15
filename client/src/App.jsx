@@ -45,6 +45,7 @@ export function Documents({api,room,onSent,mode='read',setMode=()=>{},historyOpe
   const [error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[historical,setHistorical]=useState(false),[readRetry,setReadRetry]=useState(null);
   const [pending,setPending]=useState(null),[conflict,setConflict]=useState(false),[recoveryDraft,setRecoveryDraft]=useState(null);
   const [sourceChoice,setSourceChoice]=useState('');
+  const [cancelledAction,setCancelledAction]=useState(null);
   const sources=(api.session.repositoryReads||[]).filter(source=>source.room===room);
   const source=sources.find(item=>JSON.stringify([item.repository,item.path,item.commit])===sourceChoice)||sources[0];
   const lock=useRef(false),attempt=useRef(null), mounted=useRef(true),loadSequence=useRef(0);
@@ -58,7 +59,7 @@ export function Documents({api,room,onSent,mode='read',setMode=()=>{},historyOpe
   useEffect(()=>onMeta({title,commit:snapshot?.commit,reading,composing,dirty:Boolean(snapshot&&draft!==(snapshot.content||'')),busy,historical}),[title,draft,snapshot,busy,historical,reading,composing]);
   const roomRef=useRef(room);roomRef.current=room;
   async function load(commit, preserveDraft=false) {
-    const sequence=++loadSequence.current;setReading(true);setError('');setReadRetry(null);
+    const sequence=++loadSequence.current;setReading(true);setError('');setReadRetry(null);setCancelledAction(null);
     try {const [doc,versions]=await Promise.all([api.document(roomRef.current,commit),api.history(roomRef.current)]);
       if(!mounted.current||sequence!==loadSequence.current)return;if(preserveDraft&&draft!==(snapshot?.content||''))setRecoveryDraft(draft);setSnapshot(doc);setDraft(doc.content||'');setEditorRevision(v=>v+1);setHistory(versions.commits);setHistorical(Boolean(commit));setConflict(false);setNotice('');}
     catch(e){if(sequence===loadSequence.current){setError(errorText(e));setReadRetry({commit,preserveDraft})}}
@@ -74,7 +75,8 @@ export function Documents({api,room,onSent,mode='read',setMode=()=>{},historyOpe
         if(!cancelled&&['failed','cancelled'].includes(result.task?.status)){
           setPending(null);setBusy(false);lock.current=false;attempt.current=null;
           const reasons={task_cancelled:'The task was cancelled.',room_forbidden:'The Agent no longer has access to this room.',delivery_forbidden:'The Agent cannot reply to this room.',attempts_exhausted:'The task reached its retry limit.',room_unavailable:'The room could not be verified.',runtime_error:'The external runtime could not finish the task.'};
-          setError((reasons[result.task.last_error]||'The task stopped before completion.')+(result.task.status==='cancelled'?' Your draft is kept. Save again to start a new task.':' Your draft is kept. Restore access or fix the runtime, then retry.'));
+          if(result.task.status==='cancelled'){setError('');setCancelledAction(lastCommand.current);}
+          else setError((reasons[result.task.last_error]||'The task stopped before completion.')+' Your draft is kept. Restore access or fix the runtime, then retry.');
         }else if(!cancelled&&result.task?.status==='done'){
           setPending(null);setBusy(false);lock.current=false;
           const body=result.task.body||'';
@@ -90,7 +92,7 @@ export function Documents({api,room,onSent,mode='read',setMode=()=>{},historyOpe
     const latestDraft=mode==='edit'?(editor.current?.markdown()??draft):draft;
     if(action==='write'&&latestDraft.length>6000){setError('Document text must contain at most 6000 characters. Your draft is kept.');return;}
     if(action==='write')setDraft(latestDraft);
-    if(lock.current||!snapshot||composing||(repository&&action==='report'&&(historical||recoveryDraft!==null||latestDraft!==(snapshot.content||''))))return;lock.current=true;setBusy(true);setError('');setReadRetry(null);setNotice('');
+    if(lock.current||!snapshot||composing||(repository&&action==='report'&&(historical||recoveryDraft!==null||latestDraft!==(snapshot.content||''))))return;lock.current=true;setBusy(true);setError('');setReadRetry(null);setNotice('');setCancelledAction(null);
     lastCommand.current={action,repository};
     const command=repository?{action,repository:repository.repository,path:repository.path,...(action==='report'?{base_blob:snapshot.blob}:{})}:action==='write'?{action,content:latestDraft,base_blob:snapshot.blob}:{action, ...(historical?{commit:snapshot.commit}:{})};
     const content={msgtype:'m.text',body:repository?(action==='report'?'Replace demo.md with a deterministic source file report; no LLM.':'Read an explicitly granted source file; no LLM.'):action==='write'?'Save demo.md from workspace':'Read demo.md from Git',
@@ -109,11 +111,13 @@ export function Documents({api,room,onSent,mode='read',setMode=()=>{},historyOpe
     </div>
     {historical&&<div className="state-banner historical-banner"><History size={17}/><span>You’re viewing an earlier version. Editing it may return a conflict.</span><button onClick={()=>load(undefined,true)}>Back to latest</button></div>}
     {error&&<div className="state-banner warning" role="alert"><AlertCircle size={18}/><div><strong>{conflict?'This document has a newer version':'Couldn’t complete the request'}</strong><p>{error}</p></div>{conflict?<button onClick={()=>load(undefined,true)}>Load latest to merge</button>:<button onClick={()=>readRetry?load(readRetry.commit,readRetry.preserveDraft):snapshot?submit(lastCommand.current.action,lastCommand.current.repository):load()}>Retry</button>}</div>}
+    {cancelledAction&&<div className="state-banner cancelled-banner" role="status"><Check size={18}/><div><strong>Task cancelled</strong><p>The task was cancelled. Your draft is kept. {cancelledAction.action==='write'?'Choose Save changes to start a new save task.':cancelledAction.action==='report'?'Choose Replace document with file report to start a new report task.':cancelledAction.repository?'Choose Read source in discussion to start a new source read task.':'Choose Ask example Agent to read to start a new document read task.'} Cancellation does not undo a change already saved by the runtime.</p></div></div>}
     {notice&&<div className="state-banner success" role="status"><Check size={17}/><span>{notice}</span></div>}
     {pending&&<p className="quiet-status" role="status">Your request is queued. The example runtime will post the result in the room.</p>}
-    {recoveryDraft!==null&&<div className="state-banner warning"><div><strong>Your previous draft is preserved</strong><p>Compare it with the latest version below, then merge your changes.</p><textarea aria-label="Preserved draft" readOnly value={recoveryDraft}/></div><button onClick={()=>{setDraft(recoveryDraft);setEditorRevision(v=>v+1);setMode('edit')}}>Restore previous draft</button></div>}
-    <div className="document-scroll"><div className="document-page">
-      {snapshot?<><div className="page-eyebrow"><FileText size={16}/><span>Workspace document</span></div>{mode!=='edit'&&<h1 className="document-title">{title}</h1>}
+    <div className="document-scroll">
+      {recoveryDraft!==null&&<PreservedDraft value={recoveryDraft} disabled={busy||reading||composing} onRestore={value=>{if(busy||reading||composing)return;setDraft(value);setEditorRevision(v=>v+1);setMode('edit')}}/>}
+      <div className="document-page">
+      {snapshot?<><div className="page-eyebrow"><FileText size={16}/><span>Workspace document · demo.md</span></div>{mode!=='edit'&&<h1 className="document-title">{title}</h1>}
         <div className="page-byline"><span className="tiny-avatar">D</span><span>Shared workspace</span><span className="byline-dot"/><span>{api.session.synthetic?'Browser-only snapshot':'Stored in Git'}</span></div>
         {mode==='edit'?<><BlockEditor key={editorRevision} ref={editor} value={draft} onChange={setDraft} onComposingChange={setComposing} disabled={busy||reading}/>
           <div className="editor-foot"><span>{draft.length} / 6000 characters · Markdown-backed blocks</span><button onClick={()=>load(undefined,true)} disabled={busy}>Load latest</button></div>
@@ -123,6 +127,16 @@ export function Documents({api,room,onSent,mode='read',setMode=()=>{},historyOpe
       </>:error?<div className="document-unavailable"><FileText size={30}/><h2>This document is temporarily unavailable</h2><p>Your workspace is still open. Retry above to load the document.</p></div>:<div className="document-skeleton" role="status" aria-label="Loading document"><div/><div/><div/><div/><p>Loading document…</p></div>}
     </div></div>
     {historyOpen&&<aside className="history-panel" aria-label="Version history"><header><h2>Version history</h2><button aria-label="Close history" onClick={onCloseHistory}><X size={17}/></button></header><p>{api.session.synthetic?'Sample snapshots stored in this browser.':'Every version is a fixed Git snapshot.'}</p>{history.length?history.map((commit,i)=><button className="history-row" key={commit} onClick={()=>load(commit,true)} disabled={busy||reading}><span className="version-dot"/><div><strong>{i===0?'Current version':'Previous version'}</strong><code>{short(commit)}</code></div><ChevronRight size={15}/></button>):<div className="panel-empty">Your first save creates the first version.</div>}</aside>}
+  </section>;
+}
+
+
+export function PreservedDraft({value,onRestore,disabled=false}) {
+  const presentation=useMemo(()=>readMarkdown(value),[value]);
+  return <section className="preserved-draft" aria-label="Preserved draft recovery">
+    <div className="recovery-heading"><div><h2>Your previous draft is preserved</h2><p>Read the preview, then restore it to merge with the latest version. Nothing is saved until you choose Save changes.</p></div><button disabled={disabled} onClick={()=>onRestore(value)}>Restore previous draft</button></div>
+    <details className="recovery-preview" open><summary>Draft reading preview</summary><div className="markdown-body"><h3>{presentation.title}</h3><ReactMarkdown remarkPlugins={[remarkGfm]}>{presentation.body}</ReactMarkdown></div></details>
+    <details className="recovery-source"><summary>Original Markdown · exact preserved text</summary><p>Markdown escapes and character references are source syntax. Restore keeps this exact text, including spacing and front matter.</p><textarea aria-label="Preserved draft" readOnly value={value}/></details>
   </section>;
 }
 
@@ -182,7 +196,7 @@ export function App({connector=connect}) {
     <div className="workspace-search"><Search size={16}/><input ref={searchRef} aria-label="Search workspace" placeholder="Search workspace" value={search} onChange={e=>setSearch(e.target.value)}/></div>
     <div className="nav-section"><div className="section-heading"><span>Documents</span><span className="count">1</span></div>
       <button className="tree-collection" onClick={()=>{setMode('read');setNavOpen(false)}}><ChevronDown size={14}/><BookOpen size={16}/><span>Workspace</span></button>
-      {(!search||docMeta.title.toLowerCase().includes(search.toLowerCase())||'demo.md'.includes(search.toLowerCase()))&&<button className="document-tree-item selected" onClick={()=>{setMode('read');setNavOpen(false)}}><FileText size={16}/><span>{docMeta.title}</span></button>}
+      {(!search||docMeta.title.toLowerCase().includes(search.toLowerCase())||'demo.md'.includes(search.toLowerCase()))&&<button className="document-tree-item selected" aria-current="page" aria-label="demo.md, current document" title={docMeta.title} onClick={()=>{setMode('read');setNavOpen(false)}}><FileText size={16}/><span className="document-identity"><strong>demo.md</strong><small>{docMeta.dirty?'Draft title: ':'Title: '}{docMeta.title}</small></span></button>}
       {search&&!docMeta.title.toLowerCase().includes(search.toLowerCase())&&!'demo.md'.includes(search.toLowerCase())&&<p className="nav-empty">No matching document</p>}
     </div>
     <div className="nav-section rooms-section"><div className="section-heading"><span>Rooms</span><button aria-label="Refresh rooms" onClick={refreshRooms}><RefreshCw size={13}/></button></div>
