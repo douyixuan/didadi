@@ -36,8 +36,8 @@ class MatrixSpikeTests(unittest.TestCase):
         self.agent.process([self.event])
         self.assertEqual(self.agent.api.call_count, 1)
         self.agent.api = Mock(side_effect=MatrixError(500, {'errcode': 'M_UNKNOWN'}))
-        with self.assertRaises(MatrixError):
-            self.agent.process([self.event])
+        self.agent.process([self.event])
+        self.assertFalse(any(call.args[0] == 'PUT' for call in self.agent.api.call_args_list))
 
     def test_ignores_self_noncommand_and_encrypted_events(self):
         variants = []

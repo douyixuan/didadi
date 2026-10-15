@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 from scripts.agent_worker import render as echo
-from scripts.agent_worker import run_loop
+from scripts.agent_worker import run_loop, report_failure
 from src.gitdocs import Conflict, GitDocs, InvalidPath, PublicationPending
 from src.matrix_http import request
 
@@ -46,6 +46,8 @@ def reconcile(base, token, store):
                        query={'id': item['notification']['task_id']})['task']
         if task and task['status'] == 'done':
             store.acknowledge(item['operation'])
+        elif task and task['status'] == 'failed':
+            store.abandon(item['operation'], task.get('last_error') or 'task_failed')
 
 
 def once(base, token, store, crash_after_commit=False):
@@ -53,17 +55,22 @@ def once(base, token, store, crash_after_commit=False):
     task = request(base, 'GET', '/agent/tasks', token)['task']
     if not task:
         return False
-    item = None
-    if task['result'] is not None:
-        result = task['result']
-    else:
-        result, item = render(task, store)
-    if item and crash_after_commit:
-        os._exit(73)  # Integration-test fault: Git committed; completion has not been sent.
-    request(base, 'POST', '/agent/complete', token,
-            {'id': task['id'], 'lease': task['lease'], 'result': result})
-    if item:
-        store.acknowledge(item['operation'])
+    try:
+        request(base, 'POST', '/agent/validate', token, {'id': task['id'], 'lease': task['lease']})
+        item = None
+        if task['result'] is not None:
+            result = task['result']
+        else:
+            result, item = render(task, store)
+        if item and crash_after_commit:
+            os._exit(73)  # Integration-test fault: Git committed; completion has not been sent.
+        request(base, 'POST', '/agent/complete', token,
+                {'id': task['id'], 'lease': task['lease'], 'result': result})
+        if item:
+            store.acknowledge(item['operation'])
+    except Exception as error:
+        report_failure(base, token, task, error)
+        raise
     print('completed document-runtime task=' + task['id'], flush=True)
     return True
 

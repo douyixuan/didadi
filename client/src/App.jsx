@@ -64,7 +64,11 @@ export function Documents({api,room,onSent,mode='read',setMode=()=>{},historyOpe
     let cancelled=false, checking=false;
     async function check(){if(checking)return;checking=true;
       try {const result=await api.task(pending.room,pending.id);
-        if(!cancelled&&result.task?.status==='done'){
+        if(!cancelled&&result.task?.status==='failed'){
+          setPending(null);setBusy(false);lock.current=false;attempt.current=null;
+          const reasons={room_forbidden:'The Agent no longer has access to this room.',delivery_forbidden:'The Agent cannot reply to this room.',attempts_exhausted:'The task reached its retry limit.',room_unavailable:'The room could not be verified.',runtime_error:'The external runtime could not finish the task.'};
+          setError((reasons[result.task.last_error]||'The task stopped before completion.')+' Your draft is kept. Restore access or fix the runtime, then retry.');
+        }else if(!cancelled&&result.task?.status==='done'){
           setPending(null);setBusy(false);lock.current=false;
           const body=result.task.body||'';
           if(body.startsWith('Document conflict:')){setConflict(true);setError('A newer document version exists. Your edits are preserved. Load latest to merge.');}

@@ -72,3 +72,18 @@ describe('editing and navigation regressions',()=>{
     await act(async()=>resolve({event_id:'$one'}));
   });
 });
+
+
+it('unlocks a failed save task and keeps the draft for an explicit new retry',async()=>{
+ const api=fixture();api.task.mockResolvedValue({task:{status:'failed',last_error:'room_forbidden'}});
+ render(<Documents api={api} room="!room" onSent={idle} mode="edit"/>);
+ await screen.findByLabelText('Markdown document');
+ fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# Keep terminal failure draft'}});
+ fireEvent.click(screen.getByRole('button',{name:'Save changes'}));
+ await screen.findByText(/The Agent no longer has access/);
+ expect(screen.getByLabelText('Markdown document')).toHaveValue('# Keep terminal failure draft');
+ expect(screen.getByRole('button',{name:'Save changes'})).toBeEnabled();
+ fireEvent.click(screen.getByRole('button',{name:'Save changes'}));
+ await waitFor(()=>expect(api.send).toHaveBeenCalledTimes(2));
+ expect(api.send.mock.calls[0][2]).not.toBe(api.send.mock.calls[1][2]);
+});
