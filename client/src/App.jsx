@@ -7,6 +7,7 @@ import {readMarkdown} from './readMarkdown';
 import {documentVersion} from './documentReferences';
 import {taskResult} from './taskResult';
 import {downloadMarkdown} from './downloadMarkdown';
+import {draftContext,useLocalDrafts} from './localDrafts';
 import {BookOpen, Search, ChevronDown, ChevronRight, FileText, MessageSquare, Bot, History, Plus, ArrowUp, X, Check, AlertCircle, RefreshCw, Bold, Italic, Heading2, List, Code2} from 'lucide-react';
 const short = value => value?.slice(0,10) || 'not created';
 
@@ -41,7 +42,16 @@ export function Composer({onSend, busyRoom, agentId, replyTo, clearReply, onSent
   </form>;
 }
 
-export function Documents({api,room,onSent,mode='read',setMode=()=>{},historyOpen=false,onCloseHistory=()=>{},onMeta=()=>{},requestedVersion=null,onDiscussVersion=()=>{},canDiscussVersion=false}) {
+export function Documents(props){
+  const context=draftContext(props.api.session,props.room);
+  return <DocumentWorkspace key={context||'unknown'} {...props} localContext={context}/>;
+}
+
+function DocumentWorkspace({localContext,api,room,onSent,mode='read',setMode=()=>{},historyOpen=false,onCloseHistory=()=>{},onMeta=()=>{},requestedVersion=null,onDiscussVersion=()=>{},canDiscussVersion=false}) {
+  const localDrafts=useLocalDrafts(localContext);
+  useEffect(()=>{localDrafts.refresh();},[localContext]);
+  const [draftTransition,setDraftTransition]=useState(false),transitionLock=useRef(false);
+  const [draftBase,setDraftBase]=useState(undefined),recoveryBase=useRef(null);
   const [snapshot,setSnapshot]=useState(null),[draft,setDraft]=useState(''),[history,setHistory]=useState([]);
   const [error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[historical,setHistorical]=useState(false),[readRetry,setReadRetry]=useState(null);
   const [pending,setPending]=useState(null),[conflict,setConflict]=useState(false),[recoveryDraft,setRecoveryDraft]=useState(null);
@@ -58,13 +68,13 @@ export function Documents({api,room,onSent,mode='read',setMode=()=>{},historyOpe
   useEffect(()=>setComposing(false),[mode,editorRevision]);
   const presentation=useMemo(()=>readMarkdown(draft),[draft]);
   const title=snapshot?presentation.title:'demo.md';
-  useEffect(()=>onMeta({title,commit:snapshot?.commit,reading,composing,dirty:Boolean(snapshot&&draft!==(snapshot.content||'')),busy:busy||directUncertain,historical}),[title,draft,snapshot,busy,directUncertain,historical,reading,composing]);
+  useEffect(()=>onMeta({title,commit:snapshot?.commit,reading,composing,dirty:Boolean(snapshot&&draft!==(snapshot.content||'')),busy:busy||directUncertain||draftTransition,historical}),[title,draft,snapshot,busy,directUncertain,draftTransition,historical,reading,composing]);
   const roomRef=useRef(room);roomRef.current=room;
   async function load(commit, preserveDraft=false) {
-    if(directRequest.current)return;
+    if(directRequest.current||transitionLock.current)return;
     const sequence=++loadSequence.current;setReading(true);setError('');setReadRetry(null);setCancelledAction(null);
     try {const [doc,versions]=await Promise.all([api.document(roomRef.current,commit),api.history(roomRef.current)]);
-      if(!mounted.current||sequence!==loadSequence.current)return;if(preserveDraft&&draft!==(snapshot?.content||''))setRecoveryDraft(draft);setSnapshot(doc);setUnresolvedResult(false);setDraft(doc.content||'');setEditorRevision(v=>v+1);setHistory(versions.commits);setHistorical(Boolean(commit));setConflict(false);setNotice('');}
+      if(!mounted.current||sequence!==loadSequence.current)return;if(preserveDraft&&draft!==(snapshot?.content||'')){recoveryBase.current=(draftBase===undefined?snapshot?.blob:draftBase);if(!await localDrafts.checkpoint(draft,recoveryBase.current))throw new Error('Cannot switch versions safely while local draft storage is unavailable. Your current draft is kept; export it before retrying.');if(!mounted.current||sequence!==loadSequence.current)return;setRecoveryDraft(draft);}setDraftBase(undefined);setSnapshot(doc);setUnresolvedResult(false);setDraft(doc.content||'');setEditorRevision(v=>v+1);setHistory(versions.commits);setHistorical(Boolean(commit));setConflict(false);setNotice('');}
     catch(e){if(sequence===loadSequence.current){setError(errorText(e));setReadRetry({commit,preserveDraft})}}
     finally{if(sequence===loadSequence.current)setReading(false);}
   }
@@ -86,25 +96,25 @@ export function Documents({api,room,onSent,mode='read',setMode=()=>{},historyOpe
           if(!outcome){setUnresolvedResult(true);setError('The runtime returned no supported document result. Your draft is kept. Load latest to inspect Git before sending another request.');setReadRetry({preserveDraft:true,unsupportedResult:true});}
           else if(outcome.status==='conflict'){setConflict(true);setError('A newer document version exists. Your edits are preserved. Load latest to merge.');}
           else if(outcome.status==='rejected')setError(lastCommand.current.repository?'Repository request rejected: check the granted file and requested action.':'Document request rejected: check the action, content and version.');
-          else {const saved=outcome.status==='saved';if(saved)setRecoveryDraft(null);await load(undefined,!saved);setNotice(saved?(api.session.synthetic?'Saved in this browser. No Git backend is connected.':'Saved to Git. The Agent posted a version receipt in the room.'):(api.session.synthetic?'Example Agent read the browser snapshot.':'Agent read the Git version. See the room timeline.'));}
+          else {const saved=outcome.status==='saved';if(saved){setRecoveryDraft(null);localDrafts.clear();}await load(undefined,!saved);setNotice(saved?(api.session.synthetic?'Saved in this browser. No Git backend is connected.':'Saved to Git. The Agent posted a version receipt in the room.'):(api.session.synthetic?'Example Agent read the browser snapshot.':'Agent read the Git version. See the room timeline.'));}
         }
       }catch(e){if(!cancelled)setError(errorText(e)+' Waiting to reconnect; your draft is kept.');}
       finally{checking=false;}}
     check();const timer=setInterval(check,1200);return()=>{cancelled=true;clearInterval(timer)};
   },[pending,api]);
   async function saveDirect(retry=false){
-    if(directUncertain&&!retry)return;
+    if(transitionLock.current||(directUncertain&&!retry))return;
     const latest=directRequest.current?.content??(mode==='edit'?(editor.current?.markdown()??draft):draft);
     if(lock.current||reading||unresolvedResult||!snapshot||snapshot.writable===false||composing)return;
     if(new TextEncoder().encode(latest).length>65536){lastCommand.current={action:'write',repository:null};setReadRetry(null);setConflict(false);setError('Document text must contain at most 64 KiB of UTF-8. Your draft is kept.');return;}
     setDraft(latest);lock.current=true;setBusy(true);setError('');setConflict(false);setReadRetry(null);setNotice('');setCancelledAction(null);
-    if(!directRequest.current)directRequest.current={room,content:latest,base_blob:snapshot.blob,operation:crypto.randomUUID()};
+    if(!directRequest.current)directRequest.current={room,content:latest,base_blob:(draftBase===undefined?snapshot.blob:draftBase),operation:crypto.randomUUID()};
     const fixed=directRequest.current;
     lastCommand.current={action:'write',repository:null};
     try{
       const saved=await api.saveDocument(fixed.room,fixed.content,fixed.base_blob,fixed.operation);
       if(saved.status!=='saved'||!taskResult({version:1,status:'saved',path:'demo.md',commit:saved.commit,blob:saved.blob},'write',api.session.synthetic))throw new Error('The document service returned an unknown save result. Retry the same request with your draft kept.');
-      directRequest.current=null;setDirectUncertain(false);setRecoveryDraft(null);
+      directRequest.current=null;setDirectUncertain(false);setRecoveryDraft(null);localDrafts.clear();
       setSnapshot({...snapshot,content:fixed.content,commit:saved.commit,blob:saved.blob});setHistorical(false);
       await load(undefined,false);
       setNotice(api.session.synthetic?'Saved in this browser. No Git backend is connected.':saved.receipt_pending?'Saved to Git. The discussion receipt is pending; Load latest retries delivery.':'Saved directly to Git. A version receipt is available in the workspace discussion.');
@@ -112,13 +122,14 @@ export function Documents({api,room,onSent,mode='read',setMode=()=>{},historyOpe
     finally{setBusy(false);lock.current=false;}
   }
   async function submit(action,repository=null){
+    if(transitionLock.current)return;
     if(action==='write'&&!repository&&api.saveDocument)return saveDirect();
     const latestDraft=mode==='edit'?(editor.current?.markdown()??draft):draft;
     if(action==='write'&&latestDraft.length>6000){setError('Document text must contain at most 6000 characters. Your draft is kept.');return;}
     if(action==='write')setDraft(latestDraft);
     if(lock.current||reading||unresolvedResult||!snapshot||composing||(repository&&action==='report'&&(historical||recoveryDraft!==null||latestDraft!==(snapshot.content||''))))return;lock.current=true;setBusy(true);setError('');setReadRetry(null);setNotice('');setCancelledAction(null);
     lastCommand.current={action,repository};
-    const command=repository?{action,repository:repository.repository,path:repository.path,...(action==='report'?{base_blob:snapshot.blob}:{})}:action==='write'?{action,content:latestDraft,base_blob:snapshot.blob}:{action, ...(historical?{commit:snapshot.commit}:{})};
+    const command=repository?{action,repository:repository.repository,path:repository.path,...(action==='report'?{base_blob:snapshot.blob}:{})}:action==='write'?{action,content:latestDraft,base_blob:(draftBase===undefined?snapshot.blob:draftBase)}:{action, ...(historical?{commit:snapshot.commit}:{})};
     const content={msgtype:'m.text',body:repository?(action==='report'?'Replace demo.md with a deterministic source file report; no LLM.':'Read an explicitly granted source file; no LLM.'):action==='write'?'Save demo.md from workspace':'Read demo.md from Git',
       'm.mentions':{user_ids:[api.session.agentId]},[repository?'org.didadi.repository':'org.didadi.document']:command};
     const key=JSON.stringify([room,content]);if(attempt.current?.key!==key)attempt.current={key,id:crypto.randomUUID()};
@@ -126,33 +137,54 @@ export function Documents({api,room,onSent,mode='read',setMode=()=>{},historyOpe
       setPending({room,id:result.event_id});onSent(result.event_id,true,room);}
     catch(e){setError(errorText(e));setBusy(false);lock.current=false;}
   }
+  function editDraft(value){if(transitionLock.current)return;setDraft(value);localDrafts.persist(value,(draftBase===undefined?snapshot?.blob:draftBase));}
   const dirty=snapshot&&draft!==(snapshot.content||'');
+  async function draftAction(action){
+    if(transitionLock.current||busy||draftTransition||reading||composing||directUncertain)return;
+    transitionLock.current=true;setDraftTransition(true);
+    try{await action();}finally{transitionLock.current=false;if(mounted.current)setDraftTransition(false);}
+  }
+  function restoreLocal(record){if(dirty||recoveryDraft!==null)return;return draftAction(async()=>{if(await localDrafts.restore(record)&&mounted.current){setDraftBase(record.baseBlob);setDraft(record.content);setEditorRevision(v=>v+1);setMode('edit')}});}
+  function restorePrevious(value){if(dirty)return;return draftAction(async()=>{if(await localDrafts.persist(value,recoveryBase.current)&&mounted.current){setDraftBase(recoveryBase.current);setDraft(value);setEditorRevision(v=>v+1);setMode('edit')}});}
+  function discardCurrent(){return draftAction(async()=>{if(await localDrafts.clear()&&mounted.current){setRecoveryDraft(null);setDraftBase(undefined);setDraft(snapshot.content||'');setEditorRevision(v=>v+1)}});}
+
   const bodyMarkdown=presentation.body;
   return <section className="document-surface" aria-label="Git document editor">
     <div className="document-statusbar"><span className={historical?'historical-label':'save-state'}>
       {!snapshot?(error?'Document unavailable':'Loading document…'):reading?'Loading version…':historical?<><History size={14}/> Historical version</>:busy?<><RefreshCw size={14} className="spin"/> {api.saveDocument?'Saving directly to Git…':'Saving through example Agent…'}</>:dirty?'Unsaved changes':<><Check size={14}/> All changes saved</>}</span>
-      <div>{mode==='edit'&&<button className="primary compact" onClick={()=>submit('write')} disabled={busy||reading||composing||unresolvedResult||directUncertain||!snapshot||snapshot.writable===false}>Save changes</button>}</div>
+      <div>{mode==='edit'&&<button className="primary compact" onClick={()=>submit('write')} disabled={busy||draftTransition||reading||composing||unresolvedResult||directUncertain||!snapshot||snapshot.writable===false}>Save changes</button>}</div>
     </div>
     {snapshot?.writable===false&&<p className="quiet-status" role="status">Read-only document. Room power level 50 is required to save.</p>}
     {directUncertain&&<p className="quiet-status" role="status">Editing is paused while this save is uncertain. Retry sends the exact original request. Your draft is kept.</p>}
-    {historical&&<div className="state-banner historical-banner"><History size={17}/><span>You’re viewing an earlier version. Editing it may return a conflict.</span><button disabled={busy||reading||directUncertain} onClick={()=>load(undefined,true)}>Back to latest</button></div>}
+    {historical&&<div className="state-banner historical-banner"><History size={17}/><span>You’re viewing an earlier version. Editing it may return a conflict.</span><button disabled={busy||draftTransition||reading||directUncertain} onClick={()=>load(undefined,true)}>Back to latest</button></div>}
     {error&&<div className="state-banner warning" role="alert"><AlertCircle size={18}/><div><strong>{conflict?'This document has a newer version':'Couldn’t complete the request'}</strong><p>{error}</p></div>{conflict?<button onClick={()=>load(undefined,true)}>Load latest to merge</button>:<button onClick={()=>directUncertain?saveDirect(true):readRetry?load(readRetry.commit,readRetry.preserveDraft):snapshot?submit(lastCommand.current.action,lastCommand.current.repository):load()}>{readRetry?.unsupportedResult?'Load latest':'Retry'}</button>}</div>}
     {cancelledAction&&<div className="state-banner cancelled-banner" role="status"><Check size={18}/><div><strong>Task cancelled</strong><p>The task was cancelled. Your draft is kept. {cancelledAction.action==='write'?'Choose Save changes to start a new save task.':cancelledAction.action==='report'?'Choose Replace document with file report to start a new report task.':cancelledAction.repository?'Choose Read source in discussion to start a new source read task.':'Choose Ask example Agent to read to start a new document read task.'} Cancellation does not undo a change already saved by the runtime.</p></div></div>}
     {notice&&<div className="state-banner success" role="status"><Check size={17}/><span>{notice}</span></div>}
     {pending&&<p className="quiet-status" role="status">Your request is queued. The example runtime will post the result in the room.</p>}
+    {localDrafts.warning&&<p className="quiet-status" role="alert">{localDrafts.warning}</p>}
+    {localDrafts.saved&&!localDrafts.working&&<p className="quiet-status" >Unsaved draft kept on this browser only. Not encrypted; browser storage may be cleared. </p>}
+    {localDrafts.working&&<p className="quiet-status">Updating local recovery… Keep this page open until complete.</p>}
+    {(dirty||recoveryDraft!==null)&&<button disabled={busy||draftTransition||reading||directUncertain||composing||localDrafts.working} onClick={discardCurrent}>Discard current draft</button>}
+    {draftBase!==undefined&&draftBase!==snapshot?.blob&&<p className="quiet-status" role="alert">This draft is based on an older Git version. Saving keeps that base and may conflict. Review and merge the latest text before confirming. <button disabled={busy||draftTransition||reading||directUncertain||composing} onClick={()=>setDraftBase(snapshot.blob)}>I reviewed and merged latest Git text</button></p>}
     <div className="document-scroll">
-      {recoveryDraft!==null&&<PreservedDraft value={recoveryDraft} disabled={busy||reading||composing||directUncertain} onRestore={value=>{if(busy||reading||composing||directUncertain)return;setDraft(value);setEditorRevision(v=>v+1);setMode('edit')}}/>}
+      {snapshot&&localDrafts.records.map(record=><section className="preserved-draft" aria-label="Local draft recovery" key={record.key}>
+        <h2>Unsaved draft found on this browser</h2><p>Git remains the saved version. This local copy is not encrypted or synced. {record.baseBlob!==snapshot.blob?'Git has changed since this draft began. Review and merge the latest text before saving.':'Restore to continue editing; nothing is saved to Git automatically.'}</p>
+        <details><summary>Review local Markdown</summary><pre>{record.content}</pre></details>
+        <button disabled={busy||draftTransition||reading||composing||directUncertain||localDrafts.working||dirty||recoveryDraft!==null} onClick={()=>restoreLocal(record)}>Restore local draft</button>
+        <button disabled={busy||draftTransition||reading||composing||directUncertain} onClick={()=>localDrafts.discard(record)}>Discard local draft</button><button disabled={composing} onClick={()=>downloadMarkdown(record.content)}>Export local draft</button>
+      </section>)}
+      {recoveryDraft!==null&&<PreservedDraft value={recoveryDraft} disabled={busy||draftTransition||reading||composing||directUncertain||localDrafts.working||dirty} onRestore={restorePrevious}/>}
       <div className="document-page">
       {snapshot?<><div className="page-eyebrow"><FileText size={16}/><span>Workspace document · demo.md</span></div>{mode!=='edit'&&<h1 className="document-title">{title}</h1>}
         <div className="page-byline"><span className="tiny-avatar">D</span><span>Shared workspace</span><span className="byline-dot"/><span>{api.session.synthetic?'Browser-only snapshot':'Stored in Git'}</span></div>
-        {mode==='edit'?<><BlockEditor key={editorRevision} ref={editor} value={draft} onChange={setDraft} onComposingChange={setComposing} disabled={busy||reading||directUncertain}/>
-          <div className="editor-foot"><span>{api.saveDocument?`${new TextEncoder().encode(draft).length} / 65536 UTF-8 bytes`:`${draft.length} / 6000 characters`} · Markdown-backed blocks</span><button onClick={()=>load(undefined,true)} disabled={busy||directUncertain}>Load latest</button></div>
+        {mode==='edit'?<><BlockEditor key={editorRevision} ref={editor} value={draft} onChange={editDraft} onComposingChange={setComposing} disabled={busy||draftTransition||reading||directUncertain}/>
+          <div className="editor-foot"><span>{api.saveDocument?`${new TextEncoder().encode(draft).length} / 65536 UTF-8 bytes`:`${draft.length} / 6000 characters`} · Markdown-backed blocks</span><button onClick={()=>load(undefined,true)} disabled={busy||draftTransition||reading||directUncertain}>Load latest</button></div>
         </>:<div className="markdown-body">{presentation.properties&&<details className="document-properties"><summary>Properties · Markdown front matter</summary><pre>{presentation.properties}</pre></details>}{draft?<ReactMarkdown remarkPlugins={[remarkGfm]}>{bodyMarkdown}</ReactMarkdown>:<div className="empty-document"><p>A quiet space for your first document.</p><button className="primary" onClick={()=>setMode('edit')}>Start writing</button></div>}</div>}
-        <div className="document-bottom"><span><BookOpen size={14}/> demo.md</span><button onClick={()=>onDiscussVersion(snapshot.commit)} disabled={busy||reading||!canDiscussVersion} title={canDiscussVersion?'Open the thread containing this version receipt':'No receipt for this version in the loaded discussion'}>View version discussion</button><button title="Download the current Markdown, including unsaved edits" onClick={()=>downloadMarkdown(mode==='edit'?(editor.current?.markdown()??draft):draft)} disabled={busy||reading||composing}>Export Markdown</button><button onClick={()=>submit('read')} disabled={busy||reading||unresolvedResult||directUncertain}>Ask example Agent to read</button></div>
-        {sources.length>0&&<details className="document-properties"><summary>Read-only source repository</summary><p>Explicitly granted files at a fixed Git commit. Deterministic inventory; no LLM analysis.</p><label>Source file <select aria-label="Granted source file" value={source?JSON.stringify([source.repository,source.path,source.commit]):''} onChange={event=>setSourceChoice(event.target.value)} disabled={busy||reading}>{sources.map(item=><option key={JSON.stringify([item.repository,item.path,item.commit])} value={JSON.stringify([item.repository,item.path,item.commit])}>{item.repository} / {item.path}</option>)}</select></label><p>Source commit: <code>{source?.commit}</code></p><div className="document-bottom"><button disabled={busy||reading||composing||unresolvedResult||directUncertain} onClick={()=>submit('read',source)}>Read source in discussion</button><button disabled={busy||reading||composing||unresolvedResult||directUncertain||snapshot.writable===false||dirty||historical||recoveryDraft!==null} onClick={()=>submit('report',source)}>Replace document with file report</button></div>{(dirty||historical||recoveryDraft!==null)&&<p>Resolve and save any preserved draft, then return to the latest version before replacing this document. Earlier Git versions remain available.</p>}</details>}
+        <div className="document-bottom"><span><BookOpen size={14}/> demo.md</span><button onClick={()=>onDiscussVersion(snapshot.commit)} disabled={busy||draftTransition||reading||!canDiscussVersion} title={canDiscussVersion?'Open the thread containing this version receipt':'No receipt for this version in the loaded discussion'}>View version discussion</button><button title="Download the current Markdown, including unsaved edits" onClick={()=>downloadMarkdown(mode==='edit'?(editor.current?.markdown()??draft):draft)} disabled={busy||draftTransition||reading||composing}>Export Markdown</button><button onClick={()=>submit('read')} disabled={busy||draftTransition||reading||unresolvedResult||directUncertain}>Ask example Agent to read</button></div>
+        {sources.length>0&&<details className="document-properties"><summary>Read-only source repository</summary><p>Explicitly granted files at a fixed Git commit. Deterministic inventory; no LLM analysis.</p><label>Source file <select aria-label="Granted source file" value={source?JSON.stringify([source.repository,source.path,source.commit]):''} onChange={event=>setSourceChoice(event.target.value)} disabled={busy||draftTransition||reading}>{sources.map(item=><option key={JSON.stringify([item.repository,item.path,item.commit])} value={JSON.stringify([item.repository,item.path,item.commit])}>{item.repository} / {item.path}</option>)}</select></label><p>Source commit: <code>{source?.commit}</code></p><div className="document-bottom"><button disabled={busy||draftTransition||reading||composing||unresolvedResult||directUncertain} onClick={()=>submit('read',source)}>Read source in discussion</button><button disabled={busy||draftTransition||reading||composing||unresolvedResult||directUncertain||snapshot.writable===false||dirty||historical||recoveryDraft!==null} onClick={()=>submit('report',source)}>Replace document with file report</button></div>{(dirty||historical||recoveryDraft!==null)&&<p>Resolve and save any preserved draft, then return to the latest version before replacing this document. Earlier Git versions remain available.</p>}</details>}
       </>:error?<div className="document-unavailable"><FileText size={30}/><h2>This document is temporarily unavailable</h2><p>Your workspace is still open. Retry above to load the document.</p></div>:<div className="document-skeleton" role="status" aria-label="Loading document"><div/><div/><div/><div/><p>Loading document…</p></div>}
     </div></div>
-    {historyOpen&&<aside className="history-panel" aria-label="Version history"><header><h2>Version history</h2><button aria-label="Close history" onClick={onCloseHistory}><X size={17}/></button></header><p>{api.session.synthetic?'Sample snapshots stored in this browser.':'Every version is a fixed Git snapshot.'}</p>{history.length?history.map((commit,i)=><button className="history-row" key={commit} onClick={()=>load(commit,true)} disabled={busy||reading||directUncertain}><span className="version-dot"/><div><strong>{i===0?'Current version':'Previous version'}</strong><code>{short(commit)}</code></div><ChevronRight size={15}/></button>):<div className="panel-empty">Your first save creates the first version.</div>}</aside>}
+    {historyOpen&&<aside className="history-panel" aria-label="Version history"><header><h2>Version history</h2><button aria-label="Close history" onClick={onCloseHistory}><X size={17}/></button></header><p>{api.session.synthetic?'Sample snapshots stored in this browser.':'Every version is a fixed Git snapshot.'}</p>{history.length?history.map((commit,i)=><button className="history-row" key={commit} onClick={()=>load(commit,true)} disabled={busy||draftTransition||reading||directUncertain}><span className="version-dot"/><div><strong>{i===0?'Current version':'Previous version'}</strong><code>{short(commit)}</code></div><ChevronRight size={15}/></button>):<div className="panel-empty">Your first save creates the first version.</div>}</aside>}
   </section>;
 }
 
@@ -160,7 +192,7 @@ export function Documents({api,room,onSent,mode='read',setMode=()=>{},historyOpe
 export function PreservedDraft({value,onRestore,disabled=false}) {
   const presentation=useMemo(()=>readMarkdown(value),[value]);
   return <section className="preserved-draft" aria-label="Preserved draft recovery">
-    <div className="recovery-heading"><div><h2>Your previous draft is preserved</h2><p>Read the preview, then restore it to merge with the latest version. This draft is kept only in this open page. Restore and export it before reloading or closing. Nothing is saved until you choose Save changes.</p></div><button disabled={disabled} onClick={()=>onRestore(value)}>Restore previous draft</button></div>
+    <div className="recovery-heading"><div><h2>Your previous draft is preserved</h2><p>Read the preview, then restore it to merge with the latest version. Restore it to continue editing. Local recovery status is shown above; export a copy if storage is unavailable. Nothing is saved until you choose Save changes.</p></div><button disabled={disabled} onClick={()=>onRestore(value)}>Restore previous draft</button></div>
     <details className="recovery-preview" open><summary>Draft reading preview</summary><div className="markdown-body"><h3>{presentation.title}</h3><ReactMarkdown remarkPlugins={[remarkGfm]}>{presentation.body}</ReactMarkdown></div></details>
     <details className="recovery-source"><summary>Original Markdown · exact preserved text</summary><p>Markdown escapes and character references are source syntax. Restore keeps this exact text, including spacing and front matter.</p><textarea aria-label="Preserved draft" readOnly value={value}/></details>
   </section>;

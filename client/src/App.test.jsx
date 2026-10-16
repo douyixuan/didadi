@@ -226,8 +226,8 @@ it('retains a preserved draft and blocks report replacement after loading latest
  fireEvent.click(screen.getByRole('button',{name:'Replace document with file report'}));
  expect(api.send).not.toHaveBeenCalled();
  expect(screen.getByLabelText('Preserved draft')).toHaveValue('# Keep my recovered draft');
- fireEvent.click(screen.getByRole('button',{name:'Restore previous draft'}));
- expect(screen.getByLabelText('Markdown document')).toHaveValue('# Keep my recovered draft');
+ await waitFor(()=>expect(screen.getByRole('button',{name:'Restore previous draft'})).toBeEnabled());fireEvent.click(screen.getByRole('button',{name:'Restore previous draft'}));
+ await waitFor(()=>expect(screen.getByLabelText('Markdown document')).toHaveValue('# Keep my recovered draft'));
 });
 
 
@@ -253,7 +253,7 @@ it('treats cancellation as a separate status and starts one explicit new save',a
  fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:source}});
  fireEvent.click(screen.getByRole('button',{name:'Save changes'}));
  await screen.findByText('Task cancelled');
- expect(screen.getByRole('status')).toHaveTextContent('Choose Save changes to start a new save task.');
+ expect(screen.getByText(/Choose Save changes/)).toHaveTextContent('Choose Save changes to start a new save task.');
  expect(screen.queryByRole('alert')).toBeNull();expect(screen.queryByRole('button',{name:'Retry',exact:true})).toBeNull();
  expect(screen.getByLabelText('Markdown document')).toHaveValue(source);
  let resolve;api.send.mockImplementationOnce(()=>new Promise(r=>resolve=r));
@@ -283,24 +283,24 @@ it('previews recovered syntax safely but restores and exports the original bytes
  fireEvent.click(screen.getByRole('button',{name:'Load latest',exact:true}));
  await screen.findByLabelText('Preserved draft recovery');
  const recovery=screen.getByLabelText('Preserved draft recovery');
- expect(recovery).toHaveTextContent('kept only in this open page');
+ expect(recovery).toHaveTextContent('Local recovery status is shown above');
  expect(recovery.closest('.document-scroll')).not.toBeNull();
  expect(recovery.querySelector('.recovery-source')).not.toHaveAttribute('open');
  expect(recovery.querySelector('.recovery-preview')).toHaveAttribute('open');
  expect(recovery.querySelector('.markdown-body')).toHaveTextContent('Keep spacing.');
  expect(recovery.querySelector('script')).toBeNull();
  expect(recovery.querySelector('.recovery-source textarea').value).toBe(preserved);
- fireEvent.click(screen.getByRole('button',{name:'Restore previous draft'}));
- expect(screen.getByLabelText('Markdown document')).toHaveValue(preserved);
+ await waitFor(()=>expect(screen.getByRole('button',{name:'Restore previous draft'})).toBeEnabled());fireEvent.click(screen.getByRole('button',{name:'Restore previous draft'}));
+ await waitFor(()=>expect(screen.getByLabelText('Markdown document')).toHaveValue(preserved));
  fireEvent.click(screen.getByRole('button',{name:'Export Markdown'}));
  expect(downloadMarkdown).toHaveBeenLastCalledWith(preserved);expect(api.send).not.toHaveBeenCalled();
 });
 
 
-it('passes preserved CRLF, Unicode, entities and escapes to restore byte for byte',()=>{
+it('passes preserved CRLF, Unicode, entities and escapes to restore byte for byte',async()=>{
  const source='---\r\nkey: exact\r\n---\r\n# &#x20;草稿\r\n\r\nLiteral &#x20; and \\*escaped\\* spaces.\r\n';
  const restore=vi.fn();render(<PreservedDraft value={source} onRestore={restore}/>);
- fireEvent.click(screen.getByRole('button',{name:'Restore previous draft'}));
+ await waitFor(()=>expect(screen.getByRole('button',{name:'Restore previous draft'})).toBeEnabled());fireEvent.click(screen.getByRole('button',{name:'Restore previous draft'}));
  expect(restore).toHaveBeenCalledWith(source);
  expect(new TextEncoder().encode(restore.mock.calls[0][0])).toEqual(new TextEncoder().encode(source));
 });
@@ -376,7 +376,7 @@ it('keeps a direct-save conflict draft and treats a pending receipt as a success
  fireEvent.click(screen.getByRole('button',{name:'Save changes'}));await screen.findByText('This document has a newer version');
  expect(screen.getByLabelText('Markdown document')).toHaveValue('# Keep direct conflict');
  fireEvent.click(screen.getByRole('button',{name:'Load latest to merge'}));await screen.findByLabelText('Preserved draft');
- fireEvent.click(screen.getByRole('button',{name:'Restore previous draft'}));fireEvent.click(screen.getByRole('button',{name:'Save changes'}));
+ await waitFor(()=>expect(screen.getByRole('button',{name:'Restore previous draft'})).toBeEnabled());fireEvent.click(screen.getByRole('button',{name:'Restore previous draft'}));await waitFor(()=>expect(screen.getByRole('button',{name:'Save changes'})).toBeEnabled());fireEvent.click(screen.getByRole('button',{name:'Save changes'}));
  await screen.findByText(/discussion receipt is pending/);expect(screen.queryByRole('alert')).toBeNull();
  expect(api.send).not.toHaveBeenCalled();
 });
@@ -406,4 +406,102 @@ it('retries the direct save after a local size error instead of repeating the pr
  fireEvent.click(screen.getByRole('button',{name:'Retry',exact:true}));
  await waitFor(()=>expect(api.saveDocument).toHaveBeenCalledTimes(1));
  expect(api.send).toHaveBeenCalledTimes(1);expect(api.saveDocument.mock.calls[0][1]).toBe('# Smaller preserved draft');
+});
+
+describe('local unsaved document recovery',()=>{
+ it('reopens Git first and explicitly restores an exact local draft after remount',async()=>{
+  const api=fixture(),source='---\ntitle: 本地\n---\n# Unsaved\n\\*exact*';
+  const first=render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);await screen.findByLabelText('Markdown document');
+  fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:source}});await screen.findByText(/Unsaved draft kept on this browser only/);first.unmount();
+  render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);await screen.findByLabelText('Local draft recovery');
+  expect(screen.getByLabelText('Markdown document')).toHaveValue(doc.content);expect(api.send).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button',{name:'Restore local draft'}));await waitFor(()=>expect(screen.getByLabelText('Markdown document')).toHaveValue(source));
+  fireEvent.click(screen.getByRole('button',{name:'Export Markdown'}));expect(downloadMarkdown).toHaveBeenLastCalledWith(source);
+ });
+ it('does not restore another user or room when props change',async()=>{
+  const api=fixture();const view=render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);await screen.findByLabelText('Markdown document');
+  fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# Private Alice'}});
+  const bob={...api,session:{...api.session,userId:'@bob:local'}};view.rerender(<Documents api={bob} room="!room" mode="edit" onSent={idle}/>);
+  await waitFor(()=>expect(screen.getByLabelText('Markdown document')).toHaveValue(doc.content));expect(screen.queryByLabelText('Local draft recovery')).not.toBeInTheDocument();
+  view.rerender(<Documents api={api} room="!different" mode="edit" onSent={idle}/>);await waitFor(()=>expect(api.document).toHaveBeenLastCalledWith('!different',undefined));expect(screen.queryByText('# Private Alice')).not.toBeInTheDocument();
+ });
+ it('keeps a conflicting draft across remount and clears restored copies after confirmed save',async()=>{
+  const api=fixture();api.saveDocument=vi.fn().mockRejectedValueOnce(Object.assign(new Error('conflict'),{status:409,data:{status:'conflict'}})).mockResolvedValue({status:'saved',commit:doc.commit,blob:doc.blob});
+  const first=render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);await screen.findByLabelText('Markdown document');
+  fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# Keep after conflict'}});fireEvent.click(screen.getByRole('button',{name:'Save changes'}));await screen.findByText('This document has a newer version');first.unmount();
+  api.document.mockResolvedValue({...doc,blob:'d'.repeat(40),content:'# New Git'});
+  const second=render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);await screen.findByText(/Git has changed since this draft began/);
+  fireEvent.click(screen.getByRole('button',{name:'Restore local draft'}));await waitFor(()=>expect(screen.getByLabelText('Markdown document')).toHaveValue('# Keep after conflict'));fireEvent.click(screen.getByRole('button',{name:'Save changes'}));await screen.findByText(/Saved directly to Git/);expect(api.saveDocument.mock.calls[1][2]).toBe(doc.blob);second.unmount();
+  render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);await screen.findByLabelText('Markdown document');expect(screen.queryByLabelText('Local draft recovery')).not.toBeInTheDocument();
+ });
+ it('discards only a selected recovered draft without changing Git',async()=>{
+  const api=fixture();const first=render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);await screen.findByLabelText('Markdown document');
+  fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# discard me'}});first.unmount();
+  render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);await screen.findByLabelText('Local draft recovery');fireEvent.click(screen.getByRole('button',{name:'Discard local draft'}));
+  await waitFor(()=>expect(screen.queryByLabelText('Local draft recovery')).not.toBeInTheDocument());expect(screen.getByLabelText('Markdown document')).toHaveValue(doc.content);expect(api.send).not.toHaveBeenCalled();
+ });
+ it('keeps editing and export available when storage is denied',async()=>{
+  const api=fixture();const spy=vi.spyOn(Storage.prototype,'setItem').mockImplementation(()=>{throw new DOMException('denied','SecurityError');});
+  try{render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);await screen.findByLabelText('Markdown document');fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# Memory still works'}});
+   await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('Local draft storage is unavailable'));expect(screen.getByLabelText('Markdown document')).toHaveValue('# Memory still works');
+   fireEvent.click(screen.getByRole('button',{name:'Export Markdown'}));expect(downloadMarkdown).toHaveBeenLastCalledWith('# Memory still works');
+  }finally{spy.mockRestore();}
+ });
+});
+
+it('does not replace current edits with an older local draft and supports explicit current discard',async()=>{
+ const api=fixture();const first=render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);await screen.findByLabelText('Markdown document');
+ fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# older local'}});await screen.findByText(/Unsaved draft kept/);first.unmount();
+ render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);await screen.findByLabelText('Local draft recovery');
+ fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# current edits'}});
+ expect(screen.getByRole('button',{name:'Restore local draft'})).toBeDisabled();expect(screen.getByLabelText('Markdown document')).toHaveValue('# current edits');
+ await waitFor(()=>expect(screen.getByRole('button',{name:'Discard current draft'})).toBeEnabled());fireEvent.click(screen.getByRole('button',{name:'Discard current draft'}));
+ await waitFor(()=>expect(screen.getByLabelText('Markdown document')).toHaveValue(doc.content));await waitFor(()=>expect(screen.getByRole('button',{name:'Restore local draft'})).toBeEnabled());
+ fireEvent.click(screen.getByRole('button',{name:'Restore local draft'}));await waitFor(()=>expect(screen.getByLabelText('Markdown document')).toHaveValue('# older local'));
+});
+it('does not replace the editor after failed local recovery and can export the older copy',async()=>{
+ const api=fixture();const first=render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);await screen.findByLabelText('Markdown document');
+ fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# stored before denial'}});await screen.findByText(/Unsaved draft kept/);first.unmount();
+ render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);await screen.findByLabelText('Local draft recovery');
+ const spy=vi.spyOn(Storage.prototype,'setItem').mockImplementation(()=>{throw new DOMException('full','QuotaExceededError');});
+ try{await waitFor(()=>expect(screen.getByRole('button',{name:'Restore local draft'})).toBeEnabled());fireEvent.click(screen.getByRole('button',{name:'Restore local draft'}));await screen.findByText(/Local draft storage is unavailable/);
+  expect(screen.getByLabelText('Markdown document')).toHaveValue(doc.content);fireEvent.click(screen.getByRole('button',{name:'Export local draft'}));expect(downloadMarkdown).toHaveBeenLastCalledWith('# stored before denial');
+ }finally{spy.mockRestore();}
+});
+it('only adopts latest Git as the restored save base after an explicit merge confirmation',async()=>{
+ const api=fixture();const first=render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);await screen.findByLabelText('Markdown document');
+ fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# old local'}});await screen.findByText(/Unsaved draft kept/);first.unmount();
+ const latest='d'.repeat(40);api.document.mockResolvedValue({...doc,blob:latest,content:'# newer Git'});api.saveDocument=vi.fn().mockRejectedValueOnce(Object.assign(new Error('stale'),{status:409,data:{status:'conflict'}})).mockResolvedValue({status:'saved',commit:doc.commit,blob:latest});
+ render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);await screen.findByLabelText('Local draft recovery');await waitFor(()=>expect(screen.getByRole('button',{name:'Restore local draft'})).toBeEnabled());
+ fireEvent.click(screen.getByRole('button',{name:'Restore local draft'}));await waitFor(()=>expect(screen.getByLabelText('Markdown document')).toHaveValue('# old local'));fireEvent.click(screen.getByRole('button',{name:'Save changes'}));await screen.findByText('This document has a newer version');expect(api.saveDocument.mock.calls[0][2]).toBe(doc.blob);
+ fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# merged old local and newer Git'}});fireEvent.click(screen.getByRole('button',{name:'I reviewed and merged latest Git text'}));fireEvent.click(screen.getByRole('button',{name:'Save changes'}));await screen.findByText(/Saved directly to Git/);expect(api.saveDocument.mock.calls[1][2]).toBe(latest);
+});
+
+it('keeps a preserved draft durable while editing the latest Git text',async()=>{
+ const api=fixture();const first=render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);await screen.findByLabelText('Markdown document');
+ fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# older preserved'}});fireEvent.click(screen.getByRole('button',{name:'Load latest',exact:true}));await screen.findByLabelText('Preserved draft');
+ fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# new working copy'}});await screen.findByText(/Unsaved draft kept/);first.unmount();
+ render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);await waitFor(()=>expect(screen.getAllByLabelText('Local draft recovery')).toHaveLength(2));
+ expect(screen.getByText('# older preserved',{selector:'pre'})).toBeInTheDocument();expect(screen.getByText('# new working copy',{selector:'pre'})).toBeInTheDocument();
+});
+it.each(['restore','discard'])('locks only the %s transition while a browser storage lock is queued',async action=>{
+ const api=fixture();const first=render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);await screen.findByLabelText('Markdown document');
+ fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# queued copy'}});await screen.findByText(/Unsaved draft kept/);
+ if(action==='restore'){first.unmount();render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);await screen.findByLabelText('Local draft recovery');await waitFor(()=>expect(screen.getByRole('button',{name:'Restore local draft'})).toBeEnabled());}
+ const original=navigator.locks;let release;const gate=new Promise(resolve=>release=resolve);Object.defineProperty(navigator,'locks',{configurable:true,value:{request:(name,callback)=>gate.then(()=>original.request(name,callback))}});
+ try{fireEvent.click(screen.getByRole('button',{name:action==='restore'?'Restore local draft':'Discard current draft'}));
+  expect(screen.getByLabelText('Markdown document')).toBeDisabled();expect(screen.getByRole('button',{name:'Save changes'})).toBeDisabled();expect(screen.getByRole('button',{name:'Load latest',exact:true})).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# must not enter during transition'}});
+  await act(async()=>release());await waitFor(()=>expect(screen.getByLabelText('Markdown document')).toBeEnabled());
+  expect(screen.getByLabelText('Markdown document')).toHaveValue(action==='restore'?'# queued copy':doc.content);expect(api.send).not.toHaveBeenCalled();
+ }finally{release();Object.defineProperty(navigator,'locks',{configurable:true,value:original});}
+});
+
+it('does not switch away from current edits when checkpoint storage fails',async()=>{
+ const api=fixture();const first=render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);await screen.findByLabelText('Markdown document');
+ fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# durable original'}});await screen.findByText(/Unsaved draft kept/);
+ api.document.mockResolvedValue({...doc,content:'# new Git snapshot'});const spy=vi.spyOn(Storage.prototype,'setItem').mockImplementation(()=>{throw new DOMException('full','QuotaExceededError');});
+ try{fireEvent.click(screen.getByRole('button',{name:'Load latest',exact:true}));await screen.findByText(/Cannot switch versions safely/);expect(screen.getByLabelText('Markdown document')).toHaveValue('# durable original');}
+ finally{spy.mockRestore();}
+ first.unmount();render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);await screen.findByLabelText('Local draft recovery');expect(screen.getByText('# durable original',{selector:'pre'})).toBeInTheDocument();
 });
