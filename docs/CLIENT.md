@@ -2,35 +2,23 @@
 
 This local client milestone depends on the Git document/runtime spike (PR #6) and its gateway dependency (PR #5). It uses React, Vite and **matrix-js-sdk** for real room membership/state, timeline reads, message sends, thread relations and stable outbound transaction IDs. It is not a static screenshot or an LLM UI.
 
-## Run with the existing document demo
+## Start from a fresh checkout or archive
 
-First follow [GIT_DOCUMENTS.md](GIT_DOCUMENTS.md) to start the isolated Matrix stack on `8009/9001` and the document preview/runtime on `8766`. Keep that document runtime running: the React adapter does not start a competing worker.
+Follow [LOCAL_WORKSPACE.md](LOCAL_WORKSPACE.md). The guide creates fresh local test users, a private room, a synthetic read-only source and a separate Git document repository. It installs the runtime dependency, builds the client and starts the scoped Document API with an external WebSocket worker. It does not require another checkout's credentials or processes.
 
-Requires Node 22+ (CI uses 24), Python 3.11+, Git and the existing local test stack:
-
-```sh
-npm ci --prefix client
-npm --prefix client run build
-python3 -m src.client_server --state-file .local/smoke-state.json \
-  --token-file .local/agent-token --repo .local/documents.git \
-  --metadata .local/client.sqlite --port 8767
-```
-
-Open **http://127.0.0.1:8767**. When using another checkout, point the file arguments to the existing document demo's private state/token/bare-repository files. Do not copy credentials into the frontend. This task's preview reuses `../didadi-docs/.local/` and leaves the older `8765/8766` servers and their data running.
-
-The default screen is a document, not a message dashboard. The left sidebar contains the one real granted document and real allowed rooms. Read renders Markdown safely; Edit opens a Milkdown Crepe block editor with direct body editing, slash insertion, task lists, code blocks, drag handles and undo/redo. Save sends a Matrix task and waits for the external example runtime to commit to Git. History opens fixed commit snapshots; a stale edit shows a conflict and preserves the draft until the user explicitly loads the latest version.
+The default screen is a document, not a message dashboard. The left sidebar contains the one real granted document and real allowed rooms. Read renders Markdown safely; Edit opens a Milkdown Crepe block editor with direct body editing, slash insertion, task lists, code blocks, drag handles and undo/redo. Save writes directly through the same-origin Document Service to Git; Matrix receives metadata-only version receipts. Human saves do not require the Agent worker. Explicit source read/report tasks use the external worker and scoped Document API. History opens fixed commit snapshots; a stale edit shows a conflict and preserves the draft until the user explicitly loads the latest version.
 
 Discussion and Example Agent are optional right panels. The example is labeled deterministic echo/no LLM. Room messages, thread replies and task completion are real. Version receipts and task IDs are collapsed in details. No fake multi-document tree, unimplemented sharing buttons, rich collaboration cursors or intelligent edits are shown.
 
-Rooms can be selected or created as private local test rooms using the existing non-admin fixture identity. The managed example Agent is invited through the same verified AS flow. Creation retries use a deterministic alias and a local operation record. Message/save retries reuse Matrix transaction IDs; repeated clicks are gated while pending. Switching rooms keeps unsent chat drafts in memory. All demo rooms intentionally share the single `demo.md` grant; this is labeled in the document context and is not a production room/resource permission model.
+Rooms can be selected or created as private local test rooms using the existing non-admin fixture identity. The managed example Agent is invited through the same verified AS flow. Creation retries use a deterministic alias and a local operation record. Message retries reuse Matrix transaction IDs; direct saves reuse their UUID and original payload; repeated clicks are gated while pending. Switching rooms keeps unsent chat drafts in memory. The single `demo.md` is bound to the seeded workspace room. Selecting another discussion room does not rebind or discard the document draft. Cross-room document access is rejected. This is a development workspace, not a production resource-permission model.
 
 ## Development adapter boundary
 
 `src/client_server.py` binds only to `127.0.0.1`. It accepts only loopback backend URLs and uses the existing fixture user token server-side. The SDK's browser-side `local-development-session` string is a placeholder, not a credential. Matrix, AS and worker tokens never appear in the session response or browser assets.
 
-The adapter exposes an allowlist of joined room state/messages/event/send routes, filters joined rooms to the explicitly seeded/created local rooms, disallows user/token overrides, checks CSRF and Host/Origin, and refuses sends in encrypted rooms. Document task paths/grants cannot be supplied by messages. The gateway independently checks encryption/membership before acceptance and completion. No credentials, account/security settings or public exposure are added. This is a trusted loopback development session, not production authentication or multi-tenant authorization.
+The adapter exposes an allowlist of joined room state/messages/event/send routes, filters joined rooms to the explicitly seeded/created local rooms, disallows user/token overrides, checks CSRF and Host/Origin, and refuses sends in encrypted rooms. Document paths and grants cannot be selected by messages; the service derives task scope from Gateway storage. The gateway independently checks encryption/membership before acceptance and completion. No credentials, account/security settings or public exposure are added. This is a trusted loopback development session, not production authentication or multi-tenant authorization.
 
-Markdown has no raw HTML rendering. React escapes messages, and the adapter serves a same-origin CSP. Static paths cannot leave the build directory. Only the existing deterministic runtime can service document requests. Sending to an invited Agent that has not joined yields a visible retryable error.
+Markdown has no raw HTML rendering. React escapes messages, and the adapter serves a same-origin CSP. Static paths cannot leave the build directory. The direct service owns human saves; the scoped API owns Agent document requests. Sending to an invited Agent that has not joined yields a visible retryable error.
 
 ## Verification and visual states
 
@@ -58,7 +46,7 @@ An anonymous Vercel temporary deployment expires after approximately one hour. I
 
 ## Block editor scope
 
-Milkdown Crepe 7.22.3 uses the MIT license. Its ProseMirror/Remark editing state is transient; saves still send Markdown through the existing Matrix/Agent/Git pipeline. Supported blocks are paragraphs, headings, bullet/ordered/task lists, quotes, GFM tables, code fences and dividers, with ordinary inline Markdown. Block actions duplicate, delete and move top-level blocks; lists move together. Crepe provides native dragging and slash insertion. Reading mode renders GFM tasks without enabling editing.
+Milkdown Crepe 7.22.3 uses the MIT license. Its ProseMirror/Remark editing state is transient; human saves send Markdown to the direct Document Service, while explicit Agent writes use the scoped API. Supported blocks are paragraphs, headings, bullet/ordered/task lists, quotes, GFM tables, code fences and dividers, with ordinary inline Markdown. Block actions duplicate, delete and move top-level blocks; lists move together. Crepe provides native dragging and slash insertion. Reading mode renders GFM tasks without enabling editing.
 
 The editor retains original source for each top-level Markdown block, including separators and CRLF. Unchanged blocks bypass reserialization. Text edits are patched into the original spelling and validated through the editor parser; structural edits also restore unchanged source lines when that result represents the requested editor tree. Tables are editable. HTML, images, references, footnotes and code metadata remain editable **local source blocks**, while ordinary neighboring blocks stay rich text. Inline unsupported syntax currently makes its containing top-level block source-editable; hybrid inline atoms and persistent block IDs are not implemented. Front matter appears in a collapsed Properties panel. HTML is inert text, and image upload stays disabled.
 

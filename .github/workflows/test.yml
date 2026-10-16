@@ -95,15 +95,21 @@ jobs:
         run: |
           npm ci --prefix client
           npm --prefix client run build
-          python3 -m src.client_server --state-file .local/smoke-state.json --token-file .local/agent-token --repo .local/documents.git --metadata .local/client.sqlite --matrix-url http://127.0.0.1:8008 --gateway-url http://127.0.0.1:9000 > .local/client.log 2>&1 &
+          mkdir -p .local/bundle
+          cp .local/agent-token .local/smoke-state.json .local/bundle/
+          python3 -m scripts.create_synthetic_source --matrix-url http://127.0.0.1:8008
+          python3 -m src.agent_document_api --repo .local/documents.git --token-file .local/agent-token --gateway-url http://127.0.0.1:9000 --port 9050 --repository-grants .local/bundle/repository-grants.json > .local/document-api.log 2>&1 &
+          document_pid=$!
+          python3 -m src.client_server --repository-grants .local/bundle/repository-grants.json --state-file .local/smoke-state.json --token-file .local/agent-token --repo .local/documents.git --metadata .local/client.sqlite --matrix-url http://127.0.0.1:8008 --gateway-url http://127.0.0.1:9000 > .local/client.log 2>&1 &
           client_pid=$!
-          python3 -m scripts.document_worker --token-file .local/agent-token --repo .local/documents.git > .local/client-worker.log 2>&1 &
+          python3 -m scripts.document_worker --token-file .local/agent-token --document-url http://127.0.0.1:9050 > .local/client-worker.log 2>&1 &
           worker_pid=$!
-          trap 'kill "$client_pid" "$worker_pid" 2>/dev/null || true' EXIT
+          trap 'kill "$client_pid" "$worker_pid" "$document_pid" 2>/dev/null || true' EXIT
           for attempt in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:8767/api/session > /dev/null; then break; fi
             sleep 1
           done
+          python3 -m scripts.workspace_acceptance --url http://127.0.0.1:8767
           node client/scripts/smoke.mjs
       - name: Diagnostics
         if: failure()
