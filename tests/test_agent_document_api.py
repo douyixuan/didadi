@@ -82,7 +82,8 @@ class AgentDocumentAPITests(unittest.TestCase):
         # Lost client ACK: reconcile only closes an existing Git receipt.
         self.assertEqual(len(self.store.pending()),1);self.client.reconcile()
         self.assertEqual(self.store.pending(),[])
-        left=self.claim('$left',a['outcome']['blob']);right=self.claim('$right',a['outcome']['blob'],command={'action':'write','content':'different right','base_blob':a['outcome']['blob']})
+        # Both competitors must change the base; a no-op leaves the blob unchanged.
+        left=self.claim('$left',command={'action':'write','content':'different left','base_blob':a['outcome']['blob']});right=self.claim('$right',a['outcome']['blob'],command={'action':'write','content':'different right','base_blob':a['outcome']['blob']})
         results=[]
         threads=[threading.Thread(target=lambda task:results.append(self.execute(task)),args=(task,)) for task in (left,right)]
         for thread in threads:thread.start()
