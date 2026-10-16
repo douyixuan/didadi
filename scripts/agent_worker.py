@@ -31,7 +31,7 @@ def once(base, token):
     try:
         result = task['result'] if task['result'] is not None else render(task)
         request(base, 'POST', '/agent/complete', token,
-                {'id': task['id'], 'lease': task['lease'], 'result': result})
+                {'id': task['id'], 'lease': task['lease'], 'result': result, 'outcome': task.get('outcome')})
     except Exception as error:
         report_failure(base, token, task, error)
         raise

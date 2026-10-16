@@ -42,7 +42,7 @@ class RuntimeSocketTests(unittest.TestCase):
             if path == '/agent/tasks': return {'task':self.gateway.claim()}
             if path == '/agent/status': return {'task':self.gateway.status(query['id'])}
             if path == '/agent/validate': return self.gateway.validate(data['id'], data['lease'])
-            if path == '/agent/complete': return self.gateway.complete(data['id'], data['lease'], data['result'])
+            if path == '/agent/complete': return self.gateway.complete(data['id'], data['lease'], data['result'], data.get('outcome'))
             if path == '/agent/fail': return self.gateway.fail(data['id'], data['lease'], data['reason'], retryable=data.get('retryable',False))
             raise AssertionError(path)
         except TaskError as error:

@@ -216,9 +216,6 @@ def handler(workspace, dist, port):
                         workspace.api('GET', '/rooms/' + segment(room) + '/event/' + segment(event_id))
                         result = request(workspace.gateway_url, 'GET', '/agent/status', workspace.token, query={'id': event_id})
                         task = result['task']
-                        if task and task['status'] == 'done':
-                            reply = workspace.api('GET', '/rooms/' + segment(room) + '/event/' + segment(task['reply']))
-                            task['body'] = reply['content'].get('body', '')
                 elif method == 'GET' and not parsed.path.startswith(('/api/', '/matrix/')):
                     path = (dist / unquote(parsed.path).lstrip('/')).resolve()
                     if not path.is_relative_to(dist.resolve()):

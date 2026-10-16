@@ -24,11 +24,11 @@ const text='# Client SDK verification\n\nWritten through the React client adapte
 const document={msgtype:'m.text',body:'Save demo.md from SDK regression','m.mentions':{user_ids:[session.agentId]},'org.didadi.document':{action:'write',content:text,base_blob:original.blob}};
 const saved=await sdk.sendEvent(room,'m.room.message',document,'doc-'+nonce);
 const repeated=await sdk.sendEvent(room,'m.room.message',document,'doc-'+nonce);assert.equal(saved.event_id,repeated.event_id);
-assert.match((await waitTask(saved.event_id)).body,/Saved demo.md/);
+assert.equal((await waitTask(saved.event_id)).outcome.status,'saved');
 const latest=await api('/api/document?room='+encodeURIComponent(room));assert.equal(latest.content,text);
 const historical=await api('/api/document?room='+encodeURIComponent(room)+'&commit='+original.commit);assert.equal(historical.content,original.content);
 const stale=await sdk.sendEvent(room,'m.room.message',{...document,'org.didadi.document':{action:'write',content:'stale SDK request',base_blob:original.blob}},'stale-'+nonce);
-assert.match((await waitTask(stale.event_id)).body,/Document conflict:/);
+assert.equal((await waitTask(stale.event_id)).outcome.status,'conflict');
 assert.equal((await api('/api/document?room='+encodeURIComponent(room))).commit,latest.commit);
 const created=await api('/api/rooms',{name:'Client smoke '+nonce.slice(0,6),operation:nonce});
 assert.equal((await api('/api/rooms',{name:'Client smoke',operation:nonce})).room_id,created.room_id);

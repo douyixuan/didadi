@@ -84,6 +84,8 @@ jobs:
         run: |
           python3 -m pip install -r requirements-runtime.txt
           python3 -m scripts.websocket_smoke --state-file .local/smoke-state.json --token-file .local/agent-token
+      - name: Structured client results with translated external runtime replies
+        run: python3 -m scripts.structured_result_smoke --state-file .local/smoke-state.json --token-file .local/agent-token
       - name: Real React client adapter and Matrix SDK regression
         run: |
           npm ci --prefix client

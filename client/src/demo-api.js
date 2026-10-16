@@ -14,12 +14,12 @@ export function createDemo(storage=localStorage) {
     async task(room,id){return {task:read().tasks[id]}},
     async send(room,content,txn){const s=read(),key=room+':'+txn;if(s.transactions[key])return s.transactions[key];const id='sample-'+crypto.randomUUID(),result={event_id:id};const timeline=s.events[room]||=[];timeline.push({id,sender:session.userId,time:Date.now(),content});
       if(content['m.mentions']?.user_ids?.includes(session.agentId)){
-        const command=content['org.didadi.document'];let body='Browser example Agent received: '+content.body;
+        const command=content['org.didadi.document'];let outcome=null,body='Browser example Agent received: '+content.body;
         if(command?.action==='write'){
-          if(command.base_blob!==s.versions[0].blob)body='Document conflict: a newer browser snapshot exists';
-          else {const version='sample-'+crypto.randomUUID();s.versions.unshift({commit:version,blob:version,content:command.content});body='Saved browser snapshot: '+version;}
-        } else if(command?.action==='read')body='Browser snapshot:\n'+(command.commit?s.versions.find(v=>v.commit===command.commit):s.versions[0])?.content;
-        s.tasks[id]={status:'done',body};timeline.push({id:id+'-reply',sender:session.agentId,time:Date.now(),content:{body,'m.relates_to':{rel_type:'m.thread',event_id:id}}});
+          if(command.base_blob!==s.versions[0].blob){body='Document conflict: a newer browser snapshot exists';outcome={version:1,status:'conflict',reason:'stale_version'};}
+          else {const version='sample-'+crypto.randomUUID();s.versions.unshift({commit:version,blob:version,content:command.content});body='Saved browser snapshot: '+version;outcome={version:1,status:'saved',path:'demo.md',commit:version,blob:version};}
+        } else if(command?.action==='read'){body='Browser snapshot:\n'+(command.commit?s.versions.find(v=>v.commit===command.commit):s.versions[0])?.content;outcome={version:1,status:'read'};}
+        s.tasks[id]={status:'done',body,outcome};timeline.push({id:id+'-reply',sender:session.agentId,time:Date.now(),content:{body,...(outcome?{'org.didadi.task.result':outcome}:{}),'m.relates_to':{rel_type:'m.thread',event_id:id}}});
       }s.transactions[key]=result;write(s);return result;
     }
   };
