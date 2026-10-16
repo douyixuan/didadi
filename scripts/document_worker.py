@@ -7,6 +7,7 @@ from scripts.agent_worker import render as echo
 from scripts.agent_worker import run_loop, report_failure
 from src.gitdocs import Conflict, GitDocs, InvalidPath, PublicationPending
 from src.matrix_http import request
+from src.task_result import outcome
 from src.repository_read import RepositoryDenied, RepositoryReader, report
 
 
@@ -14,7 +15,7 @@ def document_result(item):
     return 'Saved demo.md\nGit commit: ' + item['commit'] + '\nBlob: ' + item['blob']
 
 
-def render(task, store, repositories=None):
+def render_outcome(task, store, repositories=None):
     source = task['event']['content'].get('org.didadi.repository')
     if source is not None:
         try:
@@ -22,24 +23,24 @@ def render(task, store, repositories=None):
                 raise RepositoryDenied('repository_request_rejected')
             snapshot = repositories.read(task['event'], source)
             if source['action'] == 'read':
-                return (report(snapshot) + '\nSource text (untrusted data):\n' + snapshot['content']), None
+                return (report(snapshot) + '\nSource text (untrusted data):\n' + snapshot['content']), None, outcome('read')
             item = store.write('demo.md', report(snapshot), source.get('base_blob'), operation=task['id'],
                                notification={'task_id': task['id'], 'room_id': task['event']['room_id']})
-            return document_result(item), item
+            return document_result(item), item, outcome('saved', path='demo.md', commit=item['commit'], blob=item['blob'])
         except PublicationPending:
             raise
         except Conflict:
-            return 'Document conflict: refresh the Git version and merge your changes. No remote history was overwritten.', None
+            return 'Document conflict: refresh the Git version and merge your changes. No remote history was overwritten.', None, outcome('conflict', reason='stale_version')
         except (ValueError, KeyError, TypeError):
-            return 'Repository request rejected: no matching read grant, file or supported action.', None
+            return 'Repository request rejected: no matching read grant, file or supported action.', None, outcome('rejected', reason='source_not_granted')
     command = task['event']['content'].get('org.didadi.document')
     if not isinstance(command, dict):
-        return echo(task), None
+        return echo(task), None, None
     try:
         if command.get('action') == 'read':
             snapshot = store.snapshot('demo.md', command.get('commit'))
             return ('demo.md at Git commit: ' + str(snapshot['commit']) + '\n\n' +
-                    (snapshot['content'] if snapshot['content'] is not None else '(document has not been created)')[:12000]), None
+                    (snapshot['content'] if snapshot['content'] is not None else '(document has not been created)')[:12000]), None, outcome('read', **({'path':'demo.md','commit':snapshot['commit'],'blob':snapshot['blob']} if snapshot['commit'] else {}))
         if command.get('action') != 'write':
             raise ValueError('unsupported document action')
         content = command['content']
@@ -48,13 +49,19 @@ def render(task, store, repositories=None):
         # The grant is fixed here, not selected by message content. The event ID is the operation ID.
         item = store.write('demo.md', content, command.get('base_blob'), operation=task['id'],
                            notification={'task_id': task['id'], 'room_id': task['event']['room_id']})
-        return document_result(item), item
+        return document_result(item), item, outcome('saved', path='demo.md', commit=item['commit'], blob=item['blob'])
     except PublicationPending:
         raise  # Do not complete/ack a saved but unpublished operation as a stale-write error.
     except Conflict:
-        return 'Document conflict: refresh the Git version and merge your changes. No remote history was overwritten.', None
+        return 'Document conflict: refresh the Git version and merge your changes. No remote history was overwritten.', None, outcome('conflict', reason='stale_version')
     except (ValueError, InvalidPath, KeyError):
-        return 'Document request rejected: invalid action, content or version.', None
+        return 'Document request rejected: invalid action, content or version.', None, outcome('rejected', reason='invalid_request')
+
+
+def render(task, store, repositories=None):
+    """Compatibility wrapper for callers that only need display text and commit."""
+    text, item, _ = render_outcome(task, store, repositories)
+    return text, item
 
 
 def reconcile(base, token, store, transport=None):
@@ -79,12 +86,13 @@ def once(base, token, store, crash_after_commit=False, repositories=None, transp
         item = None
         if task['result'] is not None:
             result = task['result']
+            structured = task.get('outcome')
         else:
-            result, item = render(task, store, repositories)
+            result, item, structured = render_outcome(task, store, repositories)
         if item and crash_after_commit:
             os._exit(73)  # Integration-test fault: Git committed; completion has not been sent.
         send(base, 'POST', '/agent/complete', token,
-                {'id': task['id'], 'lease': task['lease'], 'result': result})
+                {'id': task['id'], 'lease': task['lease'], 'result': result, 'outcome': structured})
         if item:
             store.acknowledge(item['operation'])
     except Exception as error:

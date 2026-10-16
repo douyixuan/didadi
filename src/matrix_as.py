@@ -119,7 +119,7 @@ def make_handler(agent, hs_token, gateway=None, agent_token=None):
                 elif self.path == '/agent/validate':
                     reply = gateway.validate(data['id'], data['lease'])
                 else:
-                    reply = gateway.complete(data['id'], data['lease'], data['result'])
+                    reply = gateway.complete(data['id'], data['lease'], data['result'], data.get('outcome'))
                 self.respond(200, reply)
             except ValueError as error:
                 code = getattr(error, 'code', 'invalid_completion')
