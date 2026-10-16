@@ -1,7 +1,7 @@
 import {$node,$proseAsync} from '@milkdown/kit/utils';
 import {parserCtx,serializerCtx,schemaCtx,ParserReady,SerializerReady} from '@milkdown/kit/core';
 import {Plugin} from '@milkdown/kit/prose/state';
-import {SourceDocument} from './sourceMarkdown';
+import {SourceDocument,frontMatter} from './sourceMarkdown';
 
 // A textblock, not an embedded editor: selection, composition, undo and paste
 // remain ordinary ProseMirror operations. HTML is displayed only as inert text.
@@ -29,7 +29,18 @@ export function sourcePreservation(onDocument=()=>{}){
     ctx.set(parserCtx,value=>document.parse(value));
     ctx.set(serializerCtx,value=>document.serialize(value));
     onDocument(document);
-    return new Plugin({state:{init:()=>null,apply(tr,value,old){document.track(tr,old.doc);return value}},props:{nodeViews:{didadi_source(node){
+    // History reuses immutable content fragments for whole-document replacement.
+    // Keep source metadata with those fragments, including leading/blank text.
+    const sourceSnapshots=new WeakMap();
+    return new Plugin({state:{init:()=>null,apply(tr,value,old){const before=document.documents.get(old.doc);if(before)sourceSnapshots.set(old.doc.content,before);document.track(tr,old.doc);const source=tr.getMeta('didadi-source-paste')||sourceSnapshots.get(tr.doc.content);if(source){document.documents.set(tr.doc,source);sourceSnapshots.set(tr.doc.content,source);}return value}},props:{handleDOMEvents:{paste(view,event){
+      const text=event.clipboardData?.getData('text/plain'),selection=view.state.selection;
+      // Whole-document Markdown paste must use the same parser as Git loads.
+      // Leave partial selection, HTML-only paste and ordinary prose to Crepe.
+      if(!view.editable||typeof text!=='string'||!frontMatter(text)||selection.from>1||selection.to<view.state.doc.content.size-1)return false;
+      const parsed=document.parse(text),info=document.documents.get(parsed);
+      const transaction=view.state.tr.replaceWith(0,view.state.doc.content.size,parsed.content).setMeta('didadi-source-paste',info).setMeta('paste',true).setMeta('uiEvent','paste');
+      view.dispatch(transaction.scrollIntoView());event.preventDefault();return true;
+    }},nodeViews:{didadi_source(node){
       if(node.attrs.kind!=='front matter')return null;
       const dom=documentGlobal('details'),summary=documentGlobal('summary'),pre=documentGlobal('pre'),contentDOM=documentGlobal('code');
       dom.className='source-properties';summary.textContent='Properties · Markdown front matter';summary.contentEditable='false';pre.append(contentDOM);dom.append(summary,pre);
