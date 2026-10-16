@@ -8,7 +8,8 @@ from unittest.mock import Mock, patch
 
 from websockets.exceptions import InvalidStatus
 from websockets.sync.client import connect
-from scripts.document_worker import once, render
+from scripts.document_worker import once
+from src.agent_document_api import render
 from scripts.websocket_worker import SocketTransport, connect_runtime
 from src.gateway import Gateway, TaskError
 from src.gitdocs import GitDocs
@@ -26,6 +27,7 @@ class RuntimeSocketTests(unittest.TestCase):
             'content':{'msgtype':'m.text','body':'fixture','m.mentions':{'user_ids':[AGENT]},
                        'org.didadi.document':{'action':'write','content':'# Socket fixture\n','base_blob':None}}}
         self.store = GitDocs(self.root/'docs.git')
+        self.store._git('config','didadi.documentRoom','!room')
         self.transport_patch = patch('src.runtime_socket.request', side_effect=self.backend)
         self.transport_patch.start(); self.addCleanup(self.transport_patch.stop)
         self.server = bridge('http://127.0.0.1:1', 'fixture-token', 0, wait_seconds=.1)
@@ -42,6 +44,7 @@ class RuntimeSocketTests(unittest.TestCase):
         try:
             if path == '/agent/tasks': return {'task':self.gateway.claim()}
             if path == '/agent/status': return {'task':self.gateway.status(query['id'])}
+            if path == '/agent/document-scope': return self.gateway.document_scope(data['id'], data['lease'])
             if path == '/agent/validate': return self.gateway.validate(data['id'], data['lease'])
             if path == '/agent/complete': return self.gateway.complete(data['id'], data['lease'], data['result'], data.get('outcome'))
             if path == '/agent/fail': return self.gateway.fail(data['id'], data['lease'], data['reason'], retryable=data.get('retryable',False))

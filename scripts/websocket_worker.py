@@ -8,6 +8,7 @@ import time
 
 from websockets.sync.client import connect
 from scripts.document_worker import once
+from src.agent_document_api import DocumentClient
 from src.gitdocs import GitDocs
 from src.matrix_http import MatrixError
 from src.repository_read import RepositoryReader
@@ -53,8 +54,14 @@ def run(url, token, store, repositories=None, *, stop=None):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--url', default='ws://127.0.0.1:9020/runtime')
-    parser.add_argument('--token-file', required=True); parser.add_argument('--repo', required=True)
+    parser.add_argument('--token-file', required=True)
+    group=parser.add_mutually_exclusive_group(required=True)
+    group.add_argument('--repo', help='development cohost compatibility')
+    group.add_argument('--document-url', help='loopback Document API; no Git mount')
     parser.add_argument('--repository-grants')
     args = parser.parse_args()
     reader = RepositoryReader.from_file(args.repository_grants) if args.repository_grants else None
-    run(args.url, Path(args.token_file).read_text().strip(), GitDocs(args.repo), reader)
+    token=Path(args.token_file).read_text().strip()
+    if args.document_url and args.repository_grants: parser.error('configure grants on the Document API')
+    documents=DocumentClient(args.document_url,token) if args.document_url else GitDocs(args.repo)
+    run(args.url,token,documents,reader)

@@ -11,7 +11,7 @@ from src.gateway import Gateway
 from src.matrix_as import AGENT
 from src.matrix_http import MatrixError
 from src.task_result import encode_outcome, outcome
-from scripts.document_worker import render_outcome
+from src.agent_document_api import render_outcome
 from src.gitdocs import GitDocs
 
 

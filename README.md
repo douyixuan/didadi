@@ -25,7 +25,7 @@ See [Matrix quickstart](docs/MATRIX_QUICKSTART.md) for prerequisites, registrati
 See [the document-first React client](docs/CLIENT.md) for a real Matrix/Git workspace with optional discussion and an explicitly labeled example Agent panel. Local preview uses port `8767`; the older demos remain available.
 
 ## Git document loop
-See [Git documents and local editor](docs/GIT_DOCUMENTS.md) for the Matrix → external runtime → Git → thread demo. `src/gitdocs.py` uses a dedicated bare repository, cross-process locks, blob/branch comparisons and a Git-backed notification outbox. It remains a single-host development spike, not a production API.
+See [Git documents and local editor](docs/GIT_DOCUMENTS.md) for the Matrix → external runtime → Git → thread demo. `src/gitdocs.py` uses a dedicated bare repository, cross-process locks, blob/branch comparisons and a Git-backed notification outbox. Agent operations now use a [scoped Document API](artifact/023-scoped-agent-document-api/README.md) that derives writes from authoritative Gateway tasks and owns Git recovery. It remains a single-host development spike, not a production API.
 
 Requirements: Python 3.11+ and Git on PATH.
 

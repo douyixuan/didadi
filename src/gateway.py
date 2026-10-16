@@ -211,6 +211,16 @@ class Gateway:
                 raise TaskError('invalid_lease', retryable=True)
         return {'allowed': True}
 
+    def document_scope(self, task_id, lease):
+        """Return authoritative task context only after current authorization checks."""
+        self.validate(task_id, lease)
+        with self.db() as db:
+            row = db.execute("SELECT * FROM tasks WHERE id=? AND lease=? AND status='pending' AND until > ?",
+                             (task_id,lease,time.time())).fetchone()
+        if row is None: raise TaskError('invalid_lease', retryable=True)
+        return {'task': {'id':row['id'], 'lease':row['lease'], 'event':json.loads(row['event']),
+                         'result':row['result'], 'outcome':json.loads(row['outcome']) if row['outcome'] else None}}
+
     def complete(self, task_id, lease, result, outcome=None):
         encoded_outcome = encode_outcome(outcome)
         if not isinstance(result, str) or not 0 < len(result) <= 16000:

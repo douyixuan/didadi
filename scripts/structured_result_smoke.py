@@ -29,7 +29,7 @@ def main():
     args=parser.parse_args()
     token=Path(args.token_file).read_text().strip()
     if args.worker:
-        import scripts.document_worker as worker
+        import src.agent_document_api as worker
         from scripts.websocket_worker import run
         worker.document_result=lambda item:'已保存；展示文本无需包含英文或 Git hash。'
         run(args.url,token,GitDocs(args.repo))
