@@ -6,6 +6,14 @@ export function createDemo(storage=localStorage) {
   const write=s=>storage.setItem(KEY,JSON.stringify(s));
   const session={synthetic:true,userId:'sample-user',agentId:'sample-agent',initialRoom:'sample-room'};
   return {session,
+    async saveDocument(room,content,base_blob,operation){
+      const s=read(),key='direct:'+operation;
+      if(s.transactions[key]){const prior=s.transactions[key];if(prior.content!==content||prior.base!==base_blob){const error=Error('Operation already used.');error.status=409;error.data={status:'conflict'};throw error;}return prior.result;}
+      if(s.versions[0].blob!==base_blob){const error=Error('A newer snapshot exists.');error.status=409;error.data={status:'conflict'};throw error;}
+      const version='sample-'+crypto.randomUUID(),id='sample-'+crypto.randomUUID();s.versions.unshift({content,commit:version,blob:version});
+      (s.events[room]||=[]).push({id,sender:session.userId,time:Date.now(),content:{body:'Saved browser snapshot','org.didadi.document.commit':{version:1,path:'demo.md',commit:version,blob:version,author:session.userId}}});
+      const result={status:'saved',commit:version,blob:version,receipt:{event_id:id},receipt_pending:false};s.transactions[key]={content,base:base_blob,result};write(s);return result;
+    },
     async rooms(){return read().rooms},
     async timeline(room){return read().events[room]||[]},
     async createRoom(name,operation){const s=read();const key='room:'+operation;if(s.transactions[key])return s.transactions[key];const result={room_id:'sample-'+crypto.randomUUID()};s.rooms.push({id:result.room_id,name,agentJoined:true});s.transactions[key]=result;write(s);return result},

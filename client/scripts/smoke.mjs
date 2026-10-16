@@ -21,14 +21,16 @@ assert.equal(timeline.chunk.filter(event=>event.event_id===one.event_id).length,
 console.log('PASS real matrix-js-sdk room state, send, duplicate transaction and external reply');
 const original=await api('/api/document?room='+encodeURIComponent(room));
 const text='# Client SDK verification\n\nWritten through the React client adapter. '+nonce+'\n';
-const document={msgtype:'m.text',body:'Save demo.md from SDK regression','m.mentions':{user_ids:[session.agentId]},'org.didadi.document':{action:'write',content:text,base_blob:original.blob}};
-const saved=await sdk.sendEvent(room,'m.room.message',document,'doc-'+nonce);
-const repeated=await sdk.sendEvent(room,'m.room.message',document,'doc-'+nonce);assert.equal(saved.event_id,repeated.event_id);
-assert.equal((await waitTask(saved.event_id)).outcome.status,'saved');
+async function saveDocument(content,base_blob,operation){
+ const response=await localFetch(base+'/api/documents/demo.md',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({room,content,base_blob,operation})});
+ const value=await response.json();return {status:response.status,value};
+}
+const operation=crypto.randomUUID();const saved=await saveDocument(text,original.blob,operation);
+assert.equal(saved.status,200);assert.equal(saved.value.status,'saved');
+assert.equal((await saveDocument(text,original.blob,operation)).value.commit,saved.value.commit);
 const latest=await api('/api/document?room='+encodeURIComponent(room));assert.equal(latest.content,text);
 const historical=await api('/api/document?room='+encodeURIComponent(room)+'&commit='+original.commit);assert.equal(historical.content,original.content);
-const stale=await sdk.sendEvent(room,'m.room.message',{...document,'org.didadi.document':{action:'write',content:'stale SDK request',base_blob:original.blob}},'stale-'+nonce);
-assert.equal((await waitTask(stale.event_id)).outcome.status,'conflict');
+const stale=await saveDocument('stale SDK request',original.blob,crypto.randomUUID());assert.equal(stale.status,409);assert.equal(stale.value.status,'conflict');
 assert.equal((await api('/api/document?room='+encodeURIComponent(room))).commit,latest.commit);
 const created=await api('/api/rooms',{name:'Client smoke '+nonce.slice(0,6),operation:nonce});
 assert.equal((await api('/api/rooms',{name:'Client smoke',operation:nonce})).room_id,created.room_id);

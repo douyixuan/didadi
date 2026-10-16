@@ -85,3 +85,7 @@ Real Git receipts require the managed sender identity, task metadata, thread rel
 Open **Agent activity** in the discussion panel. Accepted pending tasks offer **Cancel task**. A cancelled document save keeps the draft and lets you save again as a new task. **View execution history** shows recorded transitions across gateway restarts. These controls are omitted from the browser-only synthetic preview, which has no persistent gateway.
 
 Only the original requester can cancel through this trusted local session. Cancellation stops further cooperative processing; it does not remove existing Git commits or undo external work already under way. The current client is still a local fixture identity, not a production login system.
+
+## Direct human saves
+
+Human edits now use the [Document Service](DIRECT_DOCUMENT_SERVICE.md). They do not require an external worker. Failed requests keep the original payload and UUID; unknown completion pauses editing until the same request can be retried. Core discussion and Agent operations still use Matrix.

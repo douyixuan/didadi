@@ -76,11 +76,11 @@ class GitDocs:
                             'GIT_COMMITTER_NAME': 'Doc Service', 'GIT_COMMITTER_EMAIL': 'docs@localhost'})
         process_env.update(env or {})
         p = subprocess.run(['git', '-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false',
-                            '-C', str(self.root), *args], input=input, text=True,
+                            '-C', str(self.root), *args], input=input.encode('utf-8') if input is not None else None,
                            capture_output=True, timeout=30, env=process_env)
         if check and p.returncode:
-            raise RuntimeError(p.stderr.strip())
-        return p.stdout
+            raise RuntimeError(p.stderr.decode('utf-8', errors='replace').strip())
+        return p.stdout.decode('utf-8')  # Do not normalize CRLF in Markdown blobs.
 
     def _ref(self, ref):
         value = self._git('rev-parse', '--verify', ref, check=False).strip()
@@ -227,15 +227,19 @@ class GitDocs:
                     raise InvalidPath('name collides with existing ' + '/'.join(old[:index + 1]) +
                                       ' on case-insensitive file systems')
 
-    def write(self, name, content, base_blob=None, *, operation=None, notification=None):
+    def write(self, name, content, base_blob=None, *, operation=None, notification=None, author=None):
         self._name(name)
         if not isinstance(content, str) or len(content.encode()) > 65536:
             raise ValueError('content must be text, at most 64 KiB')
         if base_blob is not None and (not isinstance(base_blob, str) or not re.fullmatch(r'[0-9a-f]{40}', base_blob)):
             raise ValueError('invalid base blob')
+        if author is not None and (not isinstance(author, dict) or set(author) != {'name', 'email'} or
+                any(not isinstance(v, str) or not 0 < len(v) <= 512 or any(c in v for c in '\r\n\0<>') for v in author.values())):
+            raise ValueError('invalid commit author')
         operation = operation or os.urandom(24).hex()
         opref = self._operation_ref(operation)
-        request_hash = hashlib.sha256(json.dumps([name, content, base_blob, notification],
+        request_fields = [name, content, base_blob, notification] + ([author] if author is not None else [])
+        request_hash = hashlib.sha256(json.dumps(request_fields,
                                                sort_keys=True).encode()).hexdigest()
         with self._locked():
             previous = self._operation(opref)
@@ -266,7 +270,8 @@ class GitDocs:
             metadata = {'operation': operation, 'name': name, 'request_hash': request_hash,
                         'notification': notification}
             parent = ['-p', head] if head else []
-            revision = self._git('commit-tree', tree, *parent, input=json.dumps(metadata, sort_keys=True)).strip()
+            revision = self._git('commit-tree', tree, *parent, input=json.dumps(metadata, sort_keys=True),
+                env={'GIT_AUTHOR_NAME':author['name'], 'GIT_AUTHOR_EMAIL':author['email']} if author is not None else None).strip()
             # One atomic branch ref is the commit point. The commit message contains the
             # outbox intent, so no multi-ref or Git/SQLite dual-write gap can lose a notification.
             self._git('update-ref', self.branch, revision, head or '0' * 40)

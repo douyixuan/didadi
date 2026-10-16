@@ -12,6 +12,7 @@ import sqlite3
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from src.gitdocs import GitDocs, Conflict
+from src.document_service import DocumentService, DocumentError
 from src.matrix_as import AGENT, PREFIX
 from src.matrix_http import MatrixError, request, segment
 
@@ -32,6 +33,7 @@ class Workspace:
         self.docs, self.metadata = GitDocs(repo), str(metadata)
         self.csrf = secrets.token_urlsafe(32)
         self.user_id = self.api('GET', '/account/whoami')['user_id']
+        self.documents = DocumentService(self.docs, self.api, self.user_id, state['room'])
         self.repository_reads = []
         if repositories is not None:
             for alias, grant in repositories.grants.items():
@@ -130,6 +132,8 @@ class Workspace:
                 not isinstance(repository.get('repository'), str) or not isinstance(repository.get('path'), str) or
                 set(repository) - {'action', 'repository', 'path', 'base_blob'}):
                 raise ClientError(400, 'Invalid repository request. Runtime read grants are required.')
+        if isinstance(repository, dict) and repository.get('action') == 'report':
+            self.documents.authorize(room, write=True)
         if command is not None:
             if not isinstance(command, dict) or command.get('action') not in {'read', 'write'} or mentions != [AGENT]:
                 raise ClientError(400, 'Invalid document request.')
@@ -185,13 +189,15 @@ def handler(workspace, dist, port):
                 body = None
                 if method != 'GET':
                     size = int(self.headers.get('Content-Length', '0'))
-                    if not 0 < size < 100000:
+                    if not 0 < size < 500000:
                         raise ClientError(400, 'Invalid request size.')
                     body = json.loads(self.rfile.read(size))
                 if parsed.path == '/api/session' and method == 'GET':
                     result = {'csrf': workspace.csrf, 'userId': workspace.user_id, 'agentId': AGENT,
-                              'initialRoom': workspace.state['room'], 'qa': getattr(workspace, 'qa', None), 'agentLabel': 'Example echo agent · no LLM',
+                              'initialRoom': workspace.state['room'], 'documentRoom': workspace.state['room'], 'documentSave': 'direct-v1', 'qa': getattr(workspace, 'qa', None), 'agentLabel': 'Example echo agent · no LLM',
                               'repositoryReads': workspace.repository_choices()}
+                elif parsed.path == '/api/documents/demo.md' and method == 'PUT':
+                    result = workspace.documents.save(body)
                 elif parsed.path == '/api/task/cancel' and method == 'POST':
                     result = workspace.cancel_task(body['room'],body['id'])
                 elif parsed.path == '/api/task/audit' and method == 'GET':
@@ -208,8 +214,9 @@ def handler(workspace, dist, port):
                     room = query.get('room', [''])[0]
                     workspace.allowed(room)
                     if parsed.path == '/api/document':
-                        result = workspace.docs.snapshot('demo.md', query.get('commit', [None])[0])
+                        result = workspace.documents.read(room, query.get('commit', [None])[0])
                     elif parsed.path == '/api/history':
+                        workspace.documents.authorize(room)
                         result = {'commits': workspace.docs.history('demo.md')}
                     else:
                         event_id = query.get('id', [''])[0]
@@ -227,6 +234,8 @@ def handler(workspace, dist, port):
                 else:
                     raise ClientError(404, 'Unknown client route.')
                 self.respond(200, result)
+            except DocumentError as error:
+                self.respond(error.status, error.data)
             except ClientError as error:
                 self.respond(error.status, {'error': error.message})
             except (ValueError, KeyError, TypeError):

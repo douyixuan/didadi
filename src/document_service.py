@@ -1,0 +1,92 @@
+"""Direct development document API. Git owns contents, versions and receipt intent."""
+import hashlib
+import re
+import uuid
+
+from src.document_access import document_level, DocumentAccessError
+from src.gitdocs import Conflict, PublicationPending
+from src.matrix_http import MatrixError, segment
+
+
+class DocumentError(Exception):
+    def __init__(self, http_status, message, **data):
+        self.status, self.data = http_status, {'error': message, **data}
+        super().__init__(message)
+
+
+class DocumentService:
+    def __init__(self, store, api, user_id, room):
+        self.store, self.api, self.user_id, self.room = store, api, user_id, room
+        with store._locked():
+            bound = store._git('config', '--get', 'didadi.documentRoom', check=False).strip()
+            if bound and bound != room:
+                raise ValueError('document repository is already bound to another room')
+            if not bound:
+                store._git('config', 'didadi.documentRoom', room)
+
+    def authorize(self, room, write=False):
+        if room != self.room:
+            raise DocumentError(403, 'This document is bound to the workspace room.')
+        try:
+            return document_level(self.api, room, self.user_id, write)
+        except DocumentAccessError as error:
+            raise DocumentError(error.status, error.message) from None
+
+    def read(self, room, commit=None):
+        level = self.authorize(room)
+        # Receipt recovery cannot make an already committed document unreadable.
+        self.deliver_pending()
+        return {**self.store.snapshot('demo.md', commit), 'writable': level >= 50}
+
+    def save(self, data):
+        if not isinstance(data, dict) or set(data) != {'room', 'operation', 'content', 'base_blob'}:
+            raise DocumentError(400, 'Expected room, operation, content and base_blob.')
+        operation, content, base = data['operation'], data['content'], data['base_blob']
+        try:
+            valid_id = isinstance(operation, str) and str(uuid.UUID(operation)) == operation
+            size = len(content.encode('utf-8')) if isinstance(content, str) else -1
+        except (ValueError, UnicodeError):
+            valid_id, size = False, -1
+        if not valid_id or not 0 <= size <= 65536 or (base is not None and
+                (not isinstance(base, str) or not re.fullmatch('[0-9a-f]{40}', base))):
+            raise DocumentError(400, 'Use a UUID operation, a Git base blob and at most 64 KiB of UTF-8 text.')
+        self.authorize(data['room'], write=True)
+        key = 'human-save:' + hashlib.sha256((self.user_id + '\0' + self.room + '\0' + operation).encode()).hexdigest()
+        notice = {'kind': 'document_commit', 'version': 1, 'room_id': self.room, 'author': self.user_id}
+        try:
+            item = self.store.write('demo.md', content, base, operation=key, notification=notice,
+                author={'name': self.user_id, 'email': hashlib.sha256(self.user_id.encode()).hexdigest()[:24] + '@matrix.invalid'})
+        except PublicationPending:
+            raise DocumentError(503, 'Git publication is pending. Keep the draft and retry the same operation.', status='publication_pending') from None
+        except Conflict:
+            raise DocumentError(409, 'A newer version exists or this operation was used for different text. Keep your draft.',
+                                status='conflict', current_blob=self.store.snapshot('demo.md')['blob']) from None
+        try:
+            receipt = self.deliver(item)
+        except (DocumentError, MatrixError, OSError, RuntimeError, Conflict):
+            receipt = None
+        return {'status': 'saved', 'commit': item['commit'], 'blob': item['blob'], 'path': 'demo.md',
+                'author': self.user_id, 'receipt': receipt, 'receipt_pending': receipt is None}
+
+    def deliver(self, item):
+        notice = {'kind': 'document_commit', 'version': 1, 'room_id': self.room, 'author': self.user_id}
+        if item.get('notification') != notice or not item['operation'].startswith('human-save:'):
+            raise DocumentError(403, 'This receipt belongs to another operation.')
+        self.authorize(self.room, write=True)
+        txn = hashlib.sha256(('document-receipt:' + item['operation']).encode()).hexdigest()
+        sent = self.api('PUT', '/rooms/' + segment(self.room) + '/send/m.room.message/' + txn, {
+            'msgtype': 'm.text', 'body': 'Saved demo.md (' + item['commit'][:10] + ')',
+            'org.didadi.document.commit': {'version': 1, 'path': 'demo.md', 'commit': item['commit'],
+                'blob': item['blob'], 'author': self.user_id}})
+        self.store.acknowledge(item['operation'])
+        return sent
+
+    def deliver_pending(self):
+        try:
+            notice = {'kind': 'document_commit', 'version': 1, 'room_id': self.room, 'author': self.user_id}
+            for item in self.store.pending():
+                if item.get('notification') == notice and item['operation'].startswith('human-save:'):
+                    self.deliver(item)
+        except (DocumentError, MatrixError, OSError, RuntimeError, Conflict):
+            # Recovery cannot turn a committed document into a failed save/read.
+            return
