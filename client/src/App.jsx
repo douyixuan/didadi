@@ -96,7 +96,7 @@ export function Documents({api,room,onSent,mode='read',setMode=()=>{},historyOpe
     if(directUncertain&&!retry)return;
     const latest=directRequest.current?.content??(mode==='edit'?(editor.current?.markdown()??draft):draft);
     if(lock.current||reading||unresolvedResult||!snapshot||snapshot.writable===false||composing)return;
-    if(new TextEncoder().encode(latest).length>65536){setError('Document text must contain at most 64 KiB of UTF-8. Your draft is kept.');return;}
+    if(new TextEncoder().encode(latest).length>65536){lastCommand.current={action:'write',repository:null};setReadRetry(null);setConflict(false);setError('Document text must contain at most 64 KiB of UTF-8. Your draft is kept.');return;}
     setDraft(latest);lock.current=true;setBusy(true);setError('');setConflict(false);setReadRetry(null);setNotice('');setCancelledAction(null);
     if(!directRequest.current)directRequest.current={room,content:latest,base_blob:snapshot.blob,operation:crypto.randomUUID()};
     const fixed=directRequest.current;
@@ -160,7 +160,7 @@ export function Documents({api,room,onSent,mode='read',setMode=()=>{},historyOpe
 export function PreservedDraft({value,onRestore,disabled=false}) {
   const presentation=useMemo(()=>readMarkdown(value),[value]);
   return <section className="preserved-draft" aria-label="Preserved draft recovery">
-    <div className="recovery-heading"><div><h2>Your previous draft is preserved</h2><p>Read the preview, then restore it to merge with the latest version. Nothing is saved until you choose Save changes.</p></div><button disabled={disabled} onClick={()=>onRestore(value)}>Restore previous draft</button></div>
+    <div className="recovery-heading"><div><h2>Your previous draft is preserved</h2><p>Read the preview, then restore it to merge with the latest version. This draft is kept only in this open page. Restore and export it before reloading or closing. Nothing is saved until you choose Save changes.</p></div><button disabled={disabled} onClick={()=>onRestore(value)}>Restore previous draft</button></div>
     <details className="recovery-preview" open><summary>Draft reading preview</summary><div className="markdown-body"><h3>{presentation.title}</h3><ReactMarkdown remarkPlugins={[remarkGfm]}>{presentation.body}</ReactMarkdown></div></details>
     <details className="recovery-source"><summary>Original Markdown · exact preserved text</summary><p>Markdown escapes and character references are source syntax. Restore keeps this exact text, including spacing and front matter.</p><textarea aria-label="Preserved draft" readOnly value={value}/></details>
   </section>;
