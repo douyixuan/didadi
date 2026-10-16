@@ -99,7 +99,7 @@ def make_handler(agent, hs_token, gateway=None, agent_token=None):
             return True
 
         def do_POST(self):
-            if self.path not in {'/agent/complete','/agent/fail','/agent/validate','/agent/cancel'}:
+            if self.path not in {'/agent/complete','/agent/fail','/agent/validate','/agent/cancel','/agent/document-scope'}:
                 self.respond(404, {})
                 return
             if not self.agent_auth():
@@ -116,6 +116,9 @@ def make_handler(agent, hs_token, gateway=None, agent_token=None):
                                          retryable=data.get('retryable', False))
                 elif self.path == '/agent/cancel':
                     reply = gateway.cancel(data['id'])
+                elif self.path == '/agent/document-scope':
+                    if set(data) != {'id','lease'}: raise ValueError('invalid scope request')
+                    reply = gateway.document_scope(data['id'], data['lease'])
                 elif self.path == '/agent/validate':
                     reply = gateway.validate(data['id'], data['lease'])
                 else:

@@ -65,3 +65,7 @@ python3 -m scripts.document_smoke --state-file .local/smoke-state.json \
 Stop the preview worker before running the crash smoke against its queue. The smoke sends real Matrix requests, injects process `exit(73)` after commit, waits for the gateway's 60-second lease, then verifies the same commit and recovered thread notification. It also verifies immutable reads and rejection of a stale write. The GitHub integration job runs this after the existing Matrix/restart smoke.
 
 Unit tests additionally cover two independent processes racing one blob, local-remote fast-forward/stale writes, a push race retaining unpublished work, remote rewind rejection, crash-before-push recovery, notification failure/retry, symlink replacement, and receipt reconciliation. Actual results and remaining limits are recorded in [VALIDATION.md](VALIDATION.md).
+
+## Scoped Agent API
+
+The [scoped API increment](../artifact/023-scoped-agent-document-api/README.md) moves Agent reads, writes, source reports and outbox reconciliation into the Document Service. Run the external worker with `--document-url` to avoid giving it a Git repository path. The service requires an explicit room or an existing workspace binding. Requests contain only task ID and lease; the service loads the authoritative event and checks permissions with Gateway. `--repo` remains a cohost development option. Human direct saves retain their separate same-origin API and Git conflict semantics.

@@ -1,110 +1,43 @@
-"""External deterministic document runtime. Only demo.md is granted in this spike."""
+"""External deterministic runtime. Document IO belongs to the scoped Document API."""
 import argparse
 import os
 from pathlib import Path
 
-from scripts.agent_worker import render as echo
 from scripts.agent_worker import run_loop, report_failure
-from src.gitdocs import Conflict, GitDocs, InvalidPath, PublicationPending
+from src.agent_document_api import AgentDocuments, DocumentClient
 from src.matrix_http import request
-from src.task_result import outcome
-from src.repository_read import RepositoryDenied, RepositoryReader, report
 
 
-def document_result(item):
-    return 'Saved demo.md\nGit commit: ' + item['commit'] + '\nBlob: ' + item['blob']
-
-
-def render_outcome(task, store, repositories=None):
-    content = task['event']['content']
-    document, source = content.get('org.didadi.document'), content.get('org.didadi.repository')
-    mutation = (isinstance(document, dict) and document.get('action') == 'write' or
-                isinstance(source, dict) and source.get('action') == 'report')
-    bound = store._git('config', '--get', 'didadi.documentRoom', check=False).strip()
-    if bound and (isinstance(document, dict) or mutation) and task['event'].get('room_id') != bound:
-        return 'Document request rejected: this repository is bound to another room.', None, outcome('rejected', reason='invalid_request')
-    if source is not None:
-        try:
-            if repositories is None or 'org.didadi.document' in task['event']['content']:
-                raise RepositoryDenied('repository_request_rejected')
-            snapshot = repositories.read(task['event'], source)
-            if source['action'] == 'read':
-                return (report(snapshot) + '\nSource text (untrusted data):\n' + snapshot['content']), None, outcome('read')
-            item = store.write('demo.md', report(snapshot), source.get('base_blob'), operation=task['id'],
-                               notification={'task_id': task['id'], 'room_id': task['event']['room_id']})
-            return document_result(item), item, outcome('saved', path='demo.md', commit=item['commit'], blob=item['blob'])
-        except PublicationPending:
-            raise
-        except Conflict:
-            return 'Document conflict: refresh the Git version and merge your changes. No remote history was overwritten.', None, outcome('conflict', reason='stale_version')
-        except (ValueError, KeyError, TypeError):
-            return 'Repository request rejected: no matching read grant, file or supported action.', None, outcome('rejected', reason='source_not_granted')
-    command = task['event']['content'].get('org.didadi.document')
-    if not isinstance(command, dict):
-        return echo(task), None, None
-    try:
-        if command.get('action') == 'read':
-            snapshot = store.snapshot('demo.md', command.get('commit'))
-            return ('demo.md at Git commit: ' + str(snapshot['commit']) + '\n\n' +
-                    (snapshot['content'] if snapshot['content'] is not None else '(document has not been created)')[:12000]), None, outcome('read', **({'path':'demo.md','commit':snapshot['commit'],'blob':snapshot['blob']} if snapshot['commit'] else {}))
-        if command.get('action') != 'write':
-            raise ValueError('unsupported document action')
-        content = command['content']
-        if not isinstance(content, str) or len(content) > 6000:
-            raise ValueError('document too large')
-        # The grant is fixed here, not selected by message content. The event ID is the operation ID.
-        item = store.write('demo.md', content, command.get('base_blob'), operation=task['id'],
-                           notification={'task_id': task['id'], 'room_id': task['event']['room_id']})
-        return document_result(item), item, outcome('saved', path='demo.md', commit=item['commit'], blob=item['blob'])
-    except PublicationPending:
-        raise  # Do not complete/ack a saved but unpublished operation as a stale-write error.
-    except Conflict:
-        return 'Document conflict: refresh the Git version and merge your changes. No remote history was overwritten.', None, outcome('conflict', reason='stale_version')
-    except (ValueError, InvalidPath, KeyError):
-        return 'Document request rejected: invalid action, content or version.', None, outcome('rejected', reason='invalid_request')
-
-
-def render(task, store, repositories=None):
-    """Compatibility wrapper for callers that only need display text and commit."""
-    text, item, _ = render_outcome(task, store, repositories)
-    return text, item
+def service_for(base, token, store, repositories=None, transport=None):
+    if isinstance(store, (AgentDocuments, DocumentClient)):
+        return store
+    # Development compatibility: cohost the same service with existing --repo callers.
+    # This mode is an API boundary, not filesystem/process isolation.
+    send = transport or request
+    return AgentDocuments(store, lambda method,path,data=None,query=None:
+        send(base,method,path,token,data=data,query=query), repositories)
 
 
 def reconcile(base, token, store, transport=None):
-    # A crash after Matrix ACK but before receipt is reconciled without another notification.
-    for item in store.pending():
-        if item.get('notification', {}).get('kind') == 'document_commit':
-            continue  # Owned by the direct Document Service, never by an Agent task.
-        task = (transport or request)(base, 'GET', '/agent/status', token,
-                       query={'id': item['notification']['task_id']})['task']
-        if task and task['status'] == 'done':
-            store.acknowledge(item['operation'])
-        elif task and task['status'] in {'failed','cancelled'}:
-            store.abandon(item['operation'], task.get('last_error') or 'task_failed')
+    return service_for(base,token,store,transport=transport).reconcile()
 
 
 def once(base, token, store, crash_after_commit=False, repositories=None, transport=None):
     send = transport or request
-    reconcile(base, token, store, transport)
+    documents = service_for(base,token,store,repositories,transport)
+    documents.reconcile()
     task = send(base, 'GET', '/agent/tasks', token)['task']
-    if not task:
-        return False
+    if not task: return False
     try:
-        send(base, 'POST', '/agent/validate', token, {'id': task['id'], 'lease': task['lease']})
-        item = None
-        if task['result'] is not None:
-            result = task['result']
-            structured = task.get('outcome')
-        else:
-            result, item, structured = render_outcome(task, store, repositories)
-        if item and crash_after_commit:
-            os._exit(73)  # Integration-test fault: Git committed; completion has not been sent.
+        send(base, 'POST', '/agent/validate', token, {'id':task['id'], 'lease':task['lease']})
+        response = documents.execute({'id':task['id'], 'lease':task['lease']})
+        if response['committed'] and crash_after_commit:
+            os._exit(73)
         send(base, 'POST', '/agent/complete', token,
-                {'id': task['id'], 'lease': task['lease'], 'result': result, 'outcome': structured})
-        if item:
-            store.acknowledge(item['operation'])
+             {'id':task['id'], 'lease':task['lease'], 'result':response['result'], 'outcome':response['outcome']})
+        documents.reconcile()
     except Exception as error:
-        report_failure(base, token, task, error, transport)
+        report_failure(base,token,task,error,transport)
         raise
     print('completed document-runtime task=' + task['id'], flush=True)
     return True
@@ -114,15 +47,20 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--url', default='http://127.0.0.1:9000')
     parser.add_argument('--token-file', required=True)
-    parser.add_argument('--repo', required=True)
-    parser.add_argument('--repository-grants', help='explicit fixed-revision read grants; omitted means deny all')
+    group=parser.add_mutually_exclusive_group(required=True)
+    group.add_argument('--repo', help='development cohost compatibility')
+    group.add_argument('--document-url', help='loopback Document API; runtime needs no Git mount')
+    parser.add_argument('--repository-grants', help='cohost-only explicit read grants')
     parser.add_argument('--once', action='store_true')
-    parser.add_argument('--crash-after-commit', action='store_true', help='integration-test fault injection')
-    args = parser.parse_args()
-    token = Path(args.token_file).read_text().strip()
-    store = GitDocs(args.repo)
-    repositories = RepositoryReader.from_file(args.repository_grants) if args.repository_grants else None
-    if args.once:
-        once(args.url, token, store, args.crash_after_commit, repositories)
+    parser.add_argument('--crash-after-commit', action='store_true')
+    args=parser.parse_args(); token=Path(args.token_file).read_text().strip()
+    if args.document_url:
+        if args.repository_grants: parser.error('configure grants on the Document API')
+        documents=DocumentClient(args.document_url,token); repositories=None
     else:
-        run_loop(lambda: once(args.url, token, store, args.crash_after_commit, repositories), delay=1)
+        from src.gitdocs import GitDocs
+        from src.repository_read import RepositoryReader
+        documents=GitDocs(args.repo)
+        repositories=RepositoryReader.from_file(args.repository_grants) if args.repository_grants else None
+    if args.once: once(args.url,token,documents,args.crash_after_commit,repositories)
+    else: run_loop(lambda: once(args.url,token,documents,args.crash_after_commit,repositories),delay=1)

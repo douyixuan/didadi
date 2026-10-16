@@ -26,6 +26,7 @@ def main():
     serving=threading.Thread(target=server.serve_forever,daemon=True);serving.start()
     with tempfile.TemporaryDirectory(prefix='didadi-websocket-acceptance-') as directory:
         store=GitDocs(Path(directory)/'documents.git')
+        store._git('config','didadi.documentRoom',state['room'])
         worker=threading.Thread(target=run,args=('ws://127.0.0.1:'+str(port)+'/runtime',token,store),
                                 kwargs={'stop':stop},daemon=True);worker.start()
         def send(text,base_blob):

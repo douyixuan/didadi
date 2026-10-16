@@ -50,7 +50,7 @@ def bridge(base, token, port=9020, wait_seconds=20):
                                 return
                     elif method == 'GET' and path == '/agent/status' and data is None and isinstance(query, dict) and set(query) == {'id'} and isinstance(query['id'], str):
                         result = request(base, method, path, token, query=query)
-                    elif method == 'POST' and path in {'/agent/validate', '/agent/complete', '/agent/fail'} and isinstance(data, dict) and query is None:
+                    elif method == 'POST' and path in {'/agent/validate', '/agent/complete', '/agent/fail', '/agent/document-scope'} and isinstance(data, dict) and query is None:
                         result = request(base, method, path, token, data)
                     else:
                         raise ValueError()

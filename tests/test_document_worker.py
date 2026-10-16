@@ -4,7 +4,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from scripts.document_worker import once, reconcile, render
+from scripts.document_worker import once, reconcile
+from src.agent_document_api import render
 from src.gitdocs import GitDocs
 
 
@@ -13,6 +14,7 @@ class DocumentWorkerTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.store = GitDocs(Path(self.tmp.name) / 'docs.git')
+        self.store._git('config','didadi.documentRoom','!room')
         self.task = {'id': '$write', 'lease': 'first', 'result': None, 'event': {
             'room_id': '!room', 'content': {'org.didadi.document': {
                 'action': 'write', 'content': '# demo\n', 'base_blob': None}}}}
@@ -35,6 +37,8 @@ class DocumentWorkerTests(unittest.TestCase):
                 return {'task': self.task}
             if path == '/agent/status':
                 return {'task': {'status': 'done' if done else 'pending'}}
+            if path == '/agent/document-scope':
+                return {'task':self.task}
             if path == '/agent/validate':
                 return {'allowed': True}
             if path == '/agent/fail':
