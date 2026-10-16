@@ -24,3 +24,9 @@ it('reads structured receipts independently of translated prose and never falls 
  typed.content.body=event.content.body;typed.content['org.didadi.task.result'].version=2;
  expect(documentVersion(typed,'@agent')).toBeNull();
 });
+
+it('opens a direct human receipt without a task or English body, but rejects a spoofed author',()=>{
+ const receipt={sender:'@human',content:{body:'版本已保存','org.didadi.document.commit':{version:1,path:'demo.md',commit,blob:'b'.repeat(40),author:'@human'}}};
+ expect(documentVersion(receipt,'@agent',false,'@human')).toBe(commit);
+ expect(documentVersion({...receipt,sender:'@other'},'@agent',false,'@human')).toBeNull();
+});

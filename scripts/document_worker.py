@@ -16,7 +16,13 @@ def document_result(item):
 
 
 def render_outcome(task, store, repositories=None):
-    source = task['event']['content'].get('org.didadi.repository')
+    content = task['event']['content']
+    document, source = content.get('org.didadi.document'), content.get('org.didadi.repository')
+    mutation = (isinstance(document, dict) and document.get('action') == 'write' or
+                isinstance(source, dict) and source.get('action') == 'report')
+    bound = store._git('config', '--get', 'didadi.documentRoom', check=False).strip()
+    if bound and (isinstance(document, dict) or mutation) and task['event'].get('room_id') != bound:
+        return 'Document request rejected: this repository is bound to another room.', None, outcome('rejected', reason='invalid_request')
     if source is not None:
         try:
             if repositories is None or 'org.didadi.document' in task['event']['content']:
@@ -67,6 +73,8 @@ def render(task, store, repositories=None):
 def reconcile(base, token, store, transport=None):
     # A crash after Matrix ACK but before receipt is reconciled without another notification.
     for item in store.pending():
+        if item.get('notification', {}).get('kind') == 'document_commit':
+            continue  # Owned by the direct Document Service, never by an Agent task.
         task = (transport or request)(base, 'GET', '/agent/status', token,
                        query={'id': item['notification']['task_id']})['task']
         if task and task['status'] == 'done':

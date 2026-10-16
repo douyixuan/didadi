@@ -3,19 +3,24 @@
 ## Logical components
 
 ```
-Web / Desktop clients ── Matrix Client API ── Synapse ── PostgreSQL
-         │                                      │
-         └── Platform API ── Agent Gateway ── Matrix Application Service
-                   │               │
-             Git Document     External Agent Runtime(s)
-                 Service
-                   │
-               Git repos
+Web client ── direct save/read ── Document Service ── Git document repository
+    │                                  │
+    │                         metadata commit receipts
+    │                                  ▼
+    └── discussion ── Synapse ── PostgreSQL
+                         │
+                Matrix Application Service / Agent Gateway
+                         │
+                External Agent Runtime(s)
+                         │
+                scoped legacy document/source adapter
 ```
+
 
 ## Ownership
 - Matrix is authoritative for rooms, messaging and membership.
-- Git is authoritative for Markdown content and version history.
+- Git is authoritative for Markdown content and version history. Human saves use the direct Document Service API; Matrix receives version metadata only.
+- The current Document Service is a loopback Python development component. Agent effects still use the compatible scoped adapter. It is not the proposed TypeScript/CRDT service. See `DIRECT_DOCUMENT_SERVICE.md`.
 - Platform metadata DB stores tasks, agent registration, grants, audit and task retry records.
 - The local Git document spike stores document notification intent in commit metadata and notification receipts in local Git refs. See `GIT_DOCUMENTS.md`.
 - Runtime owns model state and execution environment.
