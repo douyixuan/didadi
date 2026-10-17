@@ -576,3 +576,20 @@ it('allows exporting browser recovery drafts when divergence prevents the first 
  render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);await screen.findByText('Git histories need operator reconciliation');await screen.findByLabelText('Local draft recovery');
  expect(screen.getByRole('button',{name:'Restore local draft'})).toBeDisabled();fireEvent.click(screen.getByRole('button',{name:'Export local draft'}));expect(downloadMarkdown).toHaveBeenLastCalledWith('# Preserve across blocked reopen');expect(api.send).not.toHaveBeenCalled();
 });
+
+it('shows task lease/retry/connection observations and clears only a recovered task poll error',async()=>{
+ const api=fixture();let current={status:'pending',phase:'waiting',attempts:0,runtime:{transport:'websocket',state:'unknown'}};let offline=false;
+ api.task=vi.fn(async()=>{if(offline)throw new Error('Task poll offline');return {task:current}});
+ const view=render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);await screen.findByLabelText('Markdown document');
+ vi.useFakeTimers();
+ try{
+  await act(async()=>{fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# Kept while runtime reconnects'}});fireEvent.click(screen.getByRole('button',{name:'Save changes'}));});expect(screen.getByText('Waiting for runtime')).toBeInTheDocument();
+  current={status:'pending',phase:'running',attempts:1,max_attempts:8,lease_expires_at:160,observed_at:100,runtime:{transport:'websocket',state:'connected'}};
+  await act(async()=>vi.advanceTimersByTimeAsync(1300));expect(screen.getByText('In progress · lease held')).toBeInTheDocument();expect(screen.getByText('WebSocket runtime connected.')).toBeInTheDocument();
+  current={...current,phase:'retry_wait',next_retry_at:160,observed_at:161,retry_reason:'lease_expired',runtime:{transport:'websocket',state:'disconnected'}};
+  await act(async()=>vi.advanceTimersByTimeAsync(1300));expect(screen.getByText('Waiting to retry')).toBeInTheDocument();expect(screen.getByText(/previous lease expired/)).toBeInTheDocument();expect(screen.getByText(/WebSocket runtime disconnected/)).toBeInTheDocument();
+  offline=true;await act(async()=>vi.advanceTimersByTimeAsync(1300));expect(screen.getByText('Task status unavailable')).toBeInTheDocument();expect(screen.getByText(/Task poll offline/)).toBeInTheDocument();expect(screen.queryByText(/WebSocket runtime disconnected/)).toBeNull();
+  offline=false;current={...current,phase:'running',attempts:2,runtime:{transport:'websocket',state:'connected'}};
+  await act(async()=>vi.advanceTimersByTimeAsync(1300));expect(screen.getByText('In progress · lease held')).toBeInTheDocument();expect(screen.queryByText(/Task poll offline/)).toBeNull();expect(screen.getByLabelText('Markdown document')).toHaveValue('# Kept while runtime reconnects');expect(api.send).toHaveBeenCalledTimes(1);
+ }finally{view.unmount();vi.useRealTimers()}
+});

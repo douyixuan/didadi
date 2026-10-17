@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 import hashlib
 import json
+import re
 import secrets
 import sqlite3
 import time
@@ -20,14 +21,17 @@ class TaskError(ValueError):
 
 
 class Gateway:
-    def __init__(self, path, agent, *, max_attempts=8, lease_seconds=60, retry_seconds=2):
-        if max_attempts < 1 or lease_seconds <= 0 or retry_seconds < 0:
+    def __init__(self, path, agent, *, max_attempts=8, lease_seconds=60, retry_seconds=2, runtime_ttl_seconds=45):
+        if max_attempts < 1 or lease_seconds <= 0 or retry_seconds < 0 or runtime_ttl_seconds <= 0:
             raise ValueError('invalid retry policy')
         self.path, self.agent = str(path), agent
         self.max_attempts, self.lease_seconds, self.retry_seconds = max_attempts, lease_seconds, retry_seconds
+        self.runtime_ttl_seconds = runtime_ttl_seconds
         with self.db() as db:
             db.executescript('''
                 CREATE TABLE IF NOT EXISTS transactions (id TEXT PRIMARY KEY);
+                CREATE TABLE IF NOT EXISTS runtime_sessions (
+                    session TEXT PRIMARY KEY, seen REAL NOT NULL, closed INTEGER NOT NULL);
                 CREATE TABLE IF NOT EXISTS task_events (sequence INTEGER PRIMARY KEY AUTOINCREMENT,
                     task_id TEXT NOT NULL, action TEXT NOT NULL, at REAL NOT NULL, attempt INTEGER NOT NULL, reason TEXT);
                 CREATE INDEX IF NOT EXISTS task_event_lookup ON task_events(task_id,sequence);
@@ -38,7 +42,7 @@ class Gateway:
             db.execute('BEGIN IMMEDIATE')
             columns = {row['name'] for row in db.execute('PRAGMA table_info(tasks)')}
             for name, definition in [('attempts', 'INTEGER NOT NULL DEFAULT 0'),
-                                     ('last_error', 'TEXT'), ('outcome', 'TEXT'), ('available', 'REAL NOT NULL DEFAULT 0')]:
+                                     ('last_error', 'TEXT'), ('outcome', 'TEXT'), ('available', 'REAL NOT NULL DEFAULT 0'), ('claimed_at', 'REAL')]:
                 if name not in columns:
                     db.execute(f'ALTER TABLE tasks ADD COLUMN {name} {definition}')
 
@@ -114,13 +118,52 @@ class Gateway:
                 if inserted:self._record(db,event['event_id'],'accepted',reason=status)
             db.execute('INSERT OR IGNORE INTO transactions VALUES (?)', (txn,))
 
+    def runtime_update(self, data):
+        if (not isinstance(data, dict) or set(data) != {'session', 'connected'} or
+                not isinstance(data['session'], str) or not re.fullmatch('[0-9a-f]{48}', data['session']) or
+                type(data['connected']) is not bool):
+            raise ValueError('invalid runtime observation')
+        now = time.time()
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            # A closed connection is a tombstone: late heartbeats cannot revive it.
+            db.execute('INSERT INTO runtime_sessions(session,seen,closed) VALUES (?,?,?) '
+                       'ON CONFLICT(session) DO UPDATE SET seen=excluded.seen,closed=excluded.closed '
+                       'WHERE runtime_sessions.closed=0',
+                       (data['session'], now, int(not data['connected'])))
+            db.execute('DELETE FROM runtime_sessions WHERE seen < ?', (now-86400,))
+        return {'observed': True}
+
+    def _runtime_status(self, db, now):
+        row = db.execute('SELECT MAX(seen) AS seen, '
+            'SUM(CASE WHEN closed=0 AND seen>=? THEN 1 ELSE 0 END) AS active, '
+            'SUM(CASE WHEN closed=0 THEN 1 ELSE 0 END) AS open FROM runtime_sessions',
+            (now-self.runtime_ttl_seconds,)).fetchone()
+        state = 'connected' if row['active'] else 'unknown' if (row['open'] or row['seen'] is None or row['seen'] < now-self.runtime_ttl_seconds) else 'disconnected'
+        return {'transport':'websocket', 'state':state, 'last_observed_at':row['seen'],
+                'observed_at':now, 'ttl_seconds':self.runtime_ttl_seconds}
+
     def status(self, task_id):
         with self.db() as db:
-            row = db.execute('SELECT status,reply,attempts,last_error,outcome,result AS body FROM tasks WHERE id=?', (task_id,)).fetchone()
+            row = db.execute('SELECT status,reply,attempts,last_error,outcome,result AS body, '
+                             'lease,until,available,claimed_at FROM tasks WHERE id=?', (task_id,)).fetchone()
             if row is None:return None
-            result = dict(row)
+            now = time.time()
+            result = {key:row[key] for key in ('status','reply','attempts','last_error','body')}
             if row['status'] != 'done':result['body'] = None
             result['outcome'] = json.loads(row['outcome']) if row['status'] == 'done' and row['outcome'] else None
+            terminal = row['status'] in {'done','failed','cancelled'}
+            live = bool(row['lease'] and row['until'] > now)
+            phase = row['status'] if terminal else (
+                'running' if live and row['claimed_at'] is not None and row['claimed_at']>=0 else
+                'verifying' if live or row['status']=='unverified' else
+                'retry_wait' if row['attempts'] else 'waiting')
+            result.update(phase=phase, verification_reason=('legacy_lease_unconfirmed' if live and row['claimed_at'] is None else 'checking_access') if phase=='verifying' else None, max_attempts=self.max_attempts, observed_at=now,
+                          lease_expires_at=row['until'] if live and not terminal else None,
+                          next_retry_at=max(row['until'],row['available']) if phase=='retry_wait' else None,
+                          retry_reason=('lease_expired' if row['lease'] else row['last_error']) if phase=='retry_wait' else None,
+                          retry_limit_reached=phase=='retry_wait' and row['attempts']>=self.max_attempts,
+                          runtime=self._runtime_status(db,now))
             return result
 
     def claim(self):
@@ -142,7 +185,7 @@ class Gateway:
                     self._record(db,task_id,'failed',row['attempts'],'attempts_exhausted')
                     continue
                 lease = secrets.token_hex(24)
-                db.execute('UPDATE tasks SET lease=?,until=?,attempts=attempts+1 WHERE id=?',
+                db.execute('UPDATE tasks SET lease=?,until=?,attempts=attempts+1,claimed_at=-1 WHERE id=?',
                            (lease, time.time() + min(300, self.lease_seconds * 2 ** min(row['attempts'], 8)), task_id))
             event = json.loads(row['event'])
             try:
@@ -155,7 +198,7 @@ class Gateway:
                 continue
             with self.db() as db:
                 db.execute('BEGIN IMMEDIATE')
-                updated = db.execute("UPDATE tasks SET status='pending' WHERE id=? AND lease=? AND status IN ('pending','unverified') AND until > ?", (task_id, lease, time.time())).rowcount
+                updated = db.execute("UPDATE tasks SET status='pending',claimed_at=? WHERE id=? AND lease=? AND status IN ('pending','unverified') AND until > ?", (time.time(), task_id, lease, time.time())).rowcount
                 if not updated:
                     continue
                 self._record(db,task_id,'leased',row['attempts']+1)
