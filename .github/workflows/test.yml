@@ -95,6 +95,8 @@ jobs:
         run: python3 -m scripts.agent_document_api_smoke --state-file .local/smoke-state.json --token-file .local/agent-token
       - name: Metadata-only Matrix tasks and scoped Agent body IO
         run: python3 -m scripts.agent_body_api_smoke --state-file .local/smoke-state.json --token-file .local/agent-token
+      - name: Runtime stop restart and task visibility
+        run: python3 -m scripts.task_visibility_smoke --state-file .local/smoke-state.json --token-file .local/agent-token
       - name: Structured client results with translated external runtime replies
         run: python3 -m scripts.structured_result_smoke --state-file .local/smoke-state.json --token-file .local/agent-token
       - name: Real React client adapter and Matrix SDK regression
