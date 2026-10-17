@@ -104,7 +104,7 @@ class AgentDocumentAPITests(unittest.TestCase):
                 if calls==2: response['task']['result']='already fixed';response['task']['outcome']=None
             return response
         self.service.gateway=gateway
-        self.assertEqual(self.execute(task)['result'],'already fixed')
+        self.assertEqual(self.execute(task)['result'],'Document task completed. Inspect the authorized Document API for its current version.')
         self.assertEqual(self.store.history('demo.md'),[])
 
     def test_unbound_repository_is_not_bound_by_a_task(self):
@@ -123,3 +123,72 @@ class AgentDocumentAPITests(unittest.TestCase):
         self.assertEqual(self.execute(task)['outcome']['status'],'rejected')
         with self.assertRaises(MatrixError):self.client.execute({'id':task['id'],'lease':task['lease'],'report':'forged'})
         self.assertEqual(self.store.history('demo.md'),[])
+
+    def test_metadata_task_write_body_over_http_not_matrix_and_idempotency(self):
+        task=self.claim('$http-write',command={'action':'write','base_blob':None})
+        text='# PRIVATE document body\r\n'+'中'*10000
+        data={'id':task['id'],'lease':task['lease'],'content':text}
+        response=self.client.write(data)
+        self.assertEqual(response['outcome']['status'],'saved');self.assertNotIn(text,response['result'])
+        self.assertEqual(self.store.read('demo.md'),text);self.assertNotIn('content',task['event']['content']['org.didadi.document'])
+        self.assertEqual(self.client.write(data)['outcome'],response['outcome']);self.assertEqual(len(self.store.history('demo.md')),1)
+        changed=self.client.write({**data,'content':'changed'})
+        self.assertEqual(changed['outcome']['status'],'conflict');self.assertEqual(self.store.read('demo.md'),text)
+        for extra in ({'path':'other.md'},{'base_blob':None},{'room':'!other'}):
+            with self.assertRaises(MatrixError):self.client.write({**data,**extra})
+
+    def test_read_resource_is_http_only_and_fixed_version_recovers_after_result_delivery_failure(self):
+        seed=self.store.write('demo.md','# HTTP ONLY CONTENT\n')
+        task=self.claim('$read',command={'action':'read'})
+        response=self.execute(task);self.assertEqual(response['resource']['content'],'# HTTP ONLY CONTENT\n');self.assertNotIn('HTTP ONLY CONTENT',response['result'])
+        with self.gateway.db() as db:
+            import json
+            db.execute('UPDATE tasks SET result=?,outcome=? WHERE id=?',('OLD UNSAFE BODY',json.dumps(response['outcome'],sort_keys=True,separators=(',',':')),task['id']))
+        self.store.write('demo.md','# New version',seed['blob'])
+        replay=self.execute(task);self.assertEqual(replay['resource']['content'],'# HTTP ONLY CONTENT\n');self.assertEqual(replay['resource']['commit'],seed['commit']);self.assertNotIn('OLD UNSAFE BODY',replay['result'])
+        self.assertEqual(self.client.write({'id':task['id'],'lease':task['lease'],'content':'forged'})['outcome']['status'],'rejected')
+
+    def test_read_resource_is_not_returned_after_cancellation_during_git_read(self):
+        self.store.write('demo.md','private')
+        task=self.claim('$read-cancel',command={'action':'read'});original=self.store.snapshot
+        def snapshot(*args,**kw):
+            result=original(*args,**kw);self.gateway.cancel(task['id']);return result
+        from unittest.mock import patch
+        with patch.object(self.store,'snapshot',side_effect=snapshot),self.assertRaises(MatrixError):self.execute(task)
+
+    def test_source_resource_body_and_metadata_reference_use_only_current_grant(self):
+        from src.repository_read import RepositoryReader
+        import subprocess
+        source=self.root/'source';source.mkdir();subprocess.run(['git','init','-q',str(source)],check=True)
+        (source/'example.py').write_text('UNTRUSTED SOURCE BODY\n')
+        subprocess.run(['git','-C',str(source),'add','.'],check=True)
+        subprocess.run(['git','-C',str(source),'-c','user.name=Fixture','-c','user.email=test@local','commit','-qm','fixture'],check=True)
+        commit=subprocess.check_output(['git','-C',str(source),'rev-parse','HEAD']).decode().strip()
+        self.service.repositories=RepositoryReader({'repositories':{'fixture':{'path':str(source),'commit':commit,'rooms':['!room'],'senders':['@human'],'files':['example.py']}}})
+        task=self.claim('$source');event=task['event'];event['content'].pop('org.didadi.document');event['content']['org.didadi.repository']={'action':'read','repository':'fixture','path':'example.py'}
+        with self.gateway.db() as db:
+            import json
+            db.execute('UPDATE tasks SET event=? WHERE id=?',(json.dumps(event),task['id']))
+        result=self.execute(task);self.assertEqual(result['resource']['content'],'UNTRUSTED SOURCE BODY\n');self.assertEqual(result['outcome']['resource']['commit'],commit);self.assertNotIn('UNTRUSTED SOURCE BODY',result['result'])
+        self.service.repositories=None
+        self.assertEqual(self.execute(task)['outcome']['status'],'rejected')
+
+    def test_fixed_write_replay_validates_original_content_after_delivery_failure_and_release(self):
+        task=self.claim('$fixed-http-write',command={'action':'write','base_blob':None})
+        data={'id':task['id'],'lease':task['lease'],'content':'original private body'}
+        saved=self.client.write(data)
+        original=self.gateway.agent.api.side_effect
+        def offline(method,path,data=None):
+            if method=='PUT':raise OSError('offline')
+            return original(method,path,data)
+        self.gateway.agent.api.side_effect=offline
+        with self.assertRaises(OSError):self.gateway.complete(task['id'],task['lease'],saved['result'],saved['outcome'])
+        self.gateway.agent.api.side_effect=original
+        with self.assertRaises(MatrixError) as error:self.client.write({**data,'content':'changed'})
+        self.assertEqual(error.exception.status,409)
+        with self.gateway.db() as db:db.execute('UPDATE tasks SET until=0')
+        retry=self.gateway.claim();data['lease']=retry['lease']
+        self.assertEqual(self.client.write(data)['outcome'],saved['outcome'])
+        with self.assertRaises(MatrixError):self.client.write({**data,'content':'changed again'})
+        self.assertEqual(self.store.read('demo.md'),'original private body')
+        self.assertEqual(len(self.store.history('demo.md')),1)

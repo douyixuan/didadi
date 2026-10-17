@@ -10,7 +10,7 @@ from src.matrix_as import AGENT
 from src.matrix_http import MatrixError, segment
 from src.room_access import allowed
 from src.document_access import document_level, DocumentAccessError
-from src.task_result import encode_outcome
+from src.task_result import encode_outcome, metadata_result
 
 
 class TaskError(ValueError):
@@ -233,6 +233,14 @@ class Gateway:
                 raise TaskError('task_cancelled')
             if row is None or not secrets.compare_digest(row['lease'] or '', lease):
                 raise TaskError('invalid_lease', retryable=True)
+            event=json.loads(row['event'])
+            canonical=metadata_result(event,outcome)
+            if canonical is not None:
+                result=canonical
+                # Preserve the fixed typed outcome; only retire unsafe display text.
+                if row['result'] is not None and row['outcome']==encoded_outcome:
+                    db.execute('UPDATE tasks SET result=? WHERE id=?',(canonical,task_id))
+                    row=dict(row);row['result']=canonical
             if row['status'] == 'done':
                 if row['result'] != result or row['outcome'] != encoded_outcome:
                     raise ValueError('result already fixed')

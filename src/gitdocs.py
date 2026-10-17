@@ -163,7 +163,7 @@ class GitDocs:
             return
         self._git('update-ref', self.branch, fetched, local or '0' * 40)
 
-    def snapshot(self, name, commit=None):
+    def snapshot(self, name, commit=None, *, max_bytes=None):
         self._name(name)
         if commit is not None and (not isinstance(commit, str) or not re.fullmatch(r'[0-9a-f]{40}', commit)):
             raise ValueError('fixed commit SHA required')
@@ -174,6 +174,8 @@ class GitDocs:
                 raise ValueError('unknown commit')
             revision = commit or self._ref(self.branch)
             blob = self._version(name, revision)
+            if blob and max_bytes is not None and int(self._git('cat-file','-s',blob).strip())>max_bytes:
+                raise ValueError('document read exceeds permitted size')
             content = self._git('cat-file', 'blob', blob) if blob else None
             return {'name': name, 'content': content, 'blob': blob, 'commit': revision}
 
