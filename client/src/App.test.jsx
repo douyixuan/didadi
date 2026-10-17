@@ -529,3 +529,26 @@ it('keeps unrelated failed room creation visible when background polling recover
   await act(async()=>intervals.get(2000)());await waitFor(()=>expect(screen.queryByText(/Room list is reconnecting/)).not.toBeInTheDocument());expect(screen.getByText('Room creation denied')).toBeInTheDocument();
  }finally{timer.mockRestore();}
 });
+
+it('uses committed merged text when refresh fails so a later save cannot erase another writer',async()=>{
+ const api=fixture(),merged='# Team handbook\n\nAlice and Bob changes.';api.saveDocument=vi.fn().mockImplementationOnce(async()=>{
+  api.document.mockRejectedValueOnce(new Error('Latest refresh failed'));return {status:'saved',merged:true,content:merged,commit:'d'.repeat(40),blob:'e'.repeat(40)};
+ }).mockImplementation(async(_room,content)=>{api.document.mockResolvedValue({...doc,content,blob:'f'.repeat(40)});return {status:'saved',commit:doc.commit,blob:'f'.repeat(40)};});
+ render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);await screen.findByLabelText('Markdown document');fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# Only my submitted text'}});
+ fireEvent.click(screen.getByRole('button',{name:'Save changes'}));await screen.findByText(/Merged non-overlapping edits/);expect(screen.getByLabelText('Markdown document')).toHaveValue(merged);
+ fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:merged+'\nNext edit.'}});fireEvent.click(screen.getByRole('button',{name:'Save changes'}));await waitFor(()=>expect(api.saveDocument).toHaveBeenCalledTimes(2));
+ expect(api.saveDocument.mock.calls[1][1]).toContain('Alice and Bob');expect(api.saveDocument.mock.calls[1][2]).toBe('e'.repeat(40));
+});
+it('shows overlapping conflict details without inserting conflict markers into the draft',async()=>{
+ const api=fixture();api.saveDocument=vi.fn().mockRejectedValue(Object.assign(new Error('overlap'),{status:409,data:{status:'conflict',conflict_markdown:'<<<<<<< submitted\nMine\n=======\nTheirs\n>>>>>>> latest'}}));
+ render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);await screen.findByLabelText('Markdown document');fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# My draft'}});fireEvent.click(screen.getByRole('button',{name:'Save changes'}));
+ await screen.findByLabelText('Conflicting changes');expect(screen.getByLabelText('Conflicting changes')).toHaveAttribute('readonly');expect(screen.getByLabelText('Markdown document')).toHaveValue('# My draft');
+ fireEvent.click(screen.getByRole('button',{name:'Load latest to merge'}));await screen.findByLabelText('Preserved draft');expect(screen.queryByLabelText('Conflicting changes')).not.toBeInTheDocument();
+});
+
+it('keeps an incomplete merged receipt uncertain rather than pairing submitted text with the new blob',async()=>{
+ const api=fixture();api.saveDocument=vi.fn().mockResolvedValue({status:'saved',merged:true,commit:'d'.repeat(40),blob:'e'.repeat(40)});
+ render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);await screen.findByLabelText('Markdown document');fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# original request'}});fireEvent.click(screen.getByRole('button',{name:'Save changes'}));
+ await screen.findByText(/Merged save result is incomplete/);expect(screen.getByLabelText('Markdown document')).toHaveValue('# original request');expect(screen.getByLabelText('Markdown document')).toBeDisabled();
+ fireEvent.click(screen.getByRole('button',{name:'Retry',exact:true}));await waitFor(()=>expect(api.saveDocument).toHaveBeenCalledTimes(2));expect(api.saveDocument.mock.calls[1]).toEqual(api.saveDocument.mock.calls[0]);
+});

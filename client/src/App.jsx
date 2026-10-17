@@ -55,7 +55,7 @@ function DocumentWorkspace({localContext,api,room,onSent,mode='read',setMode=()=
   const [snapshot,setSnapshot]=useState(null),[draft,setDraft]=useState(''),[history,setHistory]=useState([]);
   const [error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[historical,setHistorical]=useState(false),[readRetry,setReadRetry]=useState(null);
   const [pending,setPending]=useState(null),[conflict,setConflict]=useState(false),[recoveryDraft,setRecoveryDraft]=useState(null);
-  const [sourceChoice,setSourceChoice]=useState('');
+  const [sourceChoice,setSourceChoice]=useState(''),[mergeConflict,setMergeConflict]=useState(null);
   const directRequest=useRef(null);const [directUncertain,setDirectUncertain]=useState(false);
   const [cancelledAction,setCancelledAction]=useState(null),[unresolvedResult,setUnresolvedResult]=useState(false);
   const sources=(api.session.repositoryReads||[]).filter(source=>source.room===room);
@@ -74,7 +74,7 @@ function DocumentWorkspace({localContext,api,room,onSent,mode='read',setMode=()=
     if(directRequest.current||transitionLock.current)return;
     const sequence=++loadSequence.current;setReading(true);setError('');setReadRetry(null);setCancelledAction(null);
     try {const [doc,versions]=await Promise.all([api.document(roomRef.current,commit),api.history(roomRef.current)]);
-      if(!mounted.current||sequence!==loadSequence.current)return;if(preserveDraft&&draft!==(snapshot?.content||'')){recoveryBase.current=(draftBase===undefined?snapshot?.blob:draftBase);if(!await localDrafts.checkpoint(draft,recoveryBase.current))throw new Error('Cannot switch versions safely while local draft storage is unavailable. Your current draft is kept; export it before retrying.');if(!mounted.current||sequence!==loadSequence.current)return;setRecoveryDraft(draft);}setDraftBase(undefined);setSnapshot(doc);setUnresolvedResult(false);setDraft(doc.content||'');setEditorRevision(v=>v+1);setHistory(versions.commits);setHistorical(Boolean(commit));setConflict(false);setNotice('');}
+      if(!mounted.current||sequence!==loadSequence.current)return;if(preserveDraft&&draft!==(snapshot?.content||'')){recoveryBase.current=(draftBase===undefined?snapshot?.blob:draftBase);if(!await localDrafts.checkpoint(draft,recoveryBase.current))throw new Error('Cannot switch versions safely while local draft storage is unavailable. Your current draft is kept; export it before retrying.');if(!mounted.current||sequence!==loadSequence.current)return;setRecoveryDraft(draft);}setDraftBase(undefined);setSnapshot(doc);setUnresolvedResult(false);setDraft(doc.content||'');setEditorRevision(v=>v+1);setHistory(versions.commits);setHistorical(Boolean(commit));setConflict(false);setMergeConflict(null);setNotice('');}
     catch(e){if(sequence===loadSequence.current){setError(errorText(e));setReadRetry({commit,preserveDraft})}}
     finally{if(sequence===loadSequence.current)setReading(false);}
   }
@@ -107,18 +107,21 @@ function DocumentWorkspace({localContext,api,room,onSent,mode='read',setMode=()=
     const latest=directRequest.current?.content??(mode==='edit'?(editor.current?.markdown()??draft):draft);
     if(lock.current||reading||unresolvedResult||!snapshot||snapshot.writable===false||composing)return;
     if(new TextEncoder().encode(latest).length>65536){lastCommand.current={action:'write',repository:null};setReadRetry(null);setConflict(false);setError('Document text must contain at most 64 KiB of UTF-8. Your draft is kept.');return;}
-    setDraft(latest);lock.current=true;setBusy(true);setError('');setConflict(false);setReadRetry(null);setNotice('');setCancelledAction(null);
+    setDraft(latest);lock.current=true;setBusy(true);setError('');setConflict(false);setReadRetry(null);setMergeConflict(null);setNotice('');setCancelledAction(null);
     if(!directRequest.current)directRequest.current={room,content:latest,base_blob:(draftBase===undefined?snapshot.blob:draftBase),operation:crypto.randomUUID()};
     const fixed=directRequest.current;
     lastCommand.current={action:'write',repository:null};
     try{
       const saved=await api.saveDocument(fixed.room,fixed.content,fixed.base_blob,fixed.operation);
       if(saved.status!=='saved'||!taskResult({version:1,status:'saved',path:'demo.md',commit:saved.commit,blob:saved.blob},'write',api.session.synthetic))throw new Error('The document service returned an unknown save result. Retry the same request with your draft kept.');
+      if(saved.merged!==undefined&&typeof saved.merged!=='boolean'||saved.merged&&(typeof saved.content!=='string'||new TextEncoder().encode(saved.content).length>65536))throw new Error('Merged save result is incomplete. Retry the same request to recover the committed text.');
+      const committedContent=saved.merged?saved.content:fixed.content;
+      setDraft(committedContent);if(saved.merged)setEditorRevision(v=>v+1);
       directRequest.current=null;setDirectUncertain(false);setRecoveryDraft(null);localDrafts.clear();
-      setSnapshot({...snapshot,content:fixed.content,commit:saved.commit,blob:saved.blob});setHistorical(false);
+      setSnapshot({...snapshot,content:committedContent,commit:saved.commit,blob:saved.blob});setHistorical(false);
       await load(undefined,false);
-      setNotice(api.session.synthetic?'Saved in this browser. No Git backend is connected.':saved.receipt_pending?'Saved to Git. The discussion receipt is pending; Load latest retries delivery.':'Saved directly to Git. A version receipt is available in the workspace discussion.');
-    }catch(e){if(e.status>=400&&e.status<500){directRequest.current=null;setDirectUncertain(false);}else setDirectUncertain(true);if(e.status===409&&e.data?.status==='conflict'){setConflict(true);setError('A newer document version exists. Your edits are preserved. Load latest to merge.');}else setError(errorText(e));}
+      setNotice(api.session.synthetic?'Saved in this browser. No Git backend is connected.':saved.merged?('Merged non-overlapping edits with the latest Git version. Saved to Git.'+(saved.receipt_pending?' The discussion receipt is pending.':'')):saved.receipt_pending?'Saved to Git. The discussion receipt is pending; Load latest retries delivery.':'Saved directly to Git. A version receipt is available in the workspace discussion.');
+    }catch(e){if(e.status>=400&&e.status<500){directRequest.current=null;setDirectUncertain(false);}else setDirectUncertain(true);if(e.status===409&&e.data?.status==='conflict'){setMergeConflict(typeof e.data.conflict_markdown==='string'?e.data.conflict_markdown:null);setConflict(true);setError('A newer document version exists. Your edits are preserved. Load latest to merge.');}else setError(errorText(e));}
     finally{setBusy(false);lock.current=false;}
   }
   async function submit(action,repository=null){
@@ -127,7 +130,7 @@ function DocumentWorkspace({localContext,api,room,onSent,mode='read',setMode=()=
     const latestDraft=mode==='edit'?(editor.current?.markdown()??draft):draft;
     if(action==='write'&&latestDraft.length>6000){setError('Document text must contain at most 6000 characters. Your draft is kept.');return;}
     if(action==='write')setDraft(latestDraft);
-    if(lock.current||reading||unresolvedResult||!snapshot||composing||(repository&&action==='report'&&(historical||recoveryDraft!==null||latestDraft!==(snapshot.content||''))))return;lock.current=true;setBusy(true);setError('');setReadRetry(null);setNotice('');setCancelledAction(null);
+    if(lock.current||reading||unresolvedResult||!snapshot||composing||(repository&&action==='report'&&(historical||recoveryDraft!==null||latestDraft!==(snapshot.content||''))))return;lock.current=true;setBusy(true);setError('');setReadRetry(null);setMergeConflict(null);setNotice('');setCancelledAction(null);
     lastCommand.current={action,repository};
     const command=repository?{action,repository:repository.repository,path:repository.path,...(action==='report'?{base_blob:snapshot.blob}:{})}:action==='write'?{action,content:latestDraft,base_blob:(draftBase===undefined?snapshot.blob:draftBase)}:{action, ...(historical?{commit:snapshot.commit}:{})};
     const content={msgtype:'m.text',body:repository?(action==='report'?'Replace demo.md with a deterministic source file report; no LLM.':'Read an explicitly granted source file; no LLM.'):action==='write'?'Save demo.md from workspace':'Read demo.md from Git',
@@ -158,6 +161,7 @@ function DocumentWorkspace({localContext,api,room,onSent,mode='read',setMode=()=
     {directUncertain&&<p className="quiet-status" role="status">Editing is paused while this save is uncertain. Retry sends the exact original request. Your draft is kept.</p>}
     {historical&&<div className="state-banner historical-banner"><History size={17}/><span>You’re viewing an earlier version. Editing it may return a conflict.</span><button disabled={busy||draftTransition||reading||directUncertain} onClick={()=>load(undefined,true)}>Back to latest</button></div>}
     {error&&<div className="state-banner warning" role="alert"><AlertCircle size={18}/><div><strong>{conflict?'This document has a newer version':'Couldn’t complete the request'}</strong><p>{error}</p></div>{conflict?<button onClick={()=>load(undefined,true)}>Load latest to merge</button>:<button onClick={()=>directUncertain?saveDirect(true):readRetry?load(readRetry.commit,readRetry.preserveDraft):snapshot?submit(lastCommand.current.action,lastCommand.current.repository):load()}>{readRetry?.unsupportedResult?'Load latest':'Retry'}</button>}</div>}
+    {mergeConflict!==null&&<details className="document-properties"><summary>Overlapping edit details · review only</summary><p>Conflict markers are not saved. Merge your draft with the latest version before saving.</p><textarea aria-label="Conflicting changes" readOnly value={mergeConflict}/></details>}
     {cancelledAction&&<div className="state-banner cancelled-banner" role="status"><Check size={18}/><div><strong>Task cancelled</strong><p>The task was cancelled. Your draft is kept. {cancelledAction.action==='write'?'Choose Save changes to start a new save task.':cancelledAction.action==='report'?'Choose Replace document with file report to start a new report task.':cancelledAction.repository?'Choose Read source in discussion to start a new source read task.':'Choose Ask example Agent to read to start a new document read task.'} Cancellation does not undo a change already saved by the runtime.</p></div></div>}
     {notice&&<div className="state-banner success" role="status"><Check size={17}/><span>{notice}</span></div>}
     {pending&&<p className="quiet-status" role="status">Your request is queued. The example runtime will post the result in the room.</p>}

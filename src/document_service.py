@@ -4,7 +4,7 @@ import re
 import uuid
 
 from src.document_access import document_level, DocumentAccessError
-from src.gitdocs import Conflict, PublicationPending
+from src.gitdocs import Conflict, MergeConflict, PublicationPending
 from src.matrix_http import MatrixError, segment
 
 
@@ -55,18 +55,23 @@ class DocumentService:
         notice = {'kind': 'document_commit', 'version': 1, 'room_id': self.room, 'author': self.user_id}
         try:
             item = self.store.write('demo.md', content, base, operation=key, notification=notice,
-                author={'name': self.user_id, 'email': hashlib.sha256(self.user_id.encode()).hexdigest()[:24] + '@matrix.invalid'})
+                merge_non_overlapping=True, author={'name': self.user_id, 'email': hashlib.sha256(self.user_id.encode()).hexdigest()[:24] + '@matrix.invalid'})
         except PublicationPending:
             raise DocumentError(503, 'Git publication is pending. Keep the draft and retry the same operation.', status='publication_pending') from None
+        except MergeConflict as error:
+            raise DocumentError(409,'Overlapping edits need a manual merge. Keep your draft.',status='conflict',
+                                current_blob=self.store.blob_version('demo.md'),
+                                conflict_markdown=error.conflict_markdown,conflict_truncated=error.truncated) from None
         except Conflict:
             raise DocumentError(409, 'A newer version exists or this operation was used for different text. Keep your draft.',
-                                status='conflict', current_blob=self.store.snapshot('demo.md')['blob']) from None
+                                status='conflict', current_blob=self.store.blob_version('demo.md')) from None
         try:
             receipt = self.deliver(item)
         except (DocumentError, MatrixError, OSError, RuntimeError, Conflict):
             receipt = None
         return {'status': 'saved', 'commit': item['commit'], 'blob': item['blob'], 'path': 'demo.md',
-                'author': self.user_id, 'receipt': receipt, 'receipt_pending': receipt is None}
+                'author': self.user_id, 'merged':bool(item.get('merged')),
+                'content':self.store.read('demo.md',item['commit']), 'receipt': receipt, 'receipt_pending': receipt is None}
 
     def deliver(self, item):
         notice = {'kind': 'document_commit', 'version': 1, 'room_id': self.room, 'author': self.user_id}
