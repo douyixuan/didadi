@@ -69,3 +69,5 @@ Unit tests additionally cover two independent processes racing one blob, local-r
 ## Scoped Agent API
 
 The [scoped API increment](../artifact/023-scoped-agent-document-api/README.md) moves Agent reads, writes, source reports and outbox reconciliation into the Document Service. Run the external worker with `--document-url` to avoid giving it a Git repository path. The service requires an explicit room or an existing workspace binding. Requests contain only task ID and lease; the service loads the authoritative event and checks permissions with Gateway. `--repo` remains a cohost development option. Human direct saves retain their separate same-origin API and Git conflict semantics.
+
+Ordinary remote divergence now returns metadata-only `remote_diverged` diagnostics and permits service restart for diagnosis; latest IO and unpublished receipts remain blocked. See [the operator recovery procedure](GIT_REMOTE_RECOVERY.md) for preserving both histories in a reviewed two-parent merge and retrying the original save without force-push or shared-history rewrites. Known upstream rewrites/deletions still require separate investigation.

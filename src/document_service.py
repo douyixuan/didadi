@@ -4,7 +4,7 @@ import re
 import uuid
 
 from src.document_access import document_level, DocumentAccessError
-from src.gitdocs import Conflict, MergeConflict, PublicationPending
+from src.gitdocs import Conflict, MergeConflict, PublicationPending, RemoteDiverged
 from src.matrix_http import MatrixError, segment
 
 
@@ -36,7 +36,10 @@ class DocumentService:
         level = self.authorize(room)
         # Receipt recovery cannot make an already committed document unreadable.
         self.deliver_pending()
-        return {**self.store.snapshot('demo.md', commit), 'writable': level >= 50}
+        try:
+            return {**self.store.snapshot('demo.md', commit), 'writable': level >= 50}
+        except RemoteDiverged as error:
+            raise DocumentError(503, str(error), status='remote_diverged', recovery=error.recovery) from None
 
     def save(self, data):
         if not isinstance(data, dict) or set(data) != {'room', 'operation', 'content', 'base_blob'}:
@@ -56,6 +59,8 @@ class DocumentService:
         try:
             item = self.store.write('demo.md', content, base, operation=key, notification=notice,
                 merge_non_overlapping=True, author={'name': self.user_id, 'email': hashlib.sha256(self.user_id.encode()).hexdigest()[:24] + '@matrix.invalid'})
+        except RemoteDiverged as error:
+            raise DocumentError(503, str(error), status='remote_diverged', recovery=error.recovery) from None
         except PublicationPending:
             raise DocumentError(503, 'Git publication is pending. Keep the draft and retry the same operation.', status='publication_pending') from None
         except MergeConflict as error:

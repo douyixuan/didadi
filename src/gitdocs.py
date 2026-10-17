@@ -31,6 +31,13 @@ class PublicationPending(Conflict):
     pass
 
 
+class RemoteDiverged(PublicationPending):
+    """Both ordinary histories are retained; only an operator may reconcile them."""
+    def __init__(self, local, remote, base):
+        self.recovery = {'local_commit': local, 'remote_commit': remote, 'merge_base': base}
+        super().__init__('Git histories diverged. Keep your draft. Ask the workspace operator to reconcile both histories, then retry the same save.')
+
+
 class InvalidPath(Exception):
     pass
 
@@ -64,7 +71,12 @@ class GitDocs:
             if configured and not Path(configured).is_absolute():
                 raise ValueError('only absolute local remotes supported')
             self.remote = configured or None
-            self._sync()
+            try:
+                self._sync()
+            except RemoteDiverged:
+                # Keep diagnostics/fixed reads available after restart. Latest reads,
+                # writes and notification delivery still check synchronization.
+                pass
 
     @contextmanager
     def _locked(self):
@@ -343,7 +355,7 @@ class GitDocs:
             if ancestor == local and local != fetched:
                 self._git('update-ref', self.branch, fetched, local)
             elif ancestor != fetched:
-                raise PublicationPending('remote diverged; local commit/outbox retained for reconciliation')
+                raise RemoteDiverged(local, fetched, ancestor or None)
         # Ordinary push refuses a race after fetch. Never force or reset unpublished work.
         try:
             self._git('push', 'origin', self.branch + ':' + self.branch)
