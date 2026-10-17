@@ -75,3 +75,11 @@ It covers raw UTF-8/CRLF, author identity, idempotent retries, concurrent confli
 It also checks receipt failure, service recreation, lost notification ACK and raw Matrix privilege bypass denial.
 No external document worker is started for these saves.
 Native editor layout and IME input require separate browser acceptance.
+
+## Non-overlapping concurrent human edits
+
+Human direct saves now attempt a line-based three-way merge when the submitted base is stale. The base must be a regular blob from this document's reachable history. Different paragraphs can merge; overlapping changes return409 with bounded `conflict_markdown` and `conflict_truncated` details and leave Git unchanged. Unknown/deleted bases, binary or invalid UTF-8, and inputs/results above64KiB fail conservatively. This is not a remote divergent-branch merge or CRDT.
+
+Successful responses include `merged` and exact committed `content` over the authorized HTTP API. The client adopts that text before refreshing history, so a failed refresh cannot pair unmerged text with a merged blob. Original operation IDs replay the original commit and merged flag, even after restart; receipts remain metadata-only. Review-only conflict details never replace the draft or enter Matrix.
+
+`GitDocs.write(..., merge_non_overlapping=True)` is opt-in; default CAS and external Agent writes remain strict. The existing author, room/power checks and outbox behavior are unchanged. `python -m scripts.concurrent_merge_smoke --state-file ... --token-file ...` verifies two independent HTTP sessions with real Matrix authority, restart/idempotency, overlap protection and no body in Matrix. Both sessions use the same already-authorized synthetic identity; this does not certify distinct-user production permissions.
