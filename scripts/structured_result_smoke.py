@@ -70,7 +70,7 @@ def main():
             identifier=send(command,txn);assert send(command,txn)==identifier
             task=finish(identifier);saved=task['outcome'];snapshot=store.snapshot('demo.md')
             assert saved=={'version':1,'status':'saved','path':'demo.md','commit':snapshot['commit'],'blob':snapshot['blob']}
-            assert task['body'].startswith('已保存') and snapshot['content']==text
+            assert task['body'].startswith('Saved demo.md') and snapshot['content']==text and text not in task['body']
             reply=request(args.matrix_url,'GET',PREFIX+'/rooms/'+segment(state['room'])+'/event/'+segment(task['reply']),state['tokens'][0])
             assert reply['content']['org.didadi.task.result']==saved
             assert reply['content']['m.relates_to']['event_id']==identifier

@@ -190,7 +190,7 @@ it('sends only the selected granted source request and retries a rejection as a 
  await screen.findByRole('heading',{name:'Team handbook'});
  expect(screen.getByLabelText('Granted source file')).toHaveTextContent('fixture / main.py');
  expect(screen.getByLabelText('Granted source file')).not.toHaveTextContent('private.py');
- fireEvent.click(screen.getByRole('button',{name:'Read source in discussion'}));
+ fireEvent.click(screen.getByRole('button',{name:'Ask Agent to read source'}));
  await screen.findByText(/Repository request rejected:/);
  expect(api.send.mock.calls[0][1]['org.didadi.repository']).toEqual({action:'read',repository:'fixture',path:'main.py'});
  fireEvent.click(screen.getByRole('button',{name:'Retry',exact:true}));
@@ -264,7 +264,7 @@ it('treats cancellation as a separate status and starts one explicit new save',a
  await act(async()=>resolve({event_id:'$new'}));
 });
 
-it.each([['read','Read source in discussion','Choose Read source in discussion'],['report','Replace document with file report','Choose Replace document with file report']])('explains the explicit next action after a cancelled source %s',async(action,button,hint)=>{
+it.each([['read','Ask Agent to read source','Choose Ask Agent to read source'],['report','Replace document with file report','Choose Replace document with file report']])('explains the explicit next action after a cancelled source %s',async(action,button,hint)=>{
  const api=fixture();api.session.repositoryReads=[{repository:'fixture',path:'main.py',commit:'a'.repeat(40),room:'!room'}];
  api.task.mockResolvedValue({task:{status:'cancelled',last_error:'task_cancelled'}});
  render(<Documents api={api} room="!room" onSent={idle}/>);await screen.findByRole('heading',{name:'Team handbook'});
@@ -398,7 +398,7 @@ it('retries the direct save after a local size error instead of repeating the pr
   return {status:'saved',commit:doc.commit,blob:doc.blob,receipt_pending:false};
  });
  render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);await screen.findByLabelText('Markdown document');
- fireEvent.click(screen.getByRole('button',{name:'Read source in discussion'}));await screen.findByText(/Repository request rejected:/);
+ fireEvent.click(screen.getByRole('button',{name:'Ask Agent to read source'}));await screen.findByText(/Repository request rejected:/);
  fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'中'.repeat(22000)}});
  fireEvent.click(screen.getByRole('button',{name:'Save changes'}));await screen.findByText(/at most 64 KiB/);
  expect(api.saveDocument).not.toHaveBeenCalled();expect(api.send).toHaveBeenCalledTimes(1);

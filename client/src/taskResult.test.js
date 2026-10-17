@@ -14,3 +14,12 @@ it('rejects unknown schemas, invalid references and unexpected metadata',()=>{
  expect(taskResult({...saved,commit:'sample-123',blob:'sample-123'},'write')).toBeNull();
  expect(taskResult({...saved,commit:'sample-123',blob:'sample-123'},'write',true)).not.toBeNull();
 });
+
+it('accepts strict source references without embedding source text',()=>{
+ const resource={kind:'repository',repository:'fixture',path:'src/main.py',commit:'a'.repeat(40),blob:'b'.repeat(40)};
+ const read={version:1,status:'read',resource};
+ expect(taskResult(read,'read')).toEqual(read);
+ for(const change of [{content:'private'},{path:'../secret'},{commit:'bad'},{repository:'unsafe\nname'}])
+  expect(taskResult({...read,resource:{...resource,...change}},'read')).toBeNull();
+ expect(taskResult({...read,path:'demo.md',commit:'a'.repeat(40),blob:'b'.repeat(40)},'read')).toBeNull();
+});
