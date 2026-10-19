@@ -77,6 +77,10 @@ def make_handler(agent, hs_token, gateway=None, agent_token=None):
                 if not self.agent_auth():
                     return
                 self.respond(200, {'task': gateway.claim()})
+            elif urlsplit(self.path).path == '/agent/audit':
+                if not self.agent_auth():return
+                task_id = parse_qs(urlsplit(self.path).query).get('id', [''])[0]
+                self.respond(200, {'events': gateway.audit(task_id)})
             elif urlsplit(self.path).path == '/agent/status':
                 if not self.agent_auth():
                     return
@@ -95,7 +99,7 @@ def make_handler(agent, hs_token, gateway=None, agent_token=None):
             return True
 
         def do_POST(self):
-            if self.path not in {'/agent/complete','/agent/fail','/agent/validate'}:
+            if self.path not in {'/agent/complete','/agent/fail','/agent/validate','/agent/cancel'}:
                 self.respond(404, {})
                 return
             if not self.agent_auth():
@@ -110,6 +114,8 @@ def make_handler(agent, hs_token, gateway=None, agent_token=None):
                         raise ValueError('invalid retry flag')
                     reply = gateway.fail(data['id'], data['lease'], data.get('reason', 'runtime_error'),
                                          retryable=data.get('retryable', False))
+                elif self.path == '/agent/cancel':
+                    reply = gateway.cancel(data['id'])
                 elif self.path == '/agent/validate':
                     reply = gateway.validate(data['id'], data['lease'])
                 else:

@@ -79,6 +79,8 @@ class ClientServerTests(unittest.TestCase):
             session=fetch('/api/session');self.assertNotIn('private-human-token',session);self.assertNotIn('private-worker-token',session)
             for path,method,data,headers in [('/api/session','GET',None,{'Host':'evil.invalid'}),
                 ('/api/rooms','POST',{'name':'room','operation':'operation-id'},{}),
+                ('/api/task/cancel','POST',{'room':'!seed:local','id':'$task'},{}),
+                ('/api/task/cancel','POST',{'room':'!seed:local','id':'$task'},{'X-CSRF-Token':self.workspace.csrf,'Origin':'https://evil.invalid'}),
                 ('/api/rooms','POST',{'name':'room','operation':'operation-id'},{'X-CSRF-Token':self.workspace.csrf,'Origin':'https://evil.invalid'}),
                 ('/%2e%2e/secret','GET',None,{})]:
                 with self.assertRaises(HTTPError) as caught:fetch(path,method,data,headers)
@@ -89,3 +91,14 @@ class ClientServerTests(unittest.TestCase):
 
     def test_external_backends_are_rejected(self):
         with self.assertRaises(ValueError):Workspace({'room':'!seed','tokens':['x']},'x',self.root/'unused.git',self.root/'db','https://matrix.example','http://127.0.0.1:9001')
+
+    def test_only_requester_in_granted_room_can_cancel(self):
+        with patch.object(self.workspace,'api',return_value={'sender':'@human:local'}), patch('src.client_server.request',return_value={'status':'cancelled'}) as gateway:
+            self.assertEqual(self.workspace.cancel_task('!seed:local','$mine')['status'],'cancelled')
+            gateway.assert_called_once()
+        with patch.object(self.workspace,'api',return_value={'sender':'@other:local'}), patch('src.client_server.request') as gateway:
+            with self.assertRaises(ClientError):self.workspace.cancel_task('!seed:local','$other')
+            gateway.assert_not_called()
+        with patch('src.client_server.request') as gateway:
+            with self.assertRaises(ClientError):self.workspace.cancel_task('!ungranted:local','$mine')
+            gateway.assert_not_called()

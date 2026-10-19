@@ -15,3 +15,6 @@
 .document-properties pre{white-space:pre-wrap;overflow-wrap:anywhere}
 .document-bottom{flex-wrap:wrap;justify-content:flex-start;gap:8px 16px}
 .document-bottom>span:first-child{margin-right:auto}
+.task-control{padding:6px 0;border-bottom:1px solid #eceef3}
+.task-control ol{padding-left:20px;font-size:11px;line-height:1.8;color:#667085}
+.task-control p{font-size:11px}
