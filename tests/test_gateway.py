@@ -120,6 +120,12 @@ class GatewayTests(unittest.TestCase):
                 with self.assertRaises(MatrixError) as caught:
                     request(base, 'GET', '/agent/tasks', token)
                 self.assertEqual(caught.exception.status, 403)
+            for token in [None, 'homeserver-secret', 'wrong']:
+                with self.assertRaises(MatrixError) as caught:
+                    request(base, 'POST', '/agent/runtime', token, {'session':'a'*48,'connected':True})
+                self.assertEqual(caught.exception.status,403)
+            request(base, 'POST', '/agent/runtime', 'worker-secret', {'session':'a'*48,'connected':True})
+            with self.assertRaises(MatrixError):request(base,'POST','/agent/runtime','worker-secret',{'session':'bad','connected':True})
             request(base, 'PUT', '/_matrix/app/v1/transactions/http', 'homeserver-secret', {'events': [self.event]})
             restored = Gateway(self.path, self.agent)
             with restored.db() as db:

@@ -6,6 +6,7 @@ import {BlockEditor} from './BlockEditor';
 import {readMarkdown} from './readMarkdown';
 import {documentVersion} from './documentReferences';
 import {taskResult} from './taskResult';
+import {taskState} from './taskState';
 import {downloadMarkdown} from './downloadMarkdown';
 import {draftContext,useLocalDrafts} from './localDrafts';
 import {BookOpen, Search, ChevronDown, ChevronRight, FileText, MessageSquare, Bot, History, Plus, ArrowUp, X, Check, AlertCircle, RefreshCw, Bold, Italic, Heading2, List, Code2} from 'lucide-react';
@@ -54,7 +55,7 @@ function DocumentWorkspace({localContext,api,room,onSent,mode='read',setMode=()=
   const [draftBase,setDraftBase]=useState(undefined),recoveryBase=useRef(null);
   const [snapshot,setSnapshot]=useState(null),[draft,setDraft]=useState(''),[history,setHistory]=useState([]);
   const [error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[historical,setHistorical]=useState(false),[readRetry,setReadRetry]=useState(null);
-  const [pending,setPending]=useState(null),[conflict,setConflict]=useState(false),[recoveryDraft,setRecoveryDraft]=useState(null);
+  const [pending,setPending]=useState(null),[taskProgress,setTaskProgress]=useState(null),[taskPollError,setTaskPollError]=useState(''),[conflict,setConflict]=useState(false),[recoveryDraft,setRecoveryDraft]=useState(null);
   const [sourceChoice,setSourceChoice]=useState(''),[mergeConflict,setMergeConflict]=useState(null),[remoteRecovery,setRemoteRecovery]=useState(null);
   const directRequest=useRef(null);const [directUncertain,setDirectUncertain]=useState(false);
   const [cancelledAction,setCancelledAction]=useState(null),[unresolvedResult,setUnresolvedResult]=useState(false);
@@ -85,6 +86,7 @@ function DocumentWorkspace({localContext,api,room,onSent,mode='read',setMode=()=
     let cancelled=false, checking=false;
     async function check(){if(checking)return;checking=true;
       try {const result=await api.task(pending.room,pending.id);
+        if(!cancelled){setTaskProgress(result.task);setTaskPollError('');}
         if(!cancelled&&['failed','cancelled'].includes(result.task?.status)){
           setPending(null);setBusy(false);lock.current=false;attempt.current=null;
           const reasons={task_cancelled:'The task was cancelled.',room_forbidden:'The Agent no longer has access to this room.',delivery_forbidden:'The Agent cannot reply to this room.',attempts_exhausted:'The task reached its retry limit.',room_unavailable:'The room could not be verified.',runtime_error:'The external runtime could not finish the task.'};
@@ -98,7 +100,7 @@ function DocumentWorkspace({localContext,api,room,onSent,mode='read',setMode=()=
           else if(outcome.status==='rejected')setError(lastCommand.current.repository?'Repository request rejected: check the granted file and requested action.':'Document request rejected: check the action, content and version.');
           else {const saved=outcome.status==='saved';if(saved){setRecoveryDraft(null);localDrafts.clear();}await load(undefined,!saved);setNotice(saved?(api.session.synthetic?'Saved in this browser. No Git backend is connected.':'Saved to Git. The Agent posted a version receipt in the room.'):(api.session.synthetic?'Example Agent read the browser snapshot.':'Agent read through the scoped API. The room contains metadata only.'));}
         }
-      }catch(e){if(!cancelled)setError(errorText(e)+' Waiting to reconnect; your draft is kept.');}
+      }catch(e){if(!cancelled)setTaskPollError(errorText(e)+' Waiting to reconnect; your draft is kept.');}
       finally{checking=false;}}
     check();const timer=setInterval(check,1200);return()=>{cancelled=true;clearInterval(timer)};
   },[pending,api]);
@@ -137,7 +139,7 @@ function DocumentWorkspace({localContext,api,room,onSent,mode='read',setMode=()=
       'm.mentions':{user_ids:[api.session.agentId]},[repository?'org.didadi.repository':'org.didadi.document']:command};
     const key=JSON.stringify([room,content]);if(attempt.current?.key!==key)attempt.current={key,id:crypto.randomUUID()};
     try {const result=await api.send(room,content,attempt.current.id);attempt.current=null;
-      setPending({room,id:result.event_id});onSent(result.event_id,true,room);}
+      setTaskProgress(null);setTaskPollError('');setPending({room,id:result.event_id});onSent(result.event_id,true,room);}
     catch(e){setError(errorText(e));setBusy(false);lock.current=false;}
   }
   function editDraft(value){if(transitionLock.current)return;setDraft(value);localDrafts.persist(value,(draftBase===undefined?snapshot?.blob:draftBase));}
@@ -164,7 +166,8 @@ function DocumentWorkspace({localContext,api,room,onSent,mode='read',setMode=()=
     {mergeConflict!==null&&<details className="document-properties"><summary>Overlapping edit details · review only</summary><p>Conflict markers are not saved. Merge your draft with the latest version before saving.</p><textarea aria-label="Conflicting changes" readOnly value={mergeConflict}/></details>}
     {cancelledAction&&<div className="state-banner cancelled-banner" role="status"><Check size={18}/><div><strong>Task cancelled</strong><p>The task was cancelled. Your draft is kept. {cancelledAction.action==='write'?'Choose Save changes to start a new save task.':cancelledAction.action==='report'?'Choose Replace document with file report to start a new report task.':cancelledAction.repository?'Choose Ask Agent to read source to start a new source read task.':'Choose Ask example Agent to read to start a new document read task.'} Cancellation does not undo a change already saved by the runtime.</p></div></div>}
     {notice&&<div className="state-banner success" role="status"><Check size={17}/><span>{notice}</span></div>}
-    {pending&&<p className="quiet-status" role="status">Your request is queued. The example runtime will post the result in the room.</p>}
+    {pending&&<div className="quiet-status" role="status" aria-label="Document task progress"><strong>{taskState(taskPollError?{status:'reconnecting'}:taskProgress).label}</strong><p>{taskState(taskPollError?{status:'reconnecting'}:taskProgress).detail}</p>{!taskPollError&&taskState(taskProgress).connection&&<p>{taskState(taskProgress).connection}</p>}</div>}
+    {pending&&taskPollError&&<p role="alert">{taskPollError}</p>}
     {localDrafts.warning&&<p className="quiet-status" role="alert">{localDrafts.warning}</p>}
     {localDrafts.saved&&!localDrafts.working&&<p className="quiet-status" >Unsaved draft kept on this browser only. Not encrypted; browser storage may be cleared. </p>}
     {localDrafts.working&&<p className="quiet-status">Updating local recovery… Keep this page open until complete.</p>}
@@ -229,8 +232,8 @@ export function App({connector=connect}) {
     refresh();const timer=setInterval(refresh,2000);return()=>{stopped=true;clearInterval(timer)};
   },[api,room]);
   useEffect(()=>{if(!api)return;const timer=setInterval(refreshRooms,10000);return()=>clearInterval(timer)},[api]);
-  useEffect(()=>{if(!api||!tasks.some(t=>!['done','failed','cancelled'].includes(t.status)))return;let cancelled=false;
-    const timer=setInterval(async()=>{const next=await Promise.all(tasks.map(async t=>{if(['done','failed','cancelled'].includes(t.status))return t;try{const result=await api.task(t.room,t.id);return {...t,status:result.task?.status||'queued',body:result.task?.body};}catch{return {...t,status:'reconnecting'};}}));if(!cancelled)setTasks(next);},1500);
+  useEffect(()=>{if(!api||!tasks.some(t=>!['done','failed','cancelled'].includes(t.status)))return;let cancelled=false,inFlight=false;
+    const timer=setInterval(async()=>{if(inFlight)return;inFlight=true;const next=await Promise.all(tasks.map(async t=>{if(['done','failed','cancelled'].includes(t.status))return t;try{const result=await api.task(t.room,t.id);return result.task?{...t,...result.task}:{...t,status:'queued',phase:null};}catch{return {...t,status:'reconnecting'};}}));if(!cancelled)setTasks(next);inFlight=false;},1500);
     return()=>{cancelled=true;clearInterval(timer)};
   },[api,tasks]);
   function updateTask(id,patch){setTasks(old=>old.map(task=>task.id===id?{...task,...patch}:task))}
@@ -267,7 +270,7 @@ export function App({connector=connect}) {
       <nav aria-label="Rooms">{rooms.filter(r=>r.name.toLowerCase().includes(search.toLowerCase())).map(r=><button className={'room '+(r.id===room?'room-selected':'')} key={r.id} onClick={()=>{setRoom(r.id);setNavOpen(false)}}><MessageSquare size={15}/><span>{r.name}</span></button>)}</nav>
       <form className="new-room" onSubmit={createRoom}><input aria-label="New local room name" value={newName} onChange={e=>setNewName(e.target.value)} placeholder="New local room" maxLength={60} disabled={creating}/><button disabled={creating||!newName.trim()} aria-label="Create local room"><Plus size={16}/></button></form>
     </div>
-    <div className="sidebar-bottom"><button className="agent-nav" onClick={()=>setPanel('agent')}><Bot size={17}/><span>Example Agent<small>Echo runtime · no LLM</small></span><span className="available-dot"/></button><div className="session-note"><span className={'available-dot '+(!online?'offline':'')}/>{online?(api.session.synthetic?'Browser-only preview':'Connected to local workspace'):'Reconnecting to workspace'}</div></div>
+    <div className="sidebar-bottom"><button className="agent-nav" onClick={()=>setPanel('agent')}><Bot size={17}/><span>Example Agent<small>Echo runtime · no LLM</small></span></button><div className="session-note"><span className={'available-dot '+(!online?'offline':'')}/>{online?(api.session.synthetic?'Browser-only preview':'Connected to local workspace'):'Reconnecting to workspace'}</div></div>
   </aside>
   <main className="main"><header className="workspace-header"><button className="mobile-nav" aria-label="Toggle navigation" onClick={()=>setNavOpen(!navOpen)}><BookOpen size={18}/></button><div className="breadcrumbs"><BookOpen size={15}/><span>Workspace</span><ChevronRight size={13}/><strong>demo.md</strong></div><div className="header-actions"><div className="mode-switch"><button aria-pressed={mode==='read'} onClick={()=>setMode('read')}>Read</button><button aria-pressed={mode==='edit'} onClick={()=>setMode('edit')}>Edit</button></div><span className="header-divider"/><button className={historyOpen?'active':''} aria-label="Version history" onClick={()=>setHistoryOpen(!historyOpen)}><History size={17}/></button><button className={panel==='discussion'?'active':''} onClick={()=>setPanel(panel==='discussion'?null:'discussion')}><MessageSquare size={17}/><span>Discussion</span></button><button className={panel==='agent'?'active':''} onClick={()=>setPanel(panel==='agent'?null:'agent')}><Bot size={17}/><span>Agent</span></button></div></header>
     {api.session.qa&&<div className="qa-banner">Visual regression capture · {api.session.qa} · isolated adapter</div>}
@@ -284,10 +287,10 @@ export function App({connector=connect}) {
           const root=relation?.rel_type==='m.thread'?relation.event_id:event.id;
           return <article className={'message '+(agent?'agent':'')} key={event.id}><span className={'avatar '+(agent?'agent-avatar':'')}>{agent?<Bot size={15}/>:'Y'}</span><div className="message-main"><div className="message-meta"><strong>{agent?'Example Agent':event.sender===api.session.userId?'You':event.sender.split(':')[0]}</strong><time>{new Date(event.time||Date.now()).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</time></div>{relation?.rel_type==='m.thread'&&<button className="thread-link" onClick={()=>setFilter(root)}>Reply in thread</button>}<MessageBody body={event.content.body} version={documentVersion(event,api.session.agentId,api.session.synthetic,api.session.userId)} disabled={docMeta.busy||docMeta.reading||docMeta.composing} onOpenVersion={commit=>{setRequestedVersion({commit});setMode('read');setHistoryOpen(true)}}/><div className="message-actions"><button onClick={()=>setReplyTo(root)}>Reply</button><button onClick={()=>setFilter(root)}>View thread</button></div></div></article>;
         })}</div>
-        <details className="task-details"><summary>Agent activity {tasks.filter(t=>t.room===room).length?`(${tasks.filter(t=>t.room===room).length})`:''}</summary>{tasks.filter(t=>t.room===room).map(t=><div key={t.id} className="task-control"><div className="task">{t.status==='done'?<Check size={13}/>:['failed','cancelled'].includes(t.status)?<AlertCircle size={13}/>:<RefreshCw size={13}/>}<span>{t.status==='done'?'Completed':t.status==='cancelled'?'Cancelled':t.status}</span><code>{short(t.id)}</code></div>
+        <details className="task-details"><summary>Agent activity {tasks.filter(t=>t.room===room).length?`(${tasks.filter(t=>t.room===room).length})`:''}</summary>{tasks.filter(t=>t.room===room).map(t=><div key={t.id} className="task-control"><div className="task">{t.status==='done'?<Check size={13}/>:['failed','cancelled'].includes(t.status)?<AlertCircle size={13}/>:<RefreshCw size={13}/>}<span>{taskState(t).label}</span><code>{short(t.id)}</code></div>{!['done','failed','cancelled'].includes(t.status)&&<p className="quiet-status">{taskState(t).detail} {taskState(t).connection}</p>}
           {!api.session.synthetic&&<div className="message-actions"><button disabled={t.cancelling||!['pending','unverified'].includes(t.status)} onClick={()=>cancelTask(t)}>{t.cancelling?'Cancelling…':'Cancel task'}</button><button disabled={t.historyBusy} onClick={()=>taskHistory(t)}>View execution history</button></div>}
           {t.controlError&&<p role="alert">{t.controlError}</p>}
-          {t.history&&<ol aria-label="Task execution history">{t.history.length?t.history.map(entry=><li key={entry.sequence}><span>{({accepted:'Accepted',leased:'Runtime started',result_ready:'Result recorded',completed:'Reply delivered',retry_scheduled:'Retry scheduled',failed:'Failed',cancelled:'Cancelled'})[entry.action]||entry.action}</span>{({room_forbidden:'Room access revoked',delivery_forbidden:'Reply permission revoked',task_cancelled:'Cancelled by request',attempts_exhausted:'Retry limit reached',runtime_error:'Runtime error',room_unavailable:'Room temporarily unavailable'})[entry.reason]&&<span> · {({room_forbidden:'Room access revoked',delivery_forbidden:'Reply permission revoked',task_cancelled:'Cancelled by request',attempts_exhausted:'Retry limit reached',runtime_error:'Runtime error',room_unavailable:'Room temporarily unavailable'})[entry.reason]}</span>}<time> · {new Date(entry.at*1000).toLocaleTimeString()}</time></li>):<li>This task has no recorded execution history.</li>}</ol>}
+          {t.history&&<ol aria-label="Task execution history">{t.history.length?t.history.map(entry=><li key={entry.sequence}><span>{({accepted:'Accepted',leased:'Lease granted',result_ready:'Result recorded',completed:'Reply delivered',retry_scheduled:'Retry scheduled',failed:'Failed',cancelled:'Cancelled'})[entry.action]||entry.action}</span>{({room_forbidden:'Room access revoked',delivery_forbidden:'Reply permission revoked',task_cancelled:'Cancelled by request',attempts_exhausted:'Retry limit reached',runtime_error:'Runtime error',room_unavailable:'Room temporarily unavailable'})[entry.reason]&&<span> · {({room_forbidden:'Room access revoked',delivery_forbidden:'Reply permission revoked',task_cancelled:'Cancelled by request',attempts_exhausted:'Retry limit reached',runtime_error:'Runtime error',room_unavailable:'Room temporarily unavailable'})[entry.reason]}</span>}<time> · {new Date(entry.at*1000).toLocaleTimeString()}</time></li>):<li>This task has no recorded execution history.</li>}</ol>}
         </div>)}{!tasks.filter(t=>t.room===room).length&&<p>No tasks sent in this session.</p>}</details>
         <Composer busyRoom={room} agentId={api.session.agentId} onSend={(content,id)=>api.send(room,content,id)} onSent={sent} replyTo={replyTo} clearReply={()=>setReplyTo(null)} defaultMention={panel==='agent'}/>
       </aside>

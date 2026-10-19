@@ -99,7 +99,7 @@ def make_handler(agent, hs_token, gateway=None, agent_token=None):
             return True
 
         def do_POST(self):
-            if self.path not in {'/agent/complete','/agent/fail','/agent/validate','/agent/cancel','/agent/document-scope'}:
+            if self.path not in {'/agent/complete','/agent/fail','/agent/validate','/agent/cancel','/agent/document-scope','/agent/runtime'}:
                 self.respond(404, {})
                 return
             if not self.agent_auth():
@@ -109,7 +109,9 @@ def make_handler(agent, hs_token, gateway=None, agent_token=None):
                 if not 0 < size <= 65536:
                     raise ValueError('invalid body size')
                 data = json.loads(self.rfile.read(size))
-                if self.path == '/agent/fail':
+                if self.path == '/agent/runtime':
+                    reply = gateway.runtime_update(data)
+                elif self.path == '/agent/fail':
                     if not isinstance(data.get('retryable', False), bool):
                         raise ValueError('invalid retry flag')
                     reply = gateway.fail(data['id'], data['lease'], data.get('reason', 'runtime_error'),

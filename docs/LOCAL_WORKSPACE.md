@@ -116,3 +116,5 @@ Protocol acceptance: `python3 -m scripts.agent_body_api_smoke --state-file .loca
 ## Local remote publication recovery
 
 When a configured trusted local Git upstream diverges, retain/export the draft and use the [operator recovery procedure](GIT_REMOTE_RECOVERY.md). The client keeps the original save ID/body/base, displays retained version metadata, and retries only that request after reconciliation. Restart supports diagnosis, not automatic merging. Existing browser recovery drafts can be exported even if the first Git read is blocked. No force-push, shared-history rewrite, remote credential change or web recovery command is provided.
+
+Task progress now separates Gateway acceptance, waiting for runtime, access verification, an active lease and retry/backoff. WebSocket connection observations are shown independently; an active lease is not proof of execution progress, and an unconfirmed/stale connection is not a definite offline assertion. Status errors keep the current task/draft instead of creating another request. See [MVP acceptance](MVP_ACCEPTANCE.md) for the finite remaining validation work and production boundaries.

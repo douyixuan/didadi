@@ -42,6 +42,7 @@ class RuntimeSocketTests(unittest.TestCase):
         return {'membership':'join','event_id':'$reply'}
     def backend(self, base, method, path, token, data=None, query=None):
         try:
+            if path == '/agent/runtime': return self.gateway.runtime_update(data)
             if path == '/agent/tasks': return {'task':self.gateway.claim()}
             if path == '/agent/status': return {'task':self.gateway.status(query['id'])}
             if path == '/agent/document-scope': return self.gateway.document_scope(data['id'], data['lease'])

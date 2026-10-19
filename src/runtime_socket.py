@@ -1,6 +1,9 @@
 """Loopback WebSocket transport for the existing durable single-agent gateway."""
 import hmac
 import json
+import logging
+import secrets
+import threading
 import time
 from urllib.parse import urlsplit
 
@@ -26,6 +29,18 @@ def bridge(base, token, port=9020, wait_seconds=20):
             incoming.headers.get('Authorization', ''), 'Bearer ' + token)):
             return connection.respond(403, 'Forbidden\n')
     def handler(socket):
+        session = secrets.token_hex(24)
+        stopped = threading.Event()
+        def observe(connected):
+            try:
+                request(base, 'POST', '/agent/runtime', token, {'session':session, 'connected':connected})
+            except (MatrixError, OSError, ValueError) as error:
+                logging.warning('Runtime connection observation failed (%s)', type(error).__name__)
+        def pulse():
+            while not stopped.wait(10): observe(True)
+        observe(True)
+        heartbeat = threading.Thread(target=pulse, daemon=True)
+        heartbeat.start()
         try:
             for raw in socket:
                 try:
@@ -64,6 +79,10 @@ def bridge(base, token, port=9020, wait_seconds=20):
                 socket.send(json.dumps(response))
         except ConnectionClosed:
             pass  # Do not release a possibly executing lease; durable expiry controls redelivery.
+        finally:
+            stopped.set()
+            observe(False)
+            heartbeat.join(timeout=1)
     return serve(handler, '127.0.0.1', port, origins=[None], process_request=authenticate,
                  compression=None, max_size=65536, max_queue=4, ping_interval=10, ping_timeout=10,
                  close_timeout=2)
