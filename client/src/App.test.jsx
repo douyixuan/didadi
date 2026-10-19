@@ -283,6 +283,7 @@ it('previews recovered syntax safely but restores and exports the original bytes
  fireEvent.click(screen.getByRole('button',{name:'Load latest',exact:true}));
  await screen.findByLabelText('Preserved draft recovery');
  const recovery=screen.getByLabelText('Preserved draft recovery');
+ expect(recovery).toHaveTextContent('kept only in this open page');
  expect(recovery.closest('.document-scroll')).not.toBeNull();
  expect(recovery.querySelector('.recovery-source')).not.toHaveAttribute('open');
  expect(recovery.querySelector('.recovery-preview')).toHaveAttribute('open');
@@ -387,4 +388,22 @@ it('blocks direct saves over the UTF-8 byte limit and for a read-only document',
  api.document.mockResolvedValue(doc);render(<Documents api={api} room="!room" onSent={idle} mode="edit"/>);await screen.findByLabelText('Markdown document');
  fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'中'.repeat(22000)}});
  fireEvent.click(screen.getByRole('button',{name:'Save changes'}));await screen.findByText(/at most 64 KiB/);expect(api.saveDocument).not.toHaveBeenCalled();
+});
+
+it('retries the direct save after a local size error instead of repeating the previous source task',async()=>{
+ const api=fixture();api.session.repositoryReads=[{repository:'fixture',path:'main.py',commit:'a'.repeat(40),room:'!room'}];
+ api.task.mockResolvedValue({task:{status:'done',outcome:{version:1,status:'rejected',reason:'source_not_granted'}}});
+ api.saveDocument=vi.fn().mockImplementation(async(room,content)=>{
+  api.document.mockResolvedValue({...doc,content});
+  return {status:'saved',commit:doc.commit,blob:doc.blob,receipt_pending:false};
+ });
+ render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);await screen.findByLabelText('Markdown document');
+ fireEvent.click(screen.getByRole('button',{name:'Read source in discussion'}));await screen.findByText(/Repository request rejected:/);
+ fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'中'.repeat(22000)}});
+ fireEvent.click(screen.getByRole('button',{name:'Save changes'}));await screen.findByText(/at most 64 KiB/);
+ expect(api.saveDocument).not.toHaveBeenCalled();expect(api.send).toHaveBeenCalledTimes(1);
+ fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# Smaller preserved draft'}});
+ fireEvent.click(screen.getByRole('button',{name:'Retry',exact:true}));
+ await waitFor(()=>expect(api.saveDocument).toHaveBeenCalledTimes(1));
+ expect(api.send).toHaveBeenCalledTimes(1);expect(api.saveDocument.mock.calls[0][1]).toBe('# Smaller preserved draft');
 });
