@@ -5,6 +5,7 @@ from pathlib import Path
 import tempfile
 import threading
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request,urlopen
@@ -44,6 +45,16 @@ class ClientServerTests(unittest.TestCase):
         for method,path,query in [('GET','/account/whoami',{}),('GET','/rooms/!ungranted:local/state',{}),
                                   ('POST','/rooms/!seed:local/state',{}),('GET','/joined_rooms',{'user_id':['@other']})]:
             with self.assertRaises(ClientError):self.workspace.proxy(method,path,query)
+
+    def test_repository_choices_hide_local_locations_and_ungranted_identity_or_room(self):
+        grant={'path':'/private/synthetic/location','commit':'a'*40,'files':['main.py'],
+               'rooms':['!seed:local','!hidden:local'],'senders':['@human:local']}
+        repositories=SimpleNamespace(grants={'fixture':grant,'other-user':{**grant,'senders':['@other']}})
+        workspace=Workspace({'room':'!seed:local','tokens':['private-human-token']},'private-worker-token',
+            self.root/'sources-docs.git',self.root/'sources-rooms.sqlite','http://127.0.0.1:8009',
+            'http://127.0.0.1:9001',repositories)
+        self.assertEqual(workspace.repository_choices(),[{'repository':'fixture','path':'main.py','commit':'a'*40,'room':'!seed:local'}])
+        self.assertNotIn('/private',json.dumps(workspace.repository_choices()))
 
     def test_encryption_and_invalid_agent_grants_fail_before_send(self):
         content={'msgtype':'m.text','body':'hello','m.mentions':{'user_ids':[AGENT]}}
