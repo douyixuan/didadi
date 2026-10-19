@@ -77,3 +77,11 @@ Only the original requester can cancel through this trusted local session. Cance
 ## Direct human saves
 
 Human edits now use the [Document Service](DIRECT_DOCUMENT_SERVICE.md). They do not require an external worker. Failed requests keep the original payload and UUID; unknown completion pauses editing until the same request can be retried. Core discussion and Agent operations still use Matrix.
+
+## Local unsaved draft recovery
+
+Git remains authoritative for saved `demo.md`. Unsaved edits are stored in localStorage on this browser origin, scoped by Matrix user ID, room ID, fixed document path and synthetic/real mode. A different port/origin has separate storage. Copies are plaintext, not synced, and browser clearing/private mode/device changes can make them unavailable. No draft is sent to a service until the existing explicit Save action.
+
+Reopening loads Git first. Review, Export local draft, Restore local draft or Discard local draft explicitly. Restoration cannot replace current unsaved edits; first save or discard them. Restored old base versions keep their CAS base and may conflict; only confirm `I reviewed and merged latest Git text` after merging current Git text. Loading another version checkpoints the old draft before switching, and stops if that cannot be done safely. Successful confirmed saves clear this editor's unchanged copies, preserving other tabs' newer drafts.
+
+Each editor has its own record. Web Locks serialize all application storage writes/deletes across tabs. Browsers without Web Locks fall back to page editing/export with a warning. Limits are64KiB UTF-8 per draft,16 records and1MiB across this app's origin storage; no old draft is automatically evicted. Storage failure/limit/corruption warns visibly. Keep the page open until recovery writes finish, or export. Recovery is best effort, not a guarantee against OS/browser data loss.
