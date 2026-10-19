@@ -205,21 +205,22 @@ function MessageBody({body='',version,onOpenVersion,disabled=false}) {
 
 export function App({connector=connect}) {
   const [api,setApi]=useState(null),[error,setError]=useState(''),[rooms,setRooms]=useState([]),[room,setRoom]=useState('');
-  const [events,setEvents]=useState([]),[timelineError,setTimelineError]=useState(''),[replyTo,setReplyTo]=useState(null),[filter,setFilter]=useState(null);
+  const [events,setEvents]=useState([]),[timelineError,setTimelineError]=useState(''),[roomsError,setRoomsError]=useState(''),[replyTo,setReplyTo]=useState(null),[filter,setFilter]=useState(null);
   const [tasks,setTasks]=useState([]),[newName,setNewName]=useState(''),[creating,setCreating]=useState(false),[online,setOnline]=useState(false);
   const [panel,setPanel]=useState(null),[mode,setMode]=useState('read'),[historyOpen,setHistoryOpen]=useState(false),[requestedVersion,setRequestedVersion]=useState(null);
   const [docMeta,setDocMeta]=useState({title:'Workspace document'}),[search,setSearch]=useState(''),[navOpen,setNavOpen]=useState(false);
   const searchRef=useRef(null);
   const timelineRef=useRef(null);
   useEffect(()=>{if(timelineRef.current)timelineRef.current.scrollTop=timelineRef.current.scrollHeight;},[events.length,filter,panel]);
+  const roomsFailed=useRef(false),roomsRefreshing=useRef(false);
   const roomCurrent=useRef(room);roomCurrent.current=room;
   useEffect(()=>{if(room&&location.protocol.startsWith('http')){const url=new URL(location.href);url.searchParams.set('room',room);window.history.replaceState({},'',url);}},[room]);
   const createAttempt=useRef(null),createLock=useRef(false);
   async function start(){setError('');try{const next=await connector();const list=await next.rooms();setApi(next);setRooms(list);const requested=new URLSearchParams(location.search).get('room');setRoom(list.some(r=>r.id===requested)?requested:(next.session.initialRoom||list[0]?.id||''));setOnline(true);}catch(e){setError(errorText(e));}}
   useEffect(()=>{start();},[connector]);
-  async function refreshRooms(){try{const list=await api.rooms();setRooms(list);}catch(e){setError(errorText(e));}}
+  async function refreshRooms(){if(roomsRefreshing.current)return;roomsRefreshing.current=true;try{const list=await api.rooms();setRooms(list);roomsFailed.current=false;setRoomsError('');}catch(e){roomsFailed.current=true;setRoomsError(errorText(e));}finally{roomsRefreshing.current=false;}}
   useEffect(()=>{if(!api||!room)return;let stopped=false,inFlight=false;setEvents([]);setReplyTo(null);setFilter(null);
-    async function refresh(){if(inFlight)return;inFlight=true;try{const result=await api.timeline(room);if(!stopped){setEvents(result);setTimelineError('');setOnline(true);}}
+    async function refresh(){if(inFlight)return;inFlight=true;try{const result=await api.timeline(room);if(!stopped){setEvents(result);setTimelineError('');setOnline(true);if(roomsFailed.current)refreshRooms();}}
       catch(e){if(!stopped){setTimelineError(errorText(e));setOnline(false);}}finally{inFlight=false}}
     refresh();const timer=setInterval(refresh,2000);return()=>{stopped=true;clearInterval(timer)};
   },[api,room]);
@@ -266,6 +267,7 @@ export function App({connector=connect}) {
   </aside>
   <main className="main"><header className="workspace-header"><button className="mobile-nav" aria-label="Toggle navigation" onClick={()=>setNavOpen(!navOpen)}><BookOpen size={18}/></button><div className="breadcrumbs"><BookOpen size={15}/><span>Workspace</span><ChevronRight size={13}/><strong>demo.md</strong></div><div className="header-actions"><div className="mode-switch"><button aria-pressed={mode==='read'} onClick={()=>setMode('read')}>Read</button><button aria-pressed={mode==='edit'} onClick={()=>setMode('edit')}>Edit</button></div><span className="header-divider"/><button className={historyOpen?'active':''} aria-label="Version history" onClick={()=>setHistoryOpen(!historyOpen)}><History size={17}/></button><button className={panel==='discussion'?'active':''} onClick={()=>setPanel(panel==='discussion'?null:'discussion')}><MessageSquare size={17}/><span>Discussion</span></button><button className={panel==='agent'?'active':''} onClick={()=>setPanel(panel==='agent'?null:'agent')}><Bot size={17}/><span>Agent</span></button></div></header>
     {api.session.qa&&<div className="qa-banner">Visual regression capture · {api.session.qa} · isolated adapter</div>}
+    {roomsError&&<div className="global-error" role="alert">Room list is reconnecting: {roomsError}</div>}
     {error&&<div className="global-error" role="alert"><AlertCircle size={16}/>{error}<button onClick={()=>setError('')} aria-label="Dismiss error"><X size={15}/></button></div>}
     <div className="content-layout"><Documents api={api} room={documentRoom} onSent={sent} mode={mode} setMode={setMode} historyOpen={historyOpen} onCloseHistory={()=>setHistoryOpen(false)} onMeta={setDocMeta} requestedVersion={requestedVersion} canDiscussVersion={Boolean(docMeta.commit)&&events.some(event=>documentVersion(event,api.session.agentId,api.session.synthetic,api.session.userId)===docMeta.commit)} onDiscussVersion={commit=>{const event=events.find(event=>documentVersion(event,api.session.agentId,api.session.synthetic,api.session.userId)===commit);if(event){setPanel('discussion');setFilter(event.content['m.relates_to']?.event_id||event.id)}}}/>
       <aside className={'collaboration-panel '+(!panel?'panel-closed':'')} aria-label="Collaboration panel"><header className="panel-heading"><div><h2>{panel==='agent'?'Example Agent':'Discussion'}</h2><span>{selected?.name||'Room'}</span></div><button aria-label="Close collaboration panel" onClick={()=>setPanel(null)}><X size={18}/></button></header>

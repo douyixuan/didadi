@@ -505,3 +505,27 @@ it('does not switch away from current edits when checkpoint storage fails',async
  finally{spy.mockRestore();}
  first.unmount();render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);await screen.findByLabelText('Local draft recovery');expect(screen.getByText('# durable original',{selector:'pre'})).toBeInTheDocument();
 });
+
+it('clears the failed room refresh on reconnect while an exact uncertain save is retried',async()=>{
+ const api=fixture(),intervals=new Map();api.rooms.mockResolvedValue([{id:'!room',name:'Workspace',agentJoined:true}]);
+ const timer=vi.spyOn(globalThis,'setInterval').mockImplementation((callback,ms)=>{intervals.set(ms,callback);return 12345+ms;});
+ api.saveDocument=vi.fn().mockRejectedValueOnce(new TypeError('fetch failed')).mockImplementation(async(_room,content)=>{api.document.mockResolvedValue({...doc,content});return {status:'saved',commit:doc.commit,blob:doc.blob};});
+ try{render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Team handbook'});fireEvent.click(screen.getByRole('button',{name:'Edit',exact:true}));
+  fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# Retry after reconnect'}});api.rooms.mockRejectedValueOnce(new TypeError('fetch failed'));
+  await act(async()=>intervals.get(10000)());await screen.findByText(/Room list is reconnecting: fetch failed/);
+  fireEvent.click(screen.getByRole('button',{name:'Save changes'}));await screen.findByText(/Editing is paused while this save is uncertain/);
+  await act(async()=>intervals.get(2000)());await waitFor(()=>expect(screen.queryByText(/Room list is reconnecting/)).not.toBeInTheDocument());
+  fireEvent.click(screen.getByRole('button',{name:'Retry',exact:true}));await screen.findByText(/Saved directly to Git/);
+  expect(screen.queryByText('fetch failed')).not.toBeInTheDocument();expect(api.saveDocument.mock.calls[1]).toEqual(api.saveDocument.mock.calls[0]);
+ }finally{timer.mockRestore();}
+});
+
+it('keeps unrelated failed room creation visible when background polling recovers',async()=>{
+ const api=fixture(),intervals=new Map();api.createRoom.mockRejectedValue(new Error('Room creation denied'));
+ const timer=vi.spyOn(globalThis,'setInterval').mockImplementation((callback,ms)=>{intervals.set(ms,callback);return 23456+ms;});
+ try{render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Team handbook'});
+  fireEvent.change(screen.getByLabelText('New local room name'),{target:{value:'denied room'}});fireEvent.click(screen.getByRole('button',{name:'Create local room'}));await screen.findByText('Room creation denied');
+  api.rooms.mockRejectedValueOnce(new TypeError('fetch failed'));await act(async()=>intervals.get(10000)());await screen.findByText(/Room list is reconnecting/);
+  await act(async()=>intervals.get(2000)());await waitFor(()=>expect(screen.queryByText(/Room list is reconnecting/)).not.toBeInTheDocument());expect(screen.getByText('Room creation denied')).toBeInTheDocument();
+ }finally{timer.mockRestore();}
+});
