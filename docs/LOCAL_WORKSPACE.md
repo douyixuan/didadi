@@ -75,7 +75,7 @@ Start the external runtime. It has no document repository path or source grants:
 .venv-delivery/bin/python -m scripts.websocket_worker --url ws://127.0.0.1:9041/runtime --token-file .local/bundle/agent-token --document-url http://127.0.0.1:9042
 ```
 
-Human saves require only the client and Matrix. Explicit Agent source tasks require all four processes. Agent IO and Git recovery belong to the Document API. It accepts only task ID and current lease, derives context from Gateway storage, and checks live Matrix authority. The existing single-runtime token and loopback services are development boundaries. Legacy `--repo` cohosting provides no OS isolation. Cancellation can race after the last authorization check; it does not undo an existing Git commit.
+Human saves require only the client and Matrix. Explicit Agent source tasks require all four processes. Agent IO and Git recovery belong to the Document API. It derives room, document path and base version from Gateway storage and checks the current task lease and live Matrix authority. Read/source bodies return only in the HTTP response resource field. New writes use the metadata-only Matrix task and scoped HTTP body API described below. The existing single-runtime token and loopback services are development boundaries. Legacy `--repo` cohosting provides no OS isolation. Cancellation can race after the last authorization check; it does not undo an existing Git commit.
 
 ## Verify and use
 
@@ -101,3 +101,14 @@ docker compose -p didadi-bundle down
 Restart with the same directory, project, ports and volumes. Reuse the existing state/grants; do not rerun fixture creation. The configuration, database and Synapse volumes form one identity set. Preserve them together. `.local` contains test credentials, grants and document data; `.venv-delivery`, `node_modules` and `client/dist` are local build outputs. None belongs in a public source archive.
 
 If startup fails, inspect `docker compose -p didadi-bundle ps -a` and service logs. Do not reset volumes as a generic repair. A PostgreSQL initialization race is prevented by TCP readiness; an unrelated port, missing tool or insufficient Docker resource issue still needs its own diagnosis.
+
+
+## Agent body IO without Matrix document bodies
+
+Recommended write task content: `org.didadi.document: {"action":"write","base_blob":null}` (or the current Git blob). Do not include document text in that Matrix event. After claiming the task over the outbound runtime connection, call `DocumentClient(document_url, token).write({"id":task["id"],"lease":task["lease"],"content":new_text})`. Only the Document API owns the Git repository. Path, room and base cannot be overridden by this request. The write remains strict CAS; retrying the same task/body is idempotent and changing an already fixed saved body returns HTTP409.
+
+For document/source reads, `.execute({"id":...,"lease":...})` returns body text under `resource.content` over HTTP only. Use it inside the runtime; send only the returned `result` and `outcome` to Gateway completion. Gateway also canonicalizes resource-task results before sending, so an old/custom runtime echoing a body cannot put that result into the Matrix receipt. Source outcomes include only the granted repository alias, path, commit and blob. Document reads are bounded to64KiB.
+
+Legacy inbound Matrix writes containing `content` still work for compatibility but are deprecated; they already place their input in Matrix. Existing historical messages cannot be retracted by this migration. Ordinary chat is unchanged. This is a development API and shared runtime-token boundary, not a production grant model.
+
+Protocol acceptance: `python3 -m scripts.agent_body_api_smoke --state-file .local/bundle/smoke-state.json --token-file .local/bundle/agent-token --matrix-url http://127.0.0.1:8020 --gateway-url http://127.0.0.1:9040`. The subprocess has no Git path/grant, writes and reads through HTTP, deliberately sends raw synthetic resource text as completion, and verifies Matrix retained metadata only. Older document smoke scripts retain body-bearing inputs specifically as legacy compatibility fixtures.

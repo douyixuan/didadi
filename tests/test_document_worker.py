@@ -64,7 +64,7 @@ class DocumentWorkerTests(unittest.TestCase):
         read = copy.deepcopy(self.task)
         read['event']['content']['org.didadi.document'] = {'action': 'read', 'commit': first['commit']}
         result, _ = render(read, self.store)
-        self.assertIn('# demo\n', result)
+        self.assertNotIn('# demo\n', result);self.assertIn(first['commit'],result)
         self.assertIsNone(self.store.read('escape.md'))
         self.assertFalse((Path(self.tmp.name) / 'escape.md').exists())
 

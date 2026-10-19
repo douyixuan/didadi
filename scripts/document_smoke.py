@@ -91,7 +91,7 @@ def main():
 
     old_read = send({'action': 'read', 'commit': first['commit']})
     read_reply = finish(old_read)
-    assert first_text in read_reply and 'Survives a worker crash' not in read_reply
+    assert first_text not in read_reply and first['commit'] in read_reply and 'Survives a worker crash' not in read_reply
     stale = send({'action': 'write', 'content': 'stale overwrite', 'base_blob': first['blob']})
     assert 'Document conflict:' in finish(stale)
     assert store.snapshot('demo.md')['commit'] == after_crash['commit']

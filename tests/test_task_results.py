@@ -28,6 +28,11 @@ class TaskResultTests(unittest.TestCase):
                       'm.mentions':{'user_ids':[AGENT]}}}
 
     def api(self, method, path, data=None):
+        if path.endswith('/state'):
+            return [
+                {'type':'m.room.member','state_key':'@alice:local','content':{'membership':'join'}},
+                {'type':'m.room.power_levels','content':{'users':{'@alice:local':100}}},
+            ]
         if path.endswith('/state/m.room.encryption'):
             raise MatrixError(404, {'errcode':'M_NOT_FOUND'})
         return {'membership':'join','event_id':'$reply'}
@@ -94,3 +99,21 @@ class TaskResultTests(unittest.TestCase):
         self.assertEqual(render_outcome(task,store)[2]['status'],'read')
         command['action']='bad'
         self.assertEqual(render_outcome(task,store)[2]['status'],'rejected')
+
+    def test_resource_result_is_canonical_even_for_legacy_pending_body_and_generic_chat_is_unchanged(self):
+        self.event['content']['org.didadi.document']={'action':'read'}
+        self.gateway.accept('one',[self.event]);task=self.gateway.claim();typed=outcome('read',path='demo.md',commit='a'*40,blob='b'*40)
+        with self.gateway.db() as db:db.execute('UPDATE tasks SET result=?,outcome=? WHERE id=?',('PRIVATE OLD BODY',encode_outcome(typed),task['id']))
+        self.gateway.complete(task['id'],task['lease'],'PRIVATE OLD BODY',typed)
+        reply=[call.args[2] for call in self.agent.api.call_args_list if call.args[0]=='PUT'][-1]
+        self.assertNotIn('PRIVATE OLD BODY',json.dumps(reply));self.assertNotIn('PRIVATE OLD BODY',self.gateway.status(task['id'])['body']);self.assertEqual(reply['org.didadi.task.result'],typed)
+        generic=copy.deepcopy(self.event);generic['event_id']='$chat';generic['content'].pop('org.didadi.document');self.gateway.accept('chat',[generic]);chat=self.gateway.claim()
+        self.gateway.complete(chat['id'],chat['lease'],'ordinary chat text')
+        self.assertEqual(self.gateway.status(chat['id'])['body'],'ordinary chat text')
+
+    def test_source_reference_is_strict_metadata_not_an_embedded_body(self):
+        reference={'kind':'repository','repository':'fixture','path':'main.py','commit':'a'*40,'blob':'b'*40}
+        self.assertIsNotNone(encode_outcome(outcome('read',resource=reference)))
+        for change in ({'content':'private'},{'path':'../secret'},{'commit':'bad'},{'repository':'unsafe\nname'}):
+            with self.assertRaises(ValueError):outcome('read',resource={**reference,**change})
+        with self.assertRaises(ValueError):outcome('saved',path='demo.md',commit='a'*40,blob='b'*40,resource=reference)
