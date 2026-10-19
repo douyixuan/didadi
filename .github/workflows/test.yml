@@ -87,6 +87,8 @@ jobs:
           python3 -m scripts.websocket_smoke --state-file .local/smoke-state.json --token-file .local/agent-token
       - name: Direct workerless Git document save and durable metadata receipts
         run: python3 -m scripts.direct_document_smoke --state-file .local/smoke-state.json --token-file .local/agent-token
+      - name: Concurrent HTTP document merge and overlap protection
+        run: python3 -m scripts.concurrent_merge_smoke --state-file .local/smoke-state.json --token-file .local/agent-token
       - name: Scoped Document API with mount-free external runtime
         run: python3 -m scripts.agent_document_api_smoke --state-file .local/smoke-state.json --token-file .local/agent-token
       - name: Structured client results with translated external runtime replies

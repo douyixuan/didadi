@@ -19,6 +19,14 @@ class Conflict(Exception):
     pass
 
 
+class MergeConflict(Conflict):
+    def __init__(self, text):
+        raw=text.encode('utf-8')
+        self.conflict_markdown=raw[:65536].decode('utf-8',errors='ignore')
+        self.truncated=len(raw)>65536
+        super().__init__('overlapping document edits')
+
+
 class PublicationPending(Conflict):
     pass
 
@@ -181,7 +189,10 @@ class GitDocs:
         return self.snapshot(name, commit)['content']
 
     def blob_version(self, name):
-        return self.snapshot(name)['blob']
+        self._name(name)
+        with self._locked():
+            self._sync()
+            return self._version(name,self._ref(self.branch))
 
     def _operation_ref(self, operation):
         if not isinstance(operation, str) or not 0 < len(operation) <= 1000:
@@ -227,7 +238,43 @@ class GitDocs:
                     raise InvalidPath('name collides with existing ' + '/'.join(old[:index + 1]) +
                                       ' on case-insensitive file systems')
 
-    def write(self, name, content, base_blob=None, *, operation=None, notification=None, author=None):
+    def _merge_content(self, name, content, base_blob, current, head):
+        if base_blob is None or current is None:
+            raise Conflict('a historical document base is required for merge')
+        # Scope a caller-supplied object to this exact path in reachable history.
+        changes=self._git('log','--format=','--raw','--no-abbrev','--no-renames',
+                          '--find-object='+base_blob,'-1',head,'--',name)
+        valid=False
+        for line in changes.splitlines():
+            if not line.startswith(':'):continue
+            fields=line.split('\t',1)[0].split()
+            if (fields[0]==':100644' and fields[2]==base_blob or
+                    fields[1]=='100644' and fields[3]==base_blob):valid=True;break
+        if not valid:raise Conflict('base is not a reachable regular version of this document')
+        try:
+            if any(int(self._git('cat-file','-s',blob).strip())>65536 for blob in (base_blob,current)):
+                raise Conflict('document merge input exceeds 64 KiB')
+            base=self._git('cat-file','blob',base_blob)
+            latest=self._git('cat-file','blob',current)
+        except (UnicodeError,RuntimeError,ValueError):
+            raise Conflict('document merge input is not supported UTF-8 text') from None
+        if any('\0' in value for value in (content,base,latest)):
+            raise Conflict('binary content cannot be merged')
+        with tempfile.TemporaryDirectory(prefix='didadi-merge-') as temporary:
+            files=[Path(temporary)/name for name in ('submitted','base','latest')]
+            for file,value in zip(files,(content,base,latest)):file.write_bytes(value.encode('utf-8'))
+            environment={key:value for key,value in os.environ.items() if not key.startswith('GIT_')}
+            result=subprocess.run(['git','-c','core.hooksPath=/dev/null','merge-file','-p','--diff3',
+                                   '-L','submitted','-L','base','-L','latest',*[str(file) for file in files]],
+                                  capture_output=True,timeout=30,env=environment)
+        if result.returncode<0 or result.returncode>127:
+            raise Conflict('document merge unavailable')
+        merged=result.stdout.decode('utf-8')
+        if result.returncode:raise MergeConflict(merged)
+        if len(result.stdout)>65536:raise Conflict('merged document exceeds 64 KiB')
+        return merged
+
+    def write(self, name, content, base_blob=None, *, operation=None, notification=None, author=None, merge_non_overlapping=False):
         self._name(name)
         if not isinstance(content, str) or len(content.encode()) > 65536:
             raise ValueError('content must be text, at most 64 KiB')
@@ -257,8 +304,12 @@ class GitDocs:
                 self._publish()
                 return previous
             head = self._ref(self.branch)
-            if self._version(name, head) != base_blob:
-                raise Conflict('document changed; refresh and merge')
+            current=self._version(name,head)
+            merged=False
+            if current != base_blob:
+                if not merge_non_overlapping:raise Conflict('document changed; refresh and merge')
+                content=self._merge_content(name,content,base_blob,current,head)
+                merged=True
             self._portable_name(name, head)
             blob = self._git('hash-object', '-w', '--stdin', input=content).strip()
             # A private index prevents shared-index corruption; no checkout means no symlink TOCTOU.
@@ -269,6 +320,7 @@ class GitDocs:
                 tree = self._git('write-tree', env=env).strip()
             metadata = {'operation': operation, 'name': name, 'request_hash': request_hash,
                         'notification': notification}
+            if merged:metadata['merged']=True
             parent = ['-p', head] if head else []
             revision = self._git('commit-tree', tree, *parent, input=json.dumps(metadata, sort_keys=True),
                 env={'GIT_AUTHOR_NAME':author['name'], 'GIT_AUTHOR_EMAIL':author['email']} if author is not None else None).strip()
