@@ -74,6 +74,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - name: Scoped synthetic source repository to Markdown report
+        run: python3 -m scripts.repository_read_smoke --state-file .local/smoke-state.json --token-file .local/agent-token
       - name: Real React client adapter and Matrix SDK regression
         run: |
           npm ci --prefix client

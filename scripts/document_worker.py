@@ -7,13 +7,31 @@ from scripts.agent_worker import render as echo
 from scripts.agent_worker import run_loop, report_failure
 from src.gitdocs import Conflict, GitDocs, InvalidPath, PublicationPending
 from src.matrix_http import request
+from src.repository_read import RepositoryDenied, RepositoryReader, report
 
 
 def document_result(item):
     return 'Saved demo.md\nGit commit: ' + item['commit'] + '\nBlob: ' + item['blob']
 
 
-def render(task, store):
+def render(task, store, repositories=None):
+    source = task['event']['content'].get('org.didadi.repository')
+    if source is not None:
+        try:
+            if repositories is None or 'org.didadi.document' in task['event']['content']:
+                raise RepositoryDenied('repository_request_rejected')
+            snapshot = repositories.read(task['event'], source)
+            if source['action'] == 'read':
+                return (report(snapshot) + '\nSource text (untrusted data):\n' + snapshot['content']), None
+            item = store.write('demo.md', report(snapshot), source.get('base_blob'), operation=task['id'],
+                               notification={'task_id': task['id'], 'room_id': task['event']['room_id']})
+            return document_result(item), item
+        except PublicationPending:
+            raise
+        except Conflict:
+            return 'Document conflict: refresh the Git version and merge your changes. No remote history was overwritten.', None
+        except (ValueError, KeyError, TypeError):
+            return 'Repository request rejected: no matching read grant, file or supported action.', None
     command = task['event']['content'].get('org.didadi.document')
     if not isinstance(command, dict):
         return echo(task), None
@@ -50,7 +68,7 @@ def reconcile(base, token, store):
             store.abandon(item['operation'], task.get('last_error') or 'task_failed')
 
 
-def once(base, token, store, crash_after_commit=False):
+def once(base, token, store, crash_after_commit=False, repositories=None):
     reconcile(base, token, store)
     task = request(base, 'GET', '/agent/tasks', token)['task']
     if not task:
@@ -61,7 +79,7 @@ def once(base, token, store, crash_after_commit=False):
         if task['result'] is not None:
             result = task['result']
         else:
-            result, item = render(task, store)
+            result, item = render(task, store, repositories)
         if item and crash_after_commit:
             os._exit(73)  # Integration-test fault: Git committed; completion has not been sent.
         request(base, 'POST', '/agent/complete', token,
@@ -80,12 +98,14 @@ if __name__ == '__main__':
     parser.add_argument('--url', default='http://127.0.0.1:9000')
     parser.add_argument('--token-file', required=True)
     parser.add_argument('--repo', required=True)
+    parser.add_argument('--repository-grants', help='explicit fixed-revision read grants; omitted means deny all')
     parser.add_argument('--once', action='store_true')
     parser.add_argument('--crash-after-commit', action='store_true', help='integration-test fault injection')
     args = parser.parse_args()
     token = Path(args.token_file).read_text().strip()
     store = GitDocs(args.repo)
+    repositories = RepositoryReader.from_file(args.repository_grants) if args.repository_grants else None
     if args.once:
-        once(args.url, token, store, args.crash_after_commit)
+        once(args.url, token, store, args.crash_after_commit, repositories)
     else:
-        run_loop(lambda: once(args.url, token, store, args.crash_after_commit), delay=1)
+        run_loop(lambda: once(args.url, token, store, args.crash_after_commit, repositories), delay=1)

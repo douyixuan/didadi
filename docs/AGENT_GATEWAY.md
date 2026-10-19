@@ -46,7 +46,7 @@ Do not run this alongside the preview if you want one predictable worker. The ex
 - `POST /agent/complete`, with the same credential, accepts `id`, `lease`, `result` (1–16000 characters). It persists the first result, checks current room access/encryption and sends as `@_didadi_agent_echo:didadi.localhost`. Callers cannot choose a sender, destination room or thread. Retry failed requests with the same lease/result. If the lease expired, reclaim the task and use the persisted result.
 - A reply preserves the original `m.thread` root, or starts a thread on the mentioned event. It contains a plain `m.room.message` fallback and `org.didadi.task` metadata.
 - Each event ID creates at most one task. SQLite transactions serialize claims across processes. Expired leases allow redelivery; external runtimes must use the task ID for their own side-effect deduplication.
-- A stable outbound Matrix transaction ID handles send retries. This does **not** guarantee exactly one message beyond the homeserver's transaction retention, or exactly-once external execution. No task cancellation, fairness, quotas, credential rotation UI, tenant isolation or production readiness is claimed.
+- A stable outbound Matrix transaction ID handles send retries. This does **not** guarantee exactly one message beyond the homeserver's transaction retention, or exactly-once external execution. Cancellation is cooperative as described below. Fairness, quotas, credential rotation UI, tenant isolation and production readiness remain separate work.
 
 ## Authorization and persistence
 
