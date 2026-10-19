@@ -89,6 +89,8 @@ jobs:
         run: python3 -m scripts.direct_document_smoke --state-file .local/smoke-state.json --token-file .local/agent-token
       - name: Concurrent HTTP document merge and overlap protection
         run: python3 -m scripts.concurrent_merge_smoke --state-file .local/smoke-state.json --token-file .local/agent-token
+      - name: Local remote divergence and explicit operator recovery
+        run: python3 -m scripts.remote_recovery_smoke --state-file .local/smoke-state.json --token-file .local/agent-token
       - name: Scoped Document API with mount-free external runtime
         run: python3 -m scripts.agent_document_api_smoke --state-file .local/smoke-state.json --token-file .local/agent-token
       - name: Metadata-only Matrix tasks and scoped Agent body IO

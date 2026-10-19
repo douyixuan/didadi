@@ -552,3 +552,27 @@ it('keeps an incomplete merged receipt uncertain rather than pairing submitted t
  await screen.findByText(/Merged save result is incomplete/);expect(screen.getByLabelText('Markdown document')).toHaveValue('# original request');expect(screen.getByLabelText('Markdown document')).toBeDisabled();
  fireEvent.click(screen.getByRole('button',{name:'Retry',exact:true}));await waitFor(()=>expect(api.saveDocument).toHaveBeenCalledTimes(2));expect(api.saveDocument.mock.calls[1]).toEqual(api.saveDocument.mock.calls[0]);
 });
+
+it('keeps the exact uncertain save and draft through operator reconciliation of remote histories',async()=>{
+ const api=fixture(),recovery={local_commit:'d'.repeat(40),remote_commit:'e'.repeat(40),merge_base:doc.commit};
+ api.saveDocument=vi.fn().mockRejectedValueOnce(Object.assign(new Error('Git histories diverged. Keep your draft and ask the operator.'),{status:503,data:{status:'remote_diverged',recovery}})).mockImplementationOnce(async()=>{
+  api.document.mockResolvedValue({...doc,content:'# Reconciled both histories',blob:'f'.repeat(40),commit:'1'.repeat(40)});
+  return {status:'saved',commit:'d'.repeat(40),blob:'2'.repeat(40)};
+ });
+ render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);await screen.findByLabelText('Markdown document');
+ fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# Unsaved local draft'}});fireEvent.click(screen.getByRole('button',{name:'Save changes'}));
+ await screen.findByText('Git histories need operator reconciliation');expect(screen.getByLabelText('Markdown document')).toHaveValue('# Unsaved local draft');expect(screen.getByLabelText('Markdown document')).toBeDisabled();
+ expect(screen.queryByRole('button',{name:'Load latest to merge'})).toBeNull();fireEvent.click(screen.getByRole('button',{name:'Export Markdown'}));expect(downloadMarkdown).toHaveBeenLastCalledWith('# Unsaved local draft');
+ expect(screen.getByText(recovery.local_commit)).toBeInTheDocument();expect(screen.getByText(recovery.remote_commit)).toBeInTheDocument();
+ fireEvent.click(screen.getByRole('button',{name:'Retry after reconciliation'}));await waitFor(()=>expect(screen.getByLabelText('Markdown document')).toHaveValue('# Reconciled both histories'));
+ expect(api.saveDocument.mock.calls[1]).toEqual(api.saveDocument.mock.calls[0]);expect(screen.queryByText('Git histories need operator reconciliation')).toBeNull();
+});
+
+it('allows exporting browser recovery drafts when divergence prevents the first Git load',async()=>{
+ const api=fixture();const first=render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);await screen.findByLabelText('Markdown document');
+ fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# Preserve across blocked reopen'}});
+ await screen.findByText(/Unsaved draft kept on this browser only/);first.unmount();
+ api.document.mockRejectedValue(Object.assign(new Error('Git histories diverged'),{status:503,data:{status:'remote_diverged',recovery:{local_commit:'d'.repeat(40),remote_commit:'e'.repeat(40),merge_base:doc.commit}}}));
+ render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);await screen.findByText('Git histories need operator reconciliation');await screen.findByLabelText('Local draft recovery');
+ expect(screen.getByRole('button',{name:'Restore local draft'})).toBeDisabled();fireEvent.click(screen.getByRole('button',{name:'Export local draft'}));expect(downloadMarkdown).toHaveBeenLastCalledWith('# Preserve across blocked reopen');expect(api.send).not.toHaveBeenCalled();
+});

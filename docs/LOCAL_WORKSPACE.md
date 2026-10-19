@@ -112,3 +112,7 @@ For document/source reads, `.execute({"id":...,"lease":...})` returns body text 
 Legacy inbound Matrix writes containing `content` still work for compatibility but are deprecated; they already place their input in Matrix. Existing historical messages cannot be retracted by this migration. Ordinary chat is unchanged. This is a development API and shared runtime-token boundary, not a production grant model.
 
 Protocol acceptance: `python3 -m scripts.agent_body_api_smoke --state-file .local/bundle/smoke-state.json --token-file .local/bundle/agent-token --matrix-url http://127.0.0.1:8020 --gateway-url http://127.0.0.1:9040`. The subprocess has no Git path/grant, writes and reads through HTTP, deliberately sends raw synthetic resource text as completion, and verifies Matrix retained metadata only. Older document smoke scripts retain body-bearing inputs specifically as legacy compatibility fixtures.
+
+## Local remote publication recovery
+
+When a configured trusted local Git upstream diverges, retain/export the draft and use the [operator recovery procedure](GIT_REMOTE_RECOVERY.md). The client keeps the original save ID/body/base, displays retained version metadata, and retries only that request after reconciliation. Restart supports diagnosis, not automatic merging. Existing browser recovery drafts can be exported even if the first Git read is blocked. No force-push, shared-history rewrite, remote credential change or web recovery command is provided.

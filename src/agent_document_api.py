@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 from scripts.agent_worker import render as echo
-from src.gitdocs import Conflict, GitDocs, InvalidPath, PublicationPending
+from src.gitdocs import Conflict, GitDocs, InvalidPath, PublicationPending, RemoteDiverged
 from src.matrix_http import request, MatrixError
 from src.repository_read import RepositoryDenied, RepositoryReader, report
 from src.task_result import outcome, metadata_result
@@ -188,6 +188,8 @@ def handler(service, token):
                 elif self.path == '/documents/execute': result = service.execute(data)
                 elif self.path == '/documents/reconcile' and data == {}: result = service.reconcile()
                 else: raise ValueError('invalid document API request')
+            except RemoteDiverged as error:
+                status, result = 503, {'error':'remote_diverged', 'retryable':True, 'recovery':error.recovery}
             except MatrixError as error:
                 status, result = error.status, error.body
             except (ValueError, KeyError, TypeError):
