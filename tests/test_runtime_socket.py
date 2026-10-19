@@ -36,6 +36,7 @@ class RuntimeSocketTests(unittest.TestCase):
     def close(self): self.server.shutdown(); self.thread.join(timeout=3)
     def api(self, method, path, data=None):
         if path.endswith('/state/m.room.encryption'): raise MatrixError(404, {'errcode':'M_NOT_FOUND'})
+        if path.endswith('/state'):return [{'type':'m.room.member','state_key':'@human','content':{'membership':'join'}},{'type':'m.room.power_levels','content':{'users':{'@human':100}}}]
         return {'membership':'join','event_id':'$reply'}
     def backend(self, base, method, path, token, data=None, query=None):
         try:

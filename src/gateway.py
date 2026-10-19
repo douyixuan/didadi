@@ -9,6 +9,7 @@ import time
 from src.matrix_as import AGENT
 from src.matrix_http import MatrixError, segment
 from src.room_access import allowed
+from src.document_access import document_level, DocumentAccessError
 from src.task_result import encode_outcome
 
 
@@ -192,6 +193,17 @@ class Gateway:
         if not self.allowed(json.loads(row['event'])['room_id']):
             self.fail(task_id, lease, 'room_forbidden')
             raise TaskError('room_forbidden')
+        event = json.loads(row['event'])
+        content = event['content']
+        document, repository = content.get('org.didadi.document'), content.get('org.didadi.repository')
+        mutation = (isinstance(document, dict) and document.get('action') == 'write' or
+                    isinstance(repository, dict) and repository.get('action') == 'report')
+        if isinstance(document, dict) or isinstance(repository, dict):
+            try:
+                document_level(self.agent.api, event['room_id'], event['sender'], write=mutation)
+            except DocumentAccessError:
+                self.fail(task_id, lease, 'room_forbidden')
+                raise TaskError('room_forbidden') from None
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
             current = db.execute("SELECT 1 FROM tasks WHERE id=? AND lease=? AND status='pending' AND until > ?", (task_id,lease,time.time())).fetchone()

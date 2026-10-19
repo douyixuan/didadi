@@ -21,11 +21,15 @@ export async function connect() {
     const response = await fetchLocal(path, body === undefined ? {} : {
       method: 'POST', headers: {'Content-Type':'application/json'}, body:JSON.stringify(body)});
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Local request failed. Retry with your draft preserved.');
+    if (!response.ok){const error=new Error(data.error || 'Local request failed. Retry with your draft preserved.');error.status=response.status;error.data=data;throw error;}
     return data;
   }
   return {
     session,
+    async saveDocument(room,content,base_blob,operation){
+      const response=await fetchLocal('/api/documents/demo.md',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({room,content,base_blob,operation})});
+      const data=await response.json();if(!response.ok){const error=new Error(data.error||'Save failed. Keep your draft.');error.status=response.status;error.data=data;throw error;}return data;
+    },
     async rooms() {
       const {joined_rooms: ids} = await client.getJoinedRooms();
       return Promise.all(ids.map(async id => {

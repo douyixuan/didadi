@@ -36,6 +36,7 @@ class LifecycleTests(unittest.TestCase):
             raise MatrixError(503, {'errcode': 'M_UNKNOWN'})
         if path.endswith('/state/m.room.encryption'):
             raise MatrixError(404, {'errcode': 'M_NOT_FOUND'})
+        if path.endswith('/state'):return [{'type':'m.room.member','state_key':'@alice:local','content':{'membership':'join'}},{'type':'m.room.power_levels','content':{'users':{'@alice:local':100}}}]
         return {'membership': 'join', 'event_id': '$reply'}
 
     def test_mixed_forbidden_and_healthy_batch_is_durably_acked(self):

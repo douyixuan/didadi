@@ -346,3 +346,45 @@ it('keeps the unsupported-result write guard until a latest-version read actuall
  expect(screen.getByRole('button',{name:'Save changes'})).toBeEnabled();
  expect(screen.getByLabelText('Preserved draft')).toHaveValue('# Unknown completion');expect(api.send).toHaveBeenCalledTimes(1);
 });
+
+
+it('saves a large human draft directly without a Matrix command and retries the same operation',async()=>{
+ const api=fixture();const text='# Direct save\n'+'中'.repeat(3000);
+ api.saveDocument=vi.fn().mockRejectedValueOnce(new Error('Connection lost')).mockImplementation(async(room,content)=>{
+  api.document.mockResolvedValue({...doc,content,commit:'c'.repeat(40),blob:'d'.repeat(40)});
+  return {status:'saved',commit:'c'.repeat(40),blob:'d'.repeat(40),receipt_pending:false};
+ });
+ render(<Documents api={api} room="!room" onSent={idle} mode="edit"/>);await screen.findByLabelText('Markdown document');
+ fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:text}});
+ fireEvent.click(screen.getByRole('button',{name:'Save changes'}));await screen.findByText('Connection lost');
+ expect(screen.getByLabelText('Markdown document')).toHaveValue(text);
+ expect(screen.getByLabelText('Markdown document')).toBeDisabled();expect(screen.getByRole('button',{name:'Load latest',exact:true})).toBeDisabled();
+ expect(screen.getByRole('button',{name:'Save changes'})).toBeDisabled();
+ fireEvent.click(screen.getByRole('button',{name:'Retry',exact:true}));await screen.findByText(/Saved directly to Git/);
+ expect(api.saveDocument).toHaveBeenCalledTimes(2);expect(api.saveDocument.mock.calls[0]).toEqual(api.saveDocument.mock.calls[1]);
+ expect(api.send).not.toHaveBeenCalled();expect(api.task).not.toHaveBeenCalled();
+});
+
+it('keeps a direct-save conflict draft and treats a pending receipt as a successful save',async()=>{
+ const api=fixture();const conflict=Object.assign(new Error('stale'),{status:409,data:{status:'conflict'}});
+ api.saveDocument=vi.fn().mockRejectedValueOnce(conflict).mockImplementation(async(room,content)=>{
+  api.document.mockResolvedValue({...doc,content});return {status:'saved',commit:doc.commit,blob:doc.blob,receipt_pending:true};
+ });
+ render(<Documents api={api} room="!room" onSent={idle} mode="edit"/>);await screen.findByLabelText('Markdown document');
+ fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# Keep direct conflict'}});
+ fireEvent.click(screen.getByRole('button',{name:'Save changes'}));await screen.findByText('This document has a newer version');
+ expect(screen.getByLabelText('Markdown document')).toHaveValue('# Keep direct conflict');
+ fireEvent.click(screen.getByRole('button',{name:'Load latest to merge'}));await screen.findByLabelText('Preserved draft');
+ fireEvent.click(screen.getByRole('button',{name:'Restore previous draft'}));fireEvent.click(screen.getByRole('button',{name:'Save changes'}));
+ await screen.findByText(/discussion receipt is pending/);expect(screen.queryByRole('alert')).toBeNull();
+ expect(api.send).not.toHaveBeenCalled();
+});
+
+it('blocks direct saves over the UTF-8 byte limit and for a read-only document',async()=>{
+ const api=fixture();api.saveDocument=vi.fn();api.document.mockResolvedValue({...doc,writable:false});
+ const view=render(<Documents api={api} room="!room" onSent={idle} mode="edit"/>);await screen.findByLabelText('Markdown document');
+ expect(screen.getByRole('button',{name:'Save changes'})).toBeDisabled();expect(api.saveDocument).not.toHaveBeenCalled();view.unmount();
+ api.document.mockResolvedValue(doc);render(<Documents api={api} room="!room" onSent={idle} mode="edit"/>);await screen.findByLabelText('Markdown document');
+ fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'中'.repeat(22000)}});
+ fireEvent.click(screen.getByRole('button',{name:'Save changes'}));await screen.findByText(/at most 64 KiB/);expect(api.saveDocument).not.toHaveBeenCalled();
+});
