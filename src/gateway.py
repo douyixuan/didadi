@@ -9,6 +9,7 @@ import time
 from src.matrix_as import AGENT
 from src.matrix_http import MatrixError, segment
 from src.room_access import allowed
+from src.task_result import encode_outcome
 
 
 class TaskError(ValueError):
@@ -36,7 +37,7 @@ class Gateway:
             db.execute('BEGIN IMMEDIATE')
             columns = {row['name'] for row in db.execute('PRAGMA table_info(tasks)')}
             for name, definition in [('attempts', 'INTEGER NOT NULL DEFAULT 0'),
-                                     ('last_error', 'TEXT'), ('available', 'REAL NOT NULL DEFAULT 0')]:
+                                     ('last_error', 'TEXT'), ('outcome', 'TEXT'), ('available', 'REAL NOT NULL DEFAULT 0')]:
                 if name not in columns:
                     db.execute(f'ALTER TABLE tasks ADD COLUMN {name} {definition}')
 
@@ -114,8 +115,12 @@ class Gateway:
 
     def status(self, task_id):
         with self.db() as db:
-            row = db.execute('SELECT status,reply,attempts,last_error FROM tasks WHERE id=?', (task_id,)).fetchone()
-            return dict(row) if row else None
+            row = db.execute('SELECT status,reply,attempts,last_error,outcome,result AS body FROM tasks WHERE id=?', (task_id,)).fetchone()
+            if row is None:return None
+            result = dict(row)
+            if row['status'] != 'done':result['body'] = None
+            result['outcome'] = json.loads(row['outcome']) if row['status'] == 'done' and row['outcome'] else None
+            return result
 
     def claim(self):
         # Reserve a lease in a short transaction. Network checks never hold the database lock.
@@ -154,7 +159,7 @@ class Gateway:
                     continue
                 self._record(db,task_id,'leased',row['attempts']+1)
             return {'id': task_id, 'event': event, 'lease': lease,
-                    'result': row['result'], 'agent': AGENT, 'attempts': row['attempts'] + 1}
+                    'result': row['result'], 'outcome': json.loads(row['outcome']) if row['outcome'] else None, 'agent': AGENT, 'attempts': row['attempts'] + 1}
         return None
 
     def fail(self, task_id, lease, reason='runtime_error', *, retryable=False):
@@ -194,7 +199,8 @@ class Gateway:
                 raise TaskError('invalid_lease', retryable=True)
         return {'allowed': True}
 
-    def complete(self, task_id, lease, result):
+    def complete(self, task_id, lease, result, outcome=None):
+        encoded_outcome = encode_outcome(outcome)
         if not isinstance(result, str) or not 0 < len(result) <= 16000:
             raise ValueError('result must contain 1..16000 characters')
         # Serialize completion against lease replacement. Persist the first result before outbound I/O.
@@ -206,15 +212,17 @@ class Gateway:
             if row is None or not secrets.compare_digest(row['lease'] or '', lease):
                 raise TaskError('invalid_lease', retryable=True)
             if row['status'] == 'done':
+                if row['result'] != result or row['outcome'] != encoded_outcome:
+                    raise ValueError('result already fixed')
                 return {'event_id': row['reply']}
             if row['status'] == 'failed':
                 raise TaskError('task_failed')
             if row['until'] < time.time():
                 raise TaskError('invalid_lease', retryable=True)
-            if row['result'] is not None and row['result'] != result:
+            if row['result'] is not None and (row['result'] != result or row['outcome'] != encoded_outcome):
                 raise ValueError('result already fixed')
             if row['result'] is None:self._record(db,task_id,'result_ready',row['attempts'])
-            db.execute('UPDATE tasks SET result=? WHERE id=?', (result, task_id))
+            db.execute('UPDATE tasks SET result=?,outcome=? WHERE id=?', (result, encoded_outcome, task_id))
         event = json.loads(row['event'])
         self.validate(task_id, lease)
         relation = event['content'].get('m.relates_to', {})
@@ -225,7 +233,7 @@ class Gateway:
             'msgtype': 'm.text', 'body': result,
             'm.relates_to': {'rel_type': 'm.thread', 'event_id': root,
                              'm.in_reply_to': {'event_id': event['event_id']}},
-            'org.didadi.task': {'id': task_id}})
+            'org.didadi.task': {'id': task_id}, **({'org.didadi.task.result': outcome} if outcome is not None else {})})
         except MatrixError as error:
             if error.status == 403 and error.body.get('errcode') == 'M_FORBIDDEN':
                 self.fail(task_id, lease, 'delivery_forbidden')

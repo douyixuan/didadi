@@ -17,3 +17,10 @@ it('keeps synthetic snapshot references explicitly separate from Git receipts',(
  expect(documentVersion(sample,'sample-agent',false)).toBeNull();
  expect(documentVersion(event,'@agent',true)).toBeNull();
 });
+
+it('reads structured receipts independently of translated prose and never falls back on an unknown version',()=>{
+ const typed=structuredClone(event);typed.content.body='已保存';typed.content['org.didadi.task.result']={version:1,status:'saved',path:'demo.md',commit,blob:'b'.repeat(40)};
+ expect(documentVersion(typed,'@agent')).toBe(commit);
+ typed.content.body=event.content.body;typed.content['org.didadi.task.result'].version=2;
+ expect(documentVersion(typed,'@agent')).toBeNull();
+});

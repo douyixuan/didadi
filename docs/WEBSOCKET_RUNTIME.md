@@ -27,3 +27,5 @@ python -m scripts.websocket_smoke --state-file .local/smoke-state.json --token-f
 This creates a temporary document repository, verifies two real Matrix/Git thread receipts around a same-port bridge restart, automatic runtime reconnect and exactly two document versions. Protocol regression tests separately cover lease recovery after a committed Git operation and recovery after a completed reply before outbox acknowledgement. These are distinct checks; a bridge restart is not a full infrastructure disaster recovery test.
 
 Transport API references: [websockets synchronous client](https://websockets.readthedocs.io/en/stable/reference/sync/client.html), [synchronous server](https://websockets.readthedocs.io/en/stable/reference/sync/server.html).
+
+See [structured document results](STRUCTURED_RESULTS.md) for typed completion metadata, fixed-pair retries and legacy runtime behavior.

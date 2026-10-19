@@ -10,7 +10,7 @@ const doc={name:'demo.md',content:'# Team handbook\n\nA real document.',blob:'a'
 function fixture(){return {session:{agentId:'@agent',userId:'@user:local',initialRoom:'!room'},
   rooms:vi.fn().mockResolvedValue([{id:'!room',name:'Workspace',agentJoined:true}]),timeline:vi.fn().mockResolvedValue([]),
   document:vi.fn().mockResolvedValue(doc),history:vi.fn().mockResolvedValue({commits:[doc.commit,'c'.repeat(40)]}),
-  send:vi.fn().mockResolvedValue({event_id:'$saved'}),task:vi.fn().mockResolvedValue({task:{status:'done',body:'Saved demo.md'}}),createRoom:vi.fn()};}
+  send:vi.fn().mockResolvedValue({event_id:'$saved'}),task:vi.fn().mockResolvedValue({task:{status:'done',body:'保存成功（任意展示文本）',outcome:{version:1,status:'saved',path:'demo.md',commit:doc.commit,blob:doc.blob}}}),createRoom:vi.fn()};}
 const idle=()=>{};
 describe('reliable message operations',()=>{
   it('prevents repeated submit while pending',async()=>{let resolve;const send=vi.fn(()=>new Promise(r=>resolve=r));
@@ -44,13 +44,13 @@ describe('document-first workspace',()=>{
     fireEvent.click(screen.getByRole('button',{name:'Retry'}));await waitFor(()=>expect(api.send).toHaveBeenCalledTimes(2));
     expect(api.send.mock.calls[0][2]).toBe(api.send.mock.calls[1][2]);
   });
-  it('preserves the draft on a real task conflict and reloads only on explicit action',async()=>{const api=fixture();api.task.mockResolvedValue({task:{status:'done',body:'Document conflict: newer version'}});
+  it('preserves the draft on a real task conflict and reloads only on explicit action',async()=>{const api=fixture();api.task.mockResolvedValue({task:{status:'done',body:'发生冲突',outcome:{version:1,status:'conflict'}}});
     render(<Documents api={api} room="!room" onSent={idle} mode="edit"/>);await screen.findByLabelText('Markdown document');
     fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# My unsaved version'}});fireEvent.click(screen.getByRole('button',{name:'Save changes'}));
     await screen.findByText('This document has a newer version');expect(screen.getByLabelText('Markdown document')).toHaveValue('# My unsaved version');
     fireEvent.click(screen.getByRole('button',{name:'Load latest to merge'}));await waitFor(()=>expect(screen.getByLabelText('Markdown document')).toHaveValue(doc.content));expect(screen.getByLabelText('Preserved draft')).toHaveValue('# My unsaved version');
   });
-  it('preserves unsaved edits when an Agent reads the document',async()=>{const api=fixture();api.task.mockResolvedValue({task:{status:'done',body:'demo.md at Git commit: sample'}});
+  it('preserves unsaved edits when an Agent reads the document',async()=>{const api=fixture();api.task.mockResolvedValue({task:{status:'done',body:'读取完成',outcome:{version:1,status:'read'}}});
     render(<Documents api={api} room="!room" onSent={idle} mode="edit"/>);await screen.findByLabelText('Markdown document');
     fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# Unsaved read draft'}});fireEvent.click(screen.getByRole('button',{name:'Ask example Agent to read'}));
     await screen.findByLabelText('Preserved draft');expect(screen.getByLabelText('Preserved draft')).toHaveValue('# Unsaved read draft');
@@ -185,7 +185,7 @@ it('cancels an accepted save without losing its draft and displays persistent ex
 it('sends only the selected granted source request and retries a rejection as a read',async()=>{
  const api=fixture();api.session.repositoryReads=[{repository:'fixture',path:'main.py',commit:'a'.repeat(40),room:'!room'},
   {repository:'other-room',path:'private.py',commit:'b'.repeat(40),room:'!other'}];
- api.task.mockResolvedValue({task:{status:'done',body:'Repository request rejected: no matching read grant, file or supported action.'}});
+ api.task.mockResolvedValue({task:{status:'done',body:'权限不符',outcome:{version:1,status:'rejected',reason:'source_not_granted'}}});
  render(<Documents api={api} room="!room" onSent={idle}/>);
  await screen.findByRole('heading',{name:'Team handbook'});
  expect(screen.getByLabelText('Granted source file')).toHaveTextContent('fixture / main.py');
@@ -201,7 +201,7 @@ it('sends only the selected granted source request and retries a rejection as a 
 
 it('protects an unsaved draft and uses the current blob for explicit report replacement',async()=>{
  const api=fixture();api.session.repositoryReads=[{repository:'fixture',path:'main.py',commit:'a'.repeat(40),room:'!room'}];
- api.task.mockResolvedValue({task:{status:'done',body:'Saved demo.md\nGit commit: '+'c'.repeat(40)}});
+ api.task.mockResolvedValue({task:{status:'done',body:'报告已写入',outcome:{version:1,status:'saved',path:'demo.md',commit:'c'.repeat(40),blob:doc.blob}}});
  const view=render(<Documents api={api} room="!room" mode="edit" onSent={idle}/>);
  await screen.findByLabelText('Markdown document');
  fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# Unsaved source report draft'}});
@@ -317,4 +317,32 @@ it('does not restore a preserved draft during a version load',async()=>{
  await act(async()=>resolve(doc));
  expect(screen.getByRole('button',{name:'Restore previous draft'})).toBeEnabled();
  expect(screen.getByLabelText('Preserved draft')).toHaveValue('# Preserved before load');
+});
+
+
+it.each([undefined,{version:2,status:'saved'},{version:1,status:'saved',path:'demo.md',commit:'invalid',blob:'invalid'}])('keeps a draft on an unsupported result and loads Git without sending a second task',async outcome=>{
+ const api=fixture();api.task.mockResolvedValue({task:{status:'done',body:'Saved demo.md',outcome}});
+ render(<Documents api={api} room="!room" onSent={idle} mode="edit"/>);await screen.findByLabelText('Markdown document');
+ fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# Keep unsupported draft'}});
+ fireEvent.click(screen.getByRole('button',{name:'Save changes'}));await screen.findByText(/runtime returned no supported/);
+ expect(screen.getByLabelText('Markdown document')).toHaveValue('# Keep unsupported draft');
+ expect(screen.queryByRole('button',{name:'Retry',exact:true})).toBeNull();
+ expect(screen.getByRole('button',{name:'Save changes'})).toBeDisabled();fireEvent.click(screen.getByRole('button',{name:'Save changes'}));
+ const load=screen.getAllByRole('button',{name:'Load latest',exact:true})[0];fireEvent.click(load);
+ await screen.findByLabelText('Preserved draft');expect(screen.getByLabelText('Preserved draft')).toHaveValue('# Keep unsupported draft');
+ expect(api.send).toHaveBeenCalledTimes(1);
+});
+
+
+it('keeps the unsupported-result write guard until a latest-version read actually succeeds',async()=>{
+ const api=fixture();api.task.mockResolvedValue({task:{status:'done',body:'Saved legacy'}});
+ render(<Documents api={api} room="!room" onSent={idle} mode="edit"/>);await screen.findByLabelText('Markdown document');
+ fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# Unknown completion'}});
+ fireEvent.click(screen.getByRole('button',{name:'Save changes'}));await screen.findByText(/runtime returned no supported/);
+ api.document.mockRejectedValueOnce(new Error('Git read unavailable'));
+ fireEvent.click(screen.getAllByRole('button',{name:'Load latest',exact:true})[0]);await screen.findByText('Git read unavailable');
+ expect(screen.getByRole('button',{name:'Save changes'})).toBeDisabled();
+ fireEvent.click(screen.getByRole('button',{name:'Retry',exact:true}));await screen.findByLabelText('Preserved draft');
+ expect(screen.getByRole('button',{name:'Save changes'})).toBeEnabled();
+ expect(screen.getByLabelText('Preserved draft')).toHaveValue('# Unknown completion');expect(api.send).toHaveBeenCalledTimes(1);
 });
