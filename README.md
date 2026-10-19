@@ -10,6 +10,10 @@ Open-source, self-hosted Matrix-based communications for humans and external age
 - Git is the only authority for Markdown document contents and versions.
 - First users: developers and agent builders; no Matrix homeserver fork.
 
+## Start a complete local workspace
+
+Follow [the clean local workspace guide](docs/LOCAL_WORKSPACE.md) for a new checkout or source archive. It installs declared dependencies, creates isolated synthetic test data, starts the four services, and verifies source reports and direct Git saves. No existing checkout or production credentials are required.
+
 ## Run the Matrix spike
 
 ```sh
@@ -30,7 +34,9 @@ See [Git documents and local editor](docs/GIT_DOCUMENTS.md) for the Matrix → e
 Requirements: Python 3.11+ and Git on PATH.
 
 ```sh
-python -m unittest discover -s tests -v
+python3 -m venv .venv-delivery
+.venv-delivery/bin/python -m pip install -r requirements-runtime.txt
+.venv-delivery/bin/python -m unittest discover -s tests -v
 ```
 
 ## Roadmap

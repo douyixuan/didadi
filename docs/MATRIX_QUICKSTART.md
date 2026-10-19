@@ -2,6 +2,8 @@
 
 This is a local development stack for Issue #1, not a production messenger or a durable agent scheduler. Requires Docker Engine/Desktop and Compose v2 with `--wait` support; internet access is needed to pull images. No Python packages or local Python installation are required for the stack.
 
+For the full document workspace and a fresh synthetic source fixture, use [LOCAL_WORKSPACE.md](LOCAL_WORKSPACE.md). The steps below exercise only Matrix communication.
+
 ## Start and test
 
 ```sh
@@ -12,7 +14,7 @@ docker compose up -d --wait --wait-timeout 240
 docker compose --profile test run --rm smoke
 ```
 
-The init container generates Synapse configuration and the AS registration automatically. Synapse loads `/config/appservice.yaml` via `app_service_config_files`; there is no manual registration API call. Configuration is JSON (valid YAML) to avoid a bootstrap dependency. Server identity is fixed as `didadi.localhost`; the client endpoint is `http://localhost:8008`. Only this endpoint is published, bound to host loopback. AS port 9000 is also bound only to host loopback for the external runtime; PostgreSQL port 5432 remains internal. Federation is disabled for this spike.
+The init container generates Synapse configuration and the AS registration automatically. Synapse loads `/config/appservice.yaml` via `app_service_config_files`; there is no manual registration API call. Configuration is JSON (valid YAML) to avoid a bootstrap dependency. Server identity is fixed as `didadi.localhost`; the client endpoint is `http://localhost:8008`. Only this endpoint is published, bound to host loopback. AS port 9000 is also bound only to host loopback for the external runtime; PostgreSQL port 5432 remains internal. Federation is disabled for this spike. PostgreSQL readiness uses TCP, so Synapse cannot start against the temporary Unix-socket-only initialization server.
 
 The smoke test uses Synapse's shared-secret admin registration endpoint to create two **non-admin** users with random names/passwords, then explicitly registers `@_didadi_agent_echo:didadi.localhost` through the AS registration flow. Anonymous registration is disabled. Tokens/passwords are never printed. Re-running the smoke test creates a fresh room and two users, so tests work with retained volumes.
 
