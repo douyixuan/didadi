@@ -37,7 +37,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: markdown-roundtrip
-          path: client/.local/markdown-roundtrip.json
+          path: |
+            client/.local/markdown-roundtrip.json
+            client/.local/source-performance.json
           if-no-files-found: error
       - run: npm --prefix client run build
   matrix-smoke:
