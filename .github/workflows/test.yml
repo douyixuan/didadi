@@ -18,7 +18,9 @@ jobs:
           git config --global user.name 'CI Test'
           git config --global user.email 'ci@example.invalid'
       - name: Unit tests
-        run: python -m unittest discover -s tests -v
+        run: |
+          python -m pip install -r requirements-runtime.txt
+          python -m unittest discover -s tests -v
   react-client:
     runs-on: ubuntu-latest
     steps:
@@ -76,6 +78,10 @@ jobs:
           node-version: '24'
       - name: Scoped synthetic source repository to Markdown report
         run: python3 -m scripts.repository_read_smoke --state-file .local/smoke-state.json --token-file .local/agent-token
+      - name: Outbound WebSocket runtime and reconnect
+        run: |
+          python3 -m pip install -r requirements-runtime.txt
+          python3 -m scripts.websocket_smoke --state-file .local/smoke-state.json --token-file .local/agent-token
       - name: Real React client adapter and Matrix SDK regression
         run: |
           npm ci --prefix client

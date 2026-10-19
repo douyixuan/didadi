@@ -57,10 +57,10 @@ def render(task, store, repositories=None):
         return 'Document request rejected: invalid action, content or version.', None
 
 
-def reconcile(base, token, store):
+def reconcile(base, token, store, transport=None):
     # A crash after Matrix ACK but before receipt is reconciled without another notification.
     for item in store.pending():
-        task = request(base, 'GET', '/agent/status', token,
+        task = (transport or request)(base, 'GET', '/agent/status', token,
                        query={'id': item['notification']['task_id']})['task']
         if task and task['status'] == 'done':
             store.acknowledge(item['operation'])
@@ -68,13 +68,14 @@ def reconcile(base, token, store):
             store.abandon(item['operation'], task.get('last_error') or 'task_failed')
 
 
-def once(base, token, store, crash_after_commit=False, repositories=None):
-    reconcile(base, token, store)
-    task = request(base, 'GET', '/agent/tasks', token)['task']
+def once(base, token, store, crash_after_commit=False, repositories=None, transport=None):
+    send = transport or request
+    reconcile(base, token, store, transport)
+    task = send(base, 'GET', '/agent/tasks', token)['task']
     if not task:
         return False
     try:
-        request(base, 'POST', '/agent/validate', token, {'id': task['id'], 'lease': task['lease']})
+        send(base, 'POST', '/agent/validate', token, {'id': task['id'], 'lease': task['lease']})
         item = None
         if task['result'] is not None:
             result = task['result']
@@ -82,12 +83,12 @@ def once(base, token, store, crash_after_commit=False, repositories=None):
             result, item = render(task, store, repositories)
         if item and crash_after_commit:
             os._exit(73)  # Integration-test fault: Git committed; completion has not been sent.
-        request(base, 'POST', '/agent/complete', token,
+        send(base, 'POST', '/agent/complete', token,
                 {'id': task['id'], 'lease': task['lease'], 'result': result})
         if item:
             store.acknowledge(item['operation'])
     except Exception as error:
-        report_failure(base, token, task, error)
+        report_failure(base, token, task, error, transport)
         raise
     print('completed document-runtime task=' + task['id'], flush=True)
     return True
