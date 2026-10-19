@@ -51,6 +51,7 @@ def main():
         reader = RepositoryReader({'repositories': {'fixture': {'path': str(source), 'commit': commit,
             'files': ['main.py'], 'rooms': [room], 'senders': [sender]}}})
         store = GitDocs(root / 'documents.git')
+        store._git('config','didadi.documentRoom',state['room'])
         command = {'action': 'report', 'repository': 'fixture', 'path': 'main.py', 'base_blob': None}
         identifier = send(command); reply = finish(identifier, store, reader)
         snapshot = store.snapshot('demo.md'); assert commit in snapshot['content']

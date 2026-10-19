@@ -93,7 +93,7 @@ class DocumentServiceTests(unittest.TestCase):
     def test_binding_and_gateway_mutation_authority_are_not_bypassed(self):
         from src.gateway import Gateway, TaskError
         from src.matrix_as import AGENT
-        from scripts.document_worker import render_outcome
+        from src.agent_document_api import render_outcome
         from unittest.mock import Mock
         with self.assertRaises(ValueError):DocumentService(GitDocs(self.root),self.api,'@alice:local','!different:local')
         task={'id':'$cross-room','event':{'room_id':'!different:local','sender':'@alice:local','content':{

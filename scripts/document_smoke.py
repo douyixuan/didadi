@@ -24,6 +24,7 @@ def main():
     state = json.loads(Path(args.state_file).read_text())
     token = Path(args.token_file).read_text().strip()
     store = GitDocs(args.repo)
+    store._git('config','didadi.documentRoom',state['room'])
     room = '/rooms/' + segment(state['room'])
     run = secrets.token_hex(6)
 

@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from scripts.document_worker import render
+from src.agent_document_api import render
 from src.gitdocs import GitDocs
 from src.repository_read import RepositoryDenied, RepositoryReader
 

@@ -22,6 +22,8 @@ def serve(state, worker_token, port=8765, document_repo=None,
     if document_repo:
         from src.gitdocs import GitDocs
         store = GitDocs(document_repo)
+        from src.agent_document_api import AgentDocuments
+        AgentDocuments(store, None, room=state['room'])  # Explicit local preview configuration.
 
     def api(method, path, data=None, query=None):
         return request(matrix_url, method, PREFIX + path, state['tokens'][0], data, query)
