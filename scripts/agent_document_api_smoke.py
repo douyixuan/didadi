@@ -11,6 +11,7 @@ import threading
 import time
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 
 from src.client_server import Workspace, handler
 from src.agent_document_api import AgentDocuments, DocumentClient, handler as document_handler
@@ -58,9 +59,20 @@ def main():
             req=Request(base+path,data=None if data is None else json.dumps(data).encode(),headers=headers,method=method)
             with urlopen(req,timeout=10) as response:return json.load(response)
         def send(command,txn=None):
-            return api('/matrix'+PREFIX+'/rooms/'+segment(state['room'])+'/send/m.room.message/'+(txn or secrets.token_hex(12)),
-                {'msgtype':'m.text','body':'Structured protocol synthetic fixture','m.mentions':{'user_ids':[AGENT]},
-                 'org.didadi.document':command},'PUT')['event_id']
+            path=PREFIX+'/rooms/'+segment(state['room'])+'/send/m.room.message/'+(txn or secrets.token_hex(12))
+            payload={'msgtype':'m.text','body':'Structured protocol synthetic fixture',
+                     'm.mentions':{'user_ids':[AGENT]},'org.didadi.document':command}
+            if command.get('action')=='write':
+                # Legacy wire compatibility is an external-client fixture, not a
+                # built-in human save. The platform proxy must reject it first.
+                try:
+                    api('/matrix'+path,payload,'PUT')
+                except HTTPError as error:
+                    assert error.code==400
+                else:
+                    raise AssertionError('platform proxy accepted a body-bearing document task')
+                return request(args.matrix_url,'PUT',path,state['tokens'][0],payload)['event_id']
+            return api('/matrix'+path,payload,'PUT')['event_id']
         def finish(identifier):
             deadline=time.monotonic()+60
             while time.monotonic()<deadline:
