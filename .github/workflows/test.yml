@@ -120,6 +120,7 @@ jobs:
           python3 -m scripts.workspace_acceptance --url http://127.0.0.1:8767
           node client/scripts/smoke.mjs
           node client/scripts/history-smoke.mjs
+          node client/scripts/documents-smoke.mjs http://127.0.0.1:8767
       - name: Diagnostics
         if: failure()
         run: |

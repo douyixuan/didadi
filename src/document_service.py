@@ -32,18 +32,32 @@ class DocumentService:
         except DocumentAccessError as error:
             raise DocumentError(error.status, error.message) from None
 
-    def read(self, room, commit=None):
+    def read(self, room, commit=None, name='demo.md'):
         level = self.authorize(room)
         # Receipt recovery cannot make an already committed document unreadable.
         self.deliver_pending()
         try:
-            return {**self.store.snapshot('demo.md', commit), 'writable': level >= 50}
+            return {**self.store.snapshot(name, commit), 'writable': level >= 50}
         except RemoteDiverged as error:
             raise DocumentError(503, str(error), status='remote_diverged', recovery=error.recovery) from None
 
-    def save(self, data):
+    def documents(self, room):
+        level = self.authorize(room)
+        self.deliver_pending()
+        try:
+            return {**self.store.documents(), 'writable': level >= 50}
+        except RemoteDiverged as error:
+            raise DocumentError(503, str(error), status='remote_diverged', recovery=error.recovery) from None
+
+    def create(self, data):
+        if not isinstance(data, dict) or set(data) != {'room', 'operation', 'content', 'name'}:
+            raise DocumentError(400, 'Expected room, operation, content and name.')
+        return self.save({key: data[key] for key in ('room', 'operation', 'content')} | {'base_blob': None}, data['name'], create=True)
+
+    def save(self, data, name='demo.md', *, create=False):
         if not isinstance(data, dict) or set(data) != {'room', 'operation', 'content', 'base_blob'}:
             raise DocumentError(400, 'Expected room, operation, content and base_blob.')
+        self.store._name(name)
         operation, content, base = data['operation'], data['content'], data['base_blob']
         try:
             valid_id = isinstance(operation, str) and str(uuid.UUID(operation)) == operation
@@ -57,36 +71,37 @@ class DocumentService:
         key = 'human-save:' + hashlib.sha256((self.user_id + '\0' + self.room + '\0' + operation).encode()).hexdigest()
         notice = {'kind': 'document_commit', 'version': 1, 'room_id': self.room, 'author': self.user_id}
         try:
-            item = self.store.write('demo.md', content, base, operation=key, notification=notice,
-                merge_non_overlapping=True, author={'name': self.user_id, 'email': hashlib.sha256(self.user_id.encode()).hexdigest()[:24] + '@matrix.invalid'})
+            item = self.store.write(name, content, base, operation=key, notification=notice,
+                merge_non_overlapping=not create, author={'name': self.user_id, 'email': hashlib.sha256(self.user_id.encode()).hexdigest()[:24] + '@matrix.invalid'})
         except RemoteDiverged as error:
             raise DocumentError(503, str(error), status='remote_diverged', recovery=error.recovery) from None
         except PublicationPending:
             raise DocumentError(503, 'Git publication is pending. Keep the draft and retry the same operation.', status='publication_pending') from None
         except MergeConflict as error:
             raise DocumentError(409,'Overlapping edits need a manual merge. Keep your draft.',status='conflict',
-                                current_blob=self.store.blob_version('demo.md'),
+                                current_blob=self.store.blob_version(name),
                                 conflict_markdown=error.conflict_markdown,conflict_truncated=error.truncated) from None
         except Conflict:
             raise DocumentError(409, 'A newer version exists or this operation was used for different text. Keep your draft.',
-                                status='conflict', current_blob=self.store.blob_version('demo.md')) from None
+                                status='conflict', current_blob=self.store.blob_version(name)) from None
         try:
             receipt = self.deliver(item)
         except (DocumentError, MatrixError, OSError, RuntimeError, Conflict):
             receipt = None
-        return {'status': 'saved', 'commit': item['commit'], 'blob': item['blob'], 'path': 'demo.md',
+        return {'status': 'saved', 'commit': item['commit'], 'blob': item['blob'], 'path': name,
                 'author': self.user_id, 'merged':bool(item.get('merged')),
-                'content':self.store.read('demo.md',item['commit']), 'receipt': receipt, 'receipt_pending': receipt is None}
+                'content':self.store.read(name,item['commit']), 'receipt': receipt, 'receipt_pending': receipt is None}
 
     def deliver(self, item):
         notice = {'kind': 'document_commit', 'version': 1, 'room_id': self.room, 'author': self.user_id}
         if item.get('notification') != notice or not item['operation'].startswith('human-save:'):
             raise DocumentError(403, 'This receipt belongs to another operation.')
         self.authorize(self.room, write=True)
+        name = self.store._name(item['name'])
         txn = hashlib.sha256(('document-receipt:' + item['operation']).encode()).hexdigest()
         sent = self.api('PUT', '/rooms/' + segment(self.room) + '/send/m.room.message/' + txn, {
-            'msgtype': 'm.text', 'body': 'Saved demo.md (' + item['commit'][:10] + ')',
-            'org.didadi.document.commit': {'version': 1, 'path': 'demo.md', 'commit': item['commit'],
+            'msgtype': 'm.text', 'body': 'Saved ' + name + ' (' + item['commit'][:10] + ')',
+            'org.didadi.document.commit': {'version': 1, 'path': name, 'commit': item['commit'],
                 'blob': item['blob'], 'author': self.user_id}})
         self.store.acknowledge(item['operation'])
         return sent

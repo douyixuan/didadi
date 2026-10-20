@@ -4,6 +4,7 @@ import sqlite3
 from pathlib import Path
 import tempfile
 import threading
+import uuid
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -91,6 +92,45 @@ class ClientServerTests(unittest.TestCase):
         self.alias_exists=True
         self.assertEqual(self.workspace.create_room('stable-request-id','Recovered room')['room_id'],'!created:local')
         self.workspace.allowed('!created:local')
+
+    def test_named_document_http_creation_errors_and_room_boundary(self):
+        def document_api(method, path, data=None):
+            if method == 'GET':
+                return [{'type': 'm.room.member', 'state_key': '@human:local', 'content': {'membership': 'join'}},
+                        {'type': 'm.room.power_levels', 'content': {'users': {'@human:local': 100}}}]
+            return {'event_id': '$document-receipt'}
+        self.workspace.documents.api = document_api
+        dist = self.root / 'document-dist'
+        dist.mkdir()
+        server = ThreadingHTTPServer(('127.0.0.1', 0), lambda *args: None)
+        server.RequestHandlerClass = handler(self.workspace, dist, server.server_port)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f'http://127.0.0.1:{server.server_port}'
+        def fetch(path, method='GET', data=None):
+            req = Request(base + path, method=method, headers={'X-CSRF-Token': self.workspace.csrf},
+                          data=json.dumps(data).encode() if data is not None else None)
+            with urlopen(req, timeout=5) as response:
+                return json.load(response)
+        payload = {'room': '!seed:local', 'name': 'Good.md', 'content': '# Good', 'operation': str(uuid.uuid4())}
+        try:
+            first = fetch('/api/documents', 'POST', payload)
+            self.assertEqual(fetch('/api/documents', 'POST', payload)['commit'], first['commit'])
+            self.assertEqual(fetch('/api/documents?room=!seed:local')['documents'][0]['name'], 'Good.md')
+            self.assertEqual(fetch('/api/document?room=!seed:local&path=Good.md')['content'], '# Good')
+            for name, status in [('../outside.md', 400), ('.git/secret.md', 400), ('good.md', 409), ('Good.md', 409)]:
+                with self.subTest(name=name), self.assertRaises(HTTPError) as caught:
+                    fetch('/api/documents', 'POST', {**payload, 'name': name, 'operation': str(uuid.uuid4())})
+                self.assertEqual(caught.exception.code, status)
+            with self.assertRaises(HTTPError) as caught:
+                fetch('/api/documents', 'POST', {**payload, 'room': '!other:local', 'name': 'Other.md'})
+            self.assertEqual(caught.exception.code, 403)
+            self.assertEqual(self.workspace.docs.read('Good.md'), '# Good')
+            self.assertIsNone(self.workspace.docs.read('Other.md'))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
     def test_http_csrf_host_and_static_path_boundaries_without_token_disclosure(self):
         dist=self.root/'dist';dist.mkdir();(dist/'index.html').write_text('<html>workspace</html>')

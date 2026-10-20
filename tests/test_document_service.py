@@ -30,6 +30,58 @@ class DocumentServiceTests(unittest.TestCase):
     def payload(self,**changes):
         return {'room':'!doc:local','operation':str(uuid.uuid4()),'content':'# Test 原文\r\n','base_blob':None,**changes}
 
+    def test_document_creation_list_isolation_and_named_receipts(self):
+        first = {'room': '!doc:local', 'operation': str(uuid.uuid4()), 'name': '设计/First doc.md', 'content': '# First\n'}
+        saved = self.service.create(first)
+        self.assertEqual(self.service.create(first), saved)
+        second = self.service.create({**first, 'operation': str(uuid.uuid4()), 'name': 'Second.md', 'content': '# Second\n'})
+        self.assertEqual([item['name'] for item in self.service.documents('!doc:local')['documents']], ['Second.md', '设计/First doc.md'])
+        self.assertEqual(self.service.read('!doc:local', name=first['name'])['content'], first['content'])
+        changed = self.service.save(self.payload(content='# First changed\n', base_blob=saved['blob']), first['name'])
+        self.assertEqual(self.store.read('Second.md'), '# Second\n')
+        self.assertEqual(self.service.read('!doc:local', saved['commit'], first['name'])['content'], first['content'])
+        paths = [item['content']['org.didadi.document.commit']['path'] for item in self.events.values()]
+        self.assertEqual(paths, [first['name'], 'Second.md', first['name']])
+        self.assertEqual(len(self.store.history(first['name'])), 2)
+        self.assertEqual(len(self.store.history('Second.md')), 1)
+        with self.assertRaises(DocumentError) as caught:
+            self.service.create({**first, 'operation': str(uuid.uuid4()), 'content': '# Must not overwrite'})
+        self.assertEqual(caught.exception.status, 409)
+        self.assertEqual(self.store.read(first['name']), '# First changed\n')
+        with self.assertRaises(DocumentError):
+            self.service.documents('!other:local')
+        self.level = 0
+        self.assertFalse(self.service.documents('!doc:local')['writable'])
+        with self.assertRaises(DocumentError):
+            self.service.create({**first, 'operation': str(uuid.uuid4()), 'name': 'Denied.md'})
+
+    def test_named_document_paths_and_operation_binding_fail_closed(self):
+        from src.gitdocs import InvalidPath
+        payload = {'room': '!doc:local', 'operation': str(uuid.uuid4()), 'name': 'Good.md', 'content': '# Good'}
+        self.service.create(payload)
+        for name in ['../outside.md', '.git/secret.md', 'good.md']:
+            with self.assertRaises(InvalidPath):
+                self.service.create({**payload, 'operation': str(uuid.uuid4()), 'name': name})
+        with self.assertRaises(DocumentError):
+            self.service.create({**payload, 'name': 'Other.md'})
+        self.assertIsNone(self.store.read('Other.md'))
+
+    def test_listing_filters_imported_executable_and_symlink_entries(self):
+        regular = self.store.write('Regular.md', '# Regular')
+        executable = self.store.write('Executable.md', '# Executable')
+        head = executable['commit']
+        with tempfile.TemporaryDirectory() as index:
+            env = {'GIT_INDEX_FILE': str(Path(index) / 'index')}
+            self.store._git('read-tree', head, env=env)
+            self.store._git('update-index', '--cacheinfo', '100755', executable['blob'], 'Executable.md', env=env)
+            self.store._git('update-index', '--add', '--cacheinfo', '120000', regular['blob'], 'Link.md', env=env)
+            tree = self.store._git('write-tree', env=env).strip()
+        commit = self.store._git('commit-tree', tree, '-p', head, input='Imported non-regular Markdown fixture').strip()
+        self.store._git('update-ref', self.store.branch, commit, head)
+        imported = GitDocs(Path(self.tmp.name) / 'imported.git', self.root)
+        self.assertEqual([item['name'] for item in imported.documents()['documents']], ['Regular.md'])
+        self.assertEqual(imported.read('Regular.md'), '# Regular')
+
     def test_direct_save_and_retry_no_body_in_receipt(self):
         data=self.payload();first=self.service.save(data);again=self.service.save(data)
         self.assertEqual(first,again);self.assertFalse(again['receipt_pending'])

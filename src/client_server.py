@@ -11,7 +11,7 @@ import secrets
 import sqlite3
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from src.gitdocs import GitDocs, Conflict
+from src.gitdocs import GitDocs, Conflict, InvalidPath, NameCollision
 from src.document_service import DocumentService, DocumentError
 from src.matrix_as import AGENT, PREFIX
 from src.matrix_http import MatrixError, request, segment
@@ -193,8 +193,13 @@ def handler(workspace, dist, port):
                     result = {'csrf': workspace.csrf, 'userId': workspace.user_id, 'agentId': AGENT,
                               'initialRoom': workspace.state['room'], 'documentRoom': workspace.state['room'], 'documentSave': 'direct-v1', 'qa': getattr(workspace, 'qa', None), 'agentLabel': 'Example echo agent · no LLM',
                               'repositoryReads': workspace.repository_choices()}
-                elif parsed.path == '/api/documents/demo.md' and method == 'PUT':
-                    result = workspace.documents.save(body)
+                elif parsed.path == '/api/documents' and method == 'GET':
+                    result = workspace.documents.documents(query.get('room', [''])[0])
+                elif parsed.path == '/api/documents' and method == 'POST':
+                    result = workspace.documents.create(body)
+                elif parsed.path.startswith('/api/documents/') and method == 'PUT':
+                    name = unquote(parsed.path[len('/api/documents/'):], errors='strict')
+                    result = workspace.documents.save(body, name)
                 elif parsed.path == '/api/task/cancel' and method == 'POST':
                     result = workspace.cancel_task(body['room'],body['id'])
                 elif parsed.path == '/api/task/audit' and method == 'GET':
@@ -211,10 +216,10 @@ def handler(workspace, dist, port):
                     room = query.get('room', [''])[0]
                     workspace.allowed(room)
                     if parsed.path == '/api/document':
-                        result = workspace.documents.read(room, query.get('commit', [None])[0])
+                        result = workspace.documents.read(room, query.get('commit', [None])[0], query.get('path', ['demo.md'])[0])
                     elif parsed.path == '/api/history':
                         workspace.documents.authorize(room)
-                        result = {'commits': workspace.docs.history('demo.md')}
+                        result = {'commits': workspace.docs.history(query.get('path', ['demo.md'])[0])}
                     else:
                         event_id = query.get('id', [''])[0]
                         workspace.api('GET', '/rooms/' + segment(room) + '/event/' + segment(event_id))
@@ -235,6 +240,10 @@ def handler(workspace, dist, port):
                 self.respond(error.status, error.data)
             except ClientError as error:
                 self.respond(error.status, {'error': error.message})
+            except NameCollision:
+                self.respond(409, {'error': 'This document name collides with an existing path. Choose another name.', 'status': 'name_conflict'})
+            except InvalidPath:
+                self.respond(400, {'error': 'Use a safe, portable Markdown path ending in .md.'})
             except (ValueError, KeyError, TypeError):
                 self.respond(400, {'error': 'Invalid request or document revision.'})
             except Conflict:

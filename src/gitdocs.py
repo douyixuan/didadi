@@ -42,6 +42,10 @@ class InvalidPath(Exception):
     pass
 
 
+class NameCollision(InvalidPath):
+    pass
+
+
 class GitDocs:
     branch = 'refs/heads/main'
 
@@ -191,6 +195,28 @@ class GitDocs:
             content = self._git('cat-file', 'blob', blob) if blob else None
             return {'name': name, 'content': content, 'blob': blob, 'commit': revision}
 
+    def documents(self):
+        """List valid Markdown blobs from one synchronized immutable Git tree."""
+        with self._locked():
+            self._sync()
+            head = self._ref(self.branch)
+            if not head:
+                return {'documents': [], 'commit': None}
+            documents = []
+            for entry in self._git('ls-tree', '-r', '-z', '--full-tree', head).split('\0'):
+                if not entry:
+                    continue
+                metadata, name = entry.split('\t', 1)
+                mode, kind, blob = metadata.split()
+                if kind != 'blob' or mode != '100644':
+                    continue
+                try:
+                    self._name(name)
+                except InvalidPath:
+                    continue
+                documents.append({'name': name, 'blob': blob, 'commit': head})
+            return {'documents': documents, 'commit': head}
+
     def history(self, name, limit=8):
         self._name(name)
         with self._locked():
@@ -321,7 +347,7 @@ class GitDocs:
                 if fold(left) != fold(right):
                     break
                 if left != right:
-                    raise InvalidPath('name collides with existing ' + '/'.join(old[:index + 1]) +
+                    raise NameCollision('name collides with existing ' + '/'.join(old[:index + 1]) +
                                       ' on case-insensitive file systems')
 
     def _merge_content(self, name, content, base_blob, current, head):

@@ -6,9 +6,9 @@ export const MAX_DRAFT_RECORDS=16;
 const MAX_TOTAL_BYTES=1048576;
 const bytes=value=>new TextEncoder().encode(value).length;
 const unavailable='Local draft storage is unavailable. Keep this page open and export your draft before closing.';
-export function draftContext(session,room){
+export function draftContext(session,room,name='demo.md'){
   if(!session?.userId||!room)return null;
-  return JSON.stringify([session.synthetic?'synthetic':'matrix',session.userId,room,'demo.md']);
+  return JSON.stringify([session.synthetic?'synthetic':'matrix',session.userId,room,name]);
 }
 export class LocalDraftStore {
   constructor(context,storage=()=>window.localStorage){this.context=context;this.storage=storage;this.id=crypto.randomUUID();}
