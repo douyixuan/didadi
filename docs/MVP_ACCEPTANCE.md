@@ -11,7 +11,7 @@
 | 私聊、群组、频道与成员 | client_server固定state.tokens[0]，create_room只创建本地测试私有room；SDK消息真实运行 | 部分实现；无真实登录/注销及成员/私聊/频道产品入口 |
 | 消息历史、引用与话题 | api.js只取最近50条，App线程只筛选已加载数组；SDK发送/replay/线程回复已验 | 部分实现；本轮候选补游标分页，完整thread候选已真实Matrix/浏览器验证，精确CI待完成 |
 | 附件 | BlockEditor上传器禁用，消息Composer纯文本；无媒体上传/下载产品链路 | 未实现；不能再因Phase0未列而排除原需求 |
-| 搜索 | App仅过滤房间名/单文档标题，无正文索引/消息搜索接口 | 部分实现；非全文搜索 |
+| 搜索 | 候选Matrix content.body搜索及Git Markdown正文/行/固定版本搜索，独立于导航标题过滤 | 已本地真实Matrix/Git/浏览器验证；精确CI待完成；限已授权房间/文档、跳过>64KiB或非UTF8文件，附件/其他资源待做 |
 | 多文档创建、打开、move/重命名 | 本轮候选增加真实列表、创建、独立保存/历史/草稿；Agent动作仍限demo.md | 创建/打开PR52本地与精确CI已通过；move/重命名另一个候选已本地实测，精确CI待完成，跨路径历史UI尚缺 |
 | 选消息转新文档及来源引用 | 候选from-messages API/UI已实现选ID、服务端取原文、来源链接和确定性Markdown | 已本地真实Matrix/Git/浏览器验证；精确CI待完成；当前限绑定房间的文本消息，无LLM |
 | Agent注册、能力、资源授权 | Gateway固定AGENT/单开发token，静态本地source白名单 | 部分实现；注册/授权可能涉及PR41原owner，需协调，不抢做 |

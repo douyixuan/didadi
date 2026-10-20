@@ -22,6 +22,9 @@ class ClientError(Exception):
         self.status, self.message = status, message
 
 
+from src.search_service import SearchService
+
+
 class Workspace:
     def __init__(self, state, token, repo, metadata, matrix_url, gateway_url, repositories=None):
         for base in [matrix_url, gateway_url]:
@@ -34,6 +37,7 @@ class Workspace:
         self.csrf = secrets.token_urlsafe(32)
         self.user_id = self.api('GET', '/account/whoami')['user_id']
         self.documents = DocumentService(self.docs, self.api, self.user_id, state['room'])
+        self.search = SearchService(self.documents,self.api,self.allowed)
         self.repository_reads = []
         if repositories is not None:
             for alias, grant in repositories.grants.items():
@@ -202,6 +206,10 @@ def handler(workspace, dist, port):
                     result = {'csrf': workspace.csrf, 'userId': workspace.user_id, 'agentId': AGENT,
                               'initialRoom': workspace.state['room'], 'documentRoom': workspace.state['room'], 'documentSave': 'direct-v1', 'qa': getattr(workspace, 'qa', None), 'agentLabel': 'Example echo agent · no LLM',
                               'repositoryReads': workspace.repository_choices()}
+                elif parsed.path == '/api/search/messages' and method == 'POST':
+                    result = workspace.search.messages(body)
+                elif parsed.path == '/api/search/documents' and method == 'POST':
+                    result = workspace.search.files(body)
                 elif parsed.path == '/api/documents' and method == 'GET':
                     result = workspace.documents.documents(query.get('room', [''])[0])
                 elif parsed.path == '/api/documents' and method == 'POST':

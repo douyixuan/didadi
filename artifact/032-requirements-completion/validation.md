@@ -47,3 +47,7 @@ Move candidate headb723651 first pushCI39408902567 failed one frontend fixture (
 ## 完整线程候选（2026-10-20）
 
 SDK relations独立取root+50回复，现有白名单固定v1 GET，无身份覆盖或授权设计扩张。完整145前端/build、最终75定向/10HTTP通过；新增初始空线程后新页游标回归。151完整Python结果另见候选PR。真实Matrix root在recent50之外、66回复两页/同cursor重试/流序去重通过。隔离已安装Chrome验证67条root+replies、注入root/older失败后重试、原cursor、compose保留、scroll top2697/height11371/view398、切房间隐藏旧thread。浏览器首轮选择器错误导致超时，修正ownedDOM选择器后通过；未为此修改产品。Review静态无阻断，已按建议将Complete thread改为Thread history避免把未加载页说成已加载。证据.local/threads，未验物理IME/拖拽。
+
+## 正文搜索候选（2026-10-20）
+
+155完整Python/151完整前端/build通过，4搜索service及25定向后端通过。真实8842/Matrix查到24条已超recent50的正文命中、两页取回；Git21份文件名无查询词、正文第3行命中，20+1分页同snapshot，未授权房间拒绝。隔离已安装Chrome完成24消息分页并打开历史thread；文档第一页后将第21份当前内容改写，注入一次分页503后同query/cursor/commit重试保留20结果，最终21结果并打开旧匹配版本；当前Git仍是新内容。证据.local/search/protocol.log/browser-proof.json/results.png/preview.png。首次protocol请求早于server启动ECONNREFUSED已保留protocol-startup-race.log，确认监听后重跑成功。Reviewer静态无阻断。最后补房间类型400验证；精确提交CI仍需观察。
