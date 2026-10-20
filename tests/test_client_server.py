@@ -186,3 +186,14 @@ class ClientServerTests(unittest.TestCase):
         with patch('src.client_server.request') as gateway:
             with self.assertRaises(ClientError):self.workspace.cancel_task('!ungranted:local','$mine')
             gateway.assert_not_called()
+
+    def test_thread_relations_are_room_scoped_and_never_allow_identity_or_limit_overrides(self):
+        path='/rooms/%21seed%3Alocal/relations/%24root/m.thread/m.room.message'
+        with patch('src.client_server.request',return_value={'chunk':[]}) as request:
+            self.assertEqual(self.workspace.thread_relations('GET',path,{'from':['cursor'],'limit':['999'],'dir':['f']}),{'chunk':[]})
+            args,kwargs=request.call_args
+            self.assertEqual(args[:3],('http://127.0.0.1:8009','GET','/_matrix/client/v1'+path))
+            self.assertEqual(kwargs['query'],{'from':'cursor','limit':'50','dir':'b'})
+            for method,other,query in [('POST',path,{}),('GET',path,{'user_id':['@other']}),('GET',path.replace('seed','ungranted'),{}),('GET',path.replace('m.thread','m.replace'),{})]:
+                with self.assertRaises(ClientError):self.workspace.thread_relations(method,other,query)
+            self.assertEqual(request.call_count,1)

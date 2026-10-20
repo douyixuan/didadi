@@ -12,6 +12,13 @@ export async function messagePage(client,room,from=null) {
     }),previousCursor:typeof result.end==='string'&&result.end!==from&&result.end!==result.start?result.end:null};
   }
 
+export async function threadPage(client,room,root,from=null){
+  const page=await client.relations(room,root,'m.thread','m.room.message',{dir:Direction.Backward,limit:50,...(from?{from}:{})});
+  const map=event=>({id:event.getId(),sender:event.getSender(),content:event.getContent(),time:event.getTs()});
+  if(!page.originalEvent||page.originalEvent.getId()!==root||page.originalEvent.getType()!=='m.room.message')throw new Error('The thread root is unavailable. Retry opening this thread.');
+  return {root:map(page.originalEvent),events:page.events.filter(event=>event.getType()==='m.room.message'&&event.getContent()['m.relates_to']?.rel_type==='m.thread'&&event.getContent()['m.relates_to'].event_id===root).reverse().map(map),previousCursor:typeof page.nextBatch==='string'&&page.nextBatch!==from?page.nextBatch:null};
+}
+
 export async function connect() {
   if(import.meta.env.VITE_PREVIEW_MODE==='synthetic')return (await import('./demo-api')).createDemo();
   const sessionResponse = await fetch('/api/session');
@@ -48,6 +55,7 @@ export async function connect() {
           agentJoined:state.some(e=>e.type==='m.room.member' && e.state_key===session.agentId && e.content.membership==='join')};
       }));
     },
+    threadPage:(room,root,from=null)=>threadPage(client,room,root,from),
     timelinePage,
     timeline:async room=>(await timelinePage(room)).events,
     send:(room, content, txn)=>client.sendEvent(room, 'm.room.message', content, txn),
