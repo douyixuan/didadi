@@ -42,6 +42,7 @@ export async function connect() {
   const timelinePage=(room,from=null)=>messagePage(client,room,from);
   return {
     session,
+    readSource:(room,repository,path)=>api('/api/repositories/read',{room,repository,path}),
     async uploadAttachment(room,file,operation,root=null){
       const query=new URLSearchParams({room,name:file.name,operation,type:file.type||'application/octet-stream'});if(root)query.set('root',root);
       const response=await fetchLocal('/api/attachments?'+query,{method:'POST',headers:{'Content-Type':file.type||'application/octet-stream'},body:file});const data=await response.json();if(!response.ok){const error=new Error(data.error||'Attachment failed. Retry with the same file.');error.status=response.status;throw error;}return data;

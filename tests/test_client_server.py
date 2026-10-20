@@ -82,6 +82,18 @@ class ClientServerTests(unittest.TestCase):
         content['org.didadi.document']={'action':'read'}
         self.assertEqual(self.workspace.proxy('PUT','/rooms/!seed:local/send/m.room.message/read',{},content),{'event_id':'$one'})
 
+    def test_source_references_require_canonical_body_and_reject_agent_commands(self):
+        reference={'repository':'repo','path':'a.py','commit':'a'*40,'blob':'b'*40,'start':1,'end':1}
+        self.workspace.sources=SimpleNamespace(reference=lambda room,ref:'canonical source')
+        content={'msgtype':'m.text','body':'canonical source','org.didadi.source_ref':reference}
+        path='/rooms/!seed:local/send/m.room.message/source'
+        self.workspace.proxy('PUT',path,{},content)
+        self.assertEqual(next(call[2] for call in self.calls if '/send/' in call[1])['org.didadi.source_ref'],reference)
+        for extra in ({'body':'spoof'},{'m.mentions':{'user_ids':[AGENT]}},{'org.didadi.document':{'action':'read'}}):
+            self.calls.clear()
+            with self.assertRaises(ClientError):self.workspace.proxy('PUT',path,{}, {**content,**extra})
+            self.assertFalse(any('/send/' in call[1] for call in self.calls))
+
     def test_quote_and_thread_references_are_validated_before_send(self):
         path='/rooms/!seed:local/send/m.room.message/quote'
         for relation in ({'m.in_reply_to':{'event_id':'$source'}},
