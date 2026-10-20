@@ -146,3 +146,5 @@ The follow-up preserves Matrix429 and the existing sanitized retry_after_ms HTTP
 失败规则：登录失败仅保留选择，不显示旧数据；登录成功/加载失败只保留当前session供重试，401清空身份/房间/文档/草稿。保存失败保留当前草稿，未知结果冻结原请求，换人/注销立即清所有工作区状态并以epoch忽略旧响应。注销发起即隐藏全部数据，只在内存隔离区保留原设备的注销请求；网络/5xx未知则禁止下一登录、仅重试原设备，401视为旧会话已失效。不能把本地隐藏说成服务端注销成功。每次登录新epoch，服务只替换同身份同设备的旧fake session，另一设备不受影响。
 
 验证包括pure fake服务与真实loopback HTTP契约、未知保存/注销响应、过期/401清空、当前设备语义、身份相同room/path碰撞、迟到请求和浏览器内存/网络边界。现有Matrix运行路径保持原样，CI仍运行其完整回归；新增预览单独构建和验收。真实Matrix登录、密码/SSO、安全cookie和真实token撤销仍未完成，需要先前记录的独立临时设备授权，不以fake通过替代。
+
+CI修订：本轮明确禁止真实Matrix认证，因此独立fictional-only/session-contract候选不运行原matrix-smoke（它会注册/登录CI合成账户）。保留完整单元、前端及fake HTTP job，精确记录skipped，不把它当通过。仅该候选受此条件影响，其他分支检查原样；不改保护规则/不合draft。最初推送启动旧CI且取消晚于首段Matrix smoke的事件已在validation记录，不能追溯宣称没有发生。

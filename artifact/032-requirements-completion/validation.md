@@ -132,3 +132,6 @@ The follow-up preserves Matrix429 and the existing sanitized retry_after_ms HTTP
 8项fake服务/HTTP测试涵盖相同room ID/文档名的跨身份隔离、操作绑定/幂等、过期、同设备替换、其他设备有效、服务重建不恢复旧会话及身份覆盖/Origin/CSRF/真实路由拒绝。独立HTTP脚本证明已构建入口、Alice保存Bob不可见、丢注销响应后401恢复、current_device、不接受password字段，真实Matrix调用和token创建为0。首次smoke错误地按源资源名断言构建HTML，失败日志保留；修正为实际页面标题后通过，不改变产品行为。
 
 实际浏览器仅允许8860，固定虚构值操作：保存已提交丢响应→原draft/op/version重试；另一个Alice B保持有效；延迟Alice保存→A注销响应丢失→仅原设备重试401→Bob登录→放行旧Alice响应仍只显示Bob。401清工作区/草稿，无cookie/会话持久化，预置无关存储sentinel保持；无外部/Matrix请求。证据.local/sessions/{browser.log,browser-proof.json,preview.png}，图已检查。最终提交的进程重启/浏览器再验与CI另核；fake通过不替代真实登录验收。旧62真实429超预算未通过边界保留，PR41/Issue12/共享token/ModelBench未触碰。
+
+
+CI边界事件：最初5a6f220推送到feat/fictional-session-contract沿用既有workflow，触发push39433165683；发现真实Matrix job会创建合成会话后请求取消，但检查时第一段Bidirectional messaging已success、Recreate containers运行中，不能声称取消发生在认证之前。此CI隔离夹具已发生真实Matrix合成会话行为，违反本轮零真实登录限制；未操作真实用户/本机共享token。不以新预览0调用证明整轮0调用。已提交取消请求，不重跑该run。候选改为fictional-only/session-contract，并仅对这一个明确候选跳过matrix-smoke，其他分支正常；单元、前端/build、fake HTTP契约继续跑。后续精确CI只可报告2job通过+Matrix skipped，不冒称原3job全绿。现有未合draft约束不变；该条件不修改保护规则，任何正常分支包括main仍保留Matrix gate。
