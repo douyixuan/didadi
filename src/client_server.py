@@ -314,8 +314,11 @@ def handler(workspace, dist, port):
             except Conflict:
                 self.respond(409, {'error': 'Git publication requires reconciliation; your draft is preserved.'})
             except MatrixError as error:
-                self.respond(error.status if error.status < 500 else 503,
-                             {'error': 'Matrix request failed. Keep your draft and retry.', 'errcode': error.body.get('errcode', 'M_UNKNOWN')})
+                data={'error':'Matrix request failed. Keep your draft and retry.','errcode':error.body.get('errcode','M_UNKNOWN')}
+                wait=error.body.get('retry_after_ms')
+                if error.status==429 and type(wait) in {int,float} and 0<=wait<=86400000:
+                    data['retry_after_ms']=wait
+                self.respond(error.status if error.status < 500 else 503,data)
             except Exception:
                 self.respond(503, {'error': 'Local backend unavailable. Keep your draft and retry.'})
 

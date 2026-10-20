@@ -236,6 +236,15 @@ class ClientServerTests(unittest.TestCase):
                 with self.assertRaises(ClientError):self.workspace.thread_relations(method,other,query)
             self.assertEqual(request.call_count,1)
 
+    def test_matrix_throttling_preserves_wait_hint_without_upstream_details(self):
+        self.workspace.proxy=lambda *args:(_ for _ in ()).throw(MatrixError(429,{'errcode':'M_LIMIT_EXCEEDED','retry_after_ms':2500,'error':'upstream private detail'}))
+        dist=self.root/'rate-dist';dist.mkdir();server=ThreadingHTTPServer(('127.0.0.1',0),lambda *args:None);server.RequestHandlerClass=handler(self.workspace,dist,server.server_port);thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+        try:
+            request=Request(f'http://127.0.0.1:{server.server_port}/matrix/_matrix/client/v3/rooms/!seed:local/send/m.room.message/rate',method='PUT',headers={'X-CSRF-Token':self.workspace.csrf,'Content-Type':'application/json'},data=b'{"msgtype":"m.text","body":"test"}')
+            with self.assertRaises(HTTPError) as error:urlopen(request,timeout=5)
+            self.assertEqual(error.exception.code,429);data=json.load(error.exception);self.assertEqual(data['retry_after_ms'],2500);self.assertEqual(data['errcode'],'M_LIMIT_EXCEEDED');self.assertNotIn('upstream private detail',json.dumps(data))
+        finally:server.shutdown();server.server_close();thread.join(timeout=2)
+
     def test_raw_attachment_upload_and_authenticated_forced_download(self):
         payload=b'<script>literal bytes</script>\r\n';events={};uploads=[]
         def attachment_api(method,path,data=None):
