@@ -13,6 +13,12 @@ from src.matrix_http import request, MatrixError
 from src.repository_read import RepositoryDenied, RepositoryReader, report
 from src.task_result import outcome, metadata_result
 from src.runtime_socket import loopback_url
+from src.matrix_as import AGENT
+
+
+def acting_author(task):
+    identity = task.get('agent') or AGENT
+    return {'name': identity, 'email': hashlib.sha256(identity.encode()).hexdigest()[:24] + '@matrix.invalid'}
 
 def document_result(item):
     return 'Saved demo.md\nGit commit: ' + item['commit'] + '\nBlob: ' + item['blob']
@@ -37,7 +43,8 @@ def render_outcome(task, store, repositories=None, resource=None):
                 typed=outcome('read',resource=reference)
                 return metadata_result(task['event'],typed), None, typed
             item = store.write('demo.md', report(snapshot), source.get('base_blob'), operation=task['id'],
-                               notification={'task_id': task['id'], 'room_id': task['event']['room_id']})
+                               notification={'task_id': task['id'], 'room_id': task['event']['room_id']},
+                               author=acting_author(task))
             return document_result(item), item, outcome('saved', path='demo.md', commit=item['commit'], blob=item['blob'])
         except PublicationPending:
             raise
@@ -61,7 +68,8 @@ def render_outcome(task, store, repositories=None, resource=None):
             raise ValueError('document too large')
         # The grant is fixed here, not selected by message content. The event ID is the operation ID.
         item = store.write('demo.md', content, command.get('base_blob'), operation=task['id'],
-                           notification={'task_id': task['id'], 'room_id': task['event']['room_id']})
+                           notification={'task_id': task['id'], 'room_id': task['event']['room_id']},
+                           author=acting_author(task))
         return document_result(item), item, outcome('saved', path='demo.md', commit=item['commit'], blob=item['blob'])
     except PublicationPending:
         raise  # Do not complete/ack a saved but unpublished operation as a stale-write error.
@@ -111,9 +119,10 @@ class AgentDocuments:
                 fields = ['demo.md', write_content, command.get('base_blob'),
                           {'task_id':task['id'], 'room_id':task['event']['room_id']}]
                 digest = hashlib.sha256(json.dumps(fields, sort_keys=True).encode()).hexdigest()
+                authored_digest = hashlib.sha256(json.dumps(fields + [acting_author(task)], sort_keys=True).encode()).hexdigest()
                 with self.store._locked():
                     item = self.store._operation(self.store._operation_ref(task['id']))
-                if (not item or item['request_hash'] != digest or
+                if (not item or item['request_hash'] not in {digest, authored_digest} or
                         any(item[key] != typed.get(key) for key in ('commit', 'blob'))):
                     raise MatrixError(409, {'error':'fixed_write_mismatch', 'retryable':False})
         response={'result':metadata_result(task['event'],task.get('outcome')) or task['result'],
