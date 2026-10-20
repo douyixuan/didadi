@@ -45,6 +45,9 @@ jobs:
       - name: Fictional-only login logout HTTP contract
         run: python3 -m scripts.session_contract_smoke --dist client/dist
   matrix-smoke:
+    # This explicit fictional-only candidate must not provision Matrix test sessions.
+    # Removing the draft prefix restores the normal integration gate.
+    if: ${{ !startsWith(github.head_ref || github.ref_name, 'fictional-only/') }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
