@@ -593,3 +593,57 @@ it('shows task lease/retry/connection observations and clears only a recovered t
   await act(async()=>vi.advanceTimersByTimeAsync(1300));expect(screen.getByText('In progress · lease held')).toBeInTheDocument();expect(screen.queryByText(/Task poll offline/)).toBeNull();expect(screen.getByLabelText('Markdown document')).toHaveValue('# Kept while runtime reconnects');expect(api.send).toHaveBeenCalledTimes(1);
  }finally{view.unmount();vi.useRealTimers()}
 });
+
+
+describe('message history pagination',()=>{
+ const message=(id,time)=>({id,sender:'@human',time,content:{body:id}});
+ it('loads older pages once, deduplicates boundaries and keeps the message draft on retry',async()=>{
+  const api=fixture();let resolve;
+  api.timelinePage=vi.fn().mockResolvedValueOnce({events:[message('$recent',3)],previousCursor:'p1'})
+   .mockRejectedValueOnce(new Error('History offline'))
+   .mockImplementationOnce(()=>new Promise(r=>resolve=r));
+  render(<App connector={async()=>api}/>);await screen.findByText('$recent');fireEvent.click(screen.getByRole('button',{name:'Discussion',exact:true}));
+  fireEvent.change(screen.getByLabelText('Message'),{target:{value:'unsent draft'}});
+  fireEvent.click(screen.getByRole('button',{name:'Load earlier messages'}));await screen.findByText(/History offline/);
+  expect(screen.getByText('$recent')).toBeInTheDocument();expect(screen.getByLabelText('Message')).toHaveValue('unsent draft');
+  const button=screen.getByRole('button',{name:'Load earlier messages'});fireEvent.click(button);fireEvent.click(button);expect(api.timelinePage).toHaveBeenCalledTimes(3);
+  await act(async()=>resolve({events:[message('$older',1),message('$recent',3)],previousCursor:null}));
+  expect(await screen.findByText('$older')).toBeInTheDocument();expect(screen.getAllByText('$recent')).toHaveLength(1);expect(screen.queryByRole('button',{name:'Load earlier messages'})).toBeNull();
+  expect(api.timelinePage.mock.calls.slice(1)).toEqual([['!room','p1'],['!room','p1']]);
+ });
+ it('discards an old room pagination response after switching rooms',async()=>{
+  const api=fixture();let resolve;api.rooms.mockResolvedValue([{id:'!room',name:'Workspace'},{id:'!other',name:'Other room'}]);
+  api.timelinePage=vi.fn((room,from)=>from?new Promise(r=>resolve=r):Promise.resolve({events:[message(room==='!room'?'$first':'$other',2)],previousCursor:room==='!room'?'p1':null}));
+  render(<App connector={async()=>api}/>);await screen.findByText('$first');fireEvent.click(screen.getByRole('button',{name:'Discussion',exact:true}));fireEvent.click(screen.getByRole('button',{name:'Load earlier messages'}));
+  fireEvent.click(screen.getByRole('button',{name:'Other room',exact:true}));await screen.findByText('$other');
+  await act(async()=>resolve({events:[message('$old-room-secret',1)],previousCursor:null}));expect(screen.queryByText('$old-room-secret')).toBeNull();expect(screen.queryByText('$first')).toBeNull();
+ });
+});
+
+
+it('keeps loaded history on refresh and discards a pending page when a genuine recent gap resets history',async()=>{
+ const api=fixture(),intervals=new Map();let resolve;
+ const message=(id,time)=>({id,time,sender:'@human',content:{body:id}});
+ api.timelinePage=vi.fn().mockResolvedValueOnce({events:[message('$recent-one',3)],previousCursor:'one'})
+  .mockResolvedValueOnce({events:[message('$old-one',1)],previousCursor:'two'})
+  .mockResolvedValueOnce({events:[message('$recent-one',3),message('$recent-two',4)],previousCursor:'new'})
+  .mockImplementationOnce(()=>new Promise(r=>resolve=r))
+  .mockResolvedValueOnce({events:[message('$after-gap',100)],previousCursor:'gap'});
+ const timer=vi.spyOn(globalThis,'setInterval').mockImplementation((callback,ms)=>{intervals.set(ms,callback);return ms;});
+ try{render(<App connector={async()=>api}/>);await screen.findByText('$recent-one');fireEvent.click(screen.getByRole('button',{name:'Discussion',exact:true}));
+  fireEvent.click(screen.getByRole('button',{name:'Load earlier messages'}));await screen.findByText('$old-one');await act(async()=>intervals.get(2000)());await screen.findByText('$recent-two');expect(screen.getByText('$old-one')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'Load earlier messages'}));await act(async()=>intervals.get(2000)());await screen.findByText('$after-gap');await screen.findByText(/Recent messages advanced/);
+  await act(async()=>resolve({events:[message('$stale-page',0)],previousCursor:null}));expect(screen.queryByText('$stale-page')).toBeNull();expect(screen.queryByText('$old-one')).toBeNull();
+ }finally{timer.mockRestore()}
+});
+
+
+it('merges an older response with messages that refreshed while it was loading',async()=>{
+ const api=fixture(),intervals=new Map();let resolve;const message=id=>({id,sender:'@human',content:{body:id}});
+ api.timelinePage=vi.fn().mockResolvedValueOnce({events:[message('$existing')],previousCursor:'old'})
+  .mockImplementationOnce(()=>new Promise(r=>resolve=r)).mockResolvedValueOnce({events:[message('$existing'),message('$arrived')],previousCursor:'fresh'});
+ const timer=vi.spyOn(globalThis,'setInterval').mockImplementation((callback,ms)=>{intervals.set(ms,callback);return ms;});
+ try{render(<App connector={async()=>api}/>);await screen.findByText('$existing');fireEvent.click(screen.getByRole('button',{name:'Discussion',exact:true}));fireEvent.click(screen.getByRole('button',{name:'Load earlier messages'}));
+  await act(async()=>intervals.get(2000)());await screen.findByText('$arrived');await act(async()=>resolve({events:[message('$earlier')],previousCursor:null}));await screen.findByText('$earlier');expect(screen.getByText('$arrived')).toBeInTheDocument();expect(screen.getAllByText('$existing')).toHaveLength(1);
+ }finally{timer.mockRestore()}
+});

@@ -4,6 +4,14 @@ export function errorText(error) {
   return error?.data?.error || error?.message || 'Local backend unavailable. Your draft is preserved.';
 }
 
+export async function messagePage(client,room,from=null) {
+    const result=await client.createMessagesRequest(room,from,50,Direction.Backward);
+    return {events:result.chunk.filter(event=>event.type==='m.room.message').reverse().map(raw=>{
+      const event=new MatrixEvent(raw);
+      return {id:event.getId(),sender:event.getSender(),content:event.getContent(),time:event.getTs()};
+    }),previousCursor:typeof result.end==='string'&&result.end!==from&&result.end!==result.start?result.end:null};
+  }
+
 export async function connect() {
   if(import.meta.env.VITE_PREVIEW_MODE==='synthetic')return (await import('./demo-api')).createDemo();
   const sessionResponse = await fetch('/api/session');
@@ -24,6 +32,7 @@ export async function connect() {
     if (!response.ok){const error=new Error(data.error || 'Local request failed. Retry with your draft preserved.');error.status=response.status;error.data=data;throw error;}
     return data;
   }
+  const timelinePage=(room,from=null)=>messagePage(client,room,from);
   return {
     session,
     async saveDocument(room,content,base_blob,operation){
@@ -39,13 +48,8 @@ export async function connect() {
           agentJoined:state.some(e=>e.type==='m.room.member' && e.state_key===session.agentId && e.content.membership==='join')};
       }));
     },
-    async timeline(room) {
-      const result = await client.createMessagesRequest(room, null, 50, Direction.Backward);
-      return result.chunk.filter(event=>event.type==='m.room.message').reverse().map(raw=>{
-        const event = new MatrixEvent(raw);
-        return {id:event.getId(), sender:event.getSender(), content:event.getContent(), time:event.getTs()};
-      });
-    },
+    timelinePage,
+    timeline:async room=>(await timelinePage(room)).events,
     send:(room, content, txn)=>client.sendEvent(room, 'm.room.message', content, txn),
     createRoom:(name, operation)=>api('/api/rooms', {name,operation}),
     document:(room, commit)=>api('/api/document?room='+encodeURIComponent(room)+(commit?'&commit='+encodeURIComponent(commit):'')),

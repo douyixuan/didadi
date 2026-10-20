@@ -7,6 +7,7 @@ import {readMarkdown} from './readMarkdown';
 import {documentVersion} from './documentReferences';
 import {taskResult} from './taskResult';
 import {taskState} from './taskState';
+import {mergeMessages} from './messageHistory';
 import {downloadMarkdown} from './downloadMarkdown';
 import {draftContext,useLocalDrafts} from './localDrafts';
 import {BookOpen, Search, ChevronDown, ChevronRight, FileText, MessageSquare, Bot, History, Plus, ArrowUp, X, Check, AlertCircle, RefreshCw, Bold, Italic, Heading2, List, Code2} from 'lucide-react';
@@ -213,12 +214,14 @@ function MessageBody({body='',version,onOpenVersion,disabled=false}) {
 export function App({connector=connect}) {
   const [api,setApi]=useState(null),[error,setError]=useState(''),[rooms,setRooms]=useState([]),[room,setRoom]=useState('');
   const [events,setEvents]=useState([]),[timelineError,setTimelineError]=useState(''),[roomsError,setRoomsError]=useState(''),[replyTo,setReplyTo]=useState(null),[filter,setFilter]=useState(null);
+  const [olderCursor,setOlderCursor]=useState(null),[loadingOlder,setLoadingOlder]=useState(false),[historyError,setHistoryError]=useState(''),[historyNotice,setHistoryNotice]=useState('');
+  const loadOlderAction=useRef(null),historyScroll=useRef(null);
   const [tasks,setTasks]=useState([]),[newName,setNewName]=useState(''),[creating,setCreating]=useState(false),[online,setOnline]=useState(false);
   const [panel,setPanel]=useState(null),[mode,setMode]=useState('read'),[historyOpen,setHistoryOpen]=useState(false),[requestedVersion,setRequestedVersion]=useState(null);
   const [docMeta,setDocMeta]=useState({title:'Workspace document'}),[search,setSearch]=useState(''),[navOpen,setNavOpen]=useState(false);
   const searchRef=useRef(null);
   const timelineRef=useRef(null);
-  useEffect(()=>{if(timelineRef.current)timelineRef.current.scrollTop=timelineRef.current.scrollHeight;},[events.length,filter,panel]);
+  useEffect(()=>{const node=timelineRef.current;if(!node)return;if(historyScroll.current){const before=historyScroll.current;historyScroll.current=null;node.scrollTop=before.top+node.scrollHeight-before.height;}else node.scrollTop=node.scrollHeight;},[events.length,filter,panel]);
   const roomsFailed=useRef(false),roomsRefreshing=useRef(false);
   const roomCurrent=useRef(room);roomCurrent.current=room;
   useEffect(()=>{if(room&&location.protocol.startsWith('http')){const url=new URL(location.href);url.searchParams.set('room',room);window.history.replaceState({},'',url);}},[room]);
@@ -226,10 +229,25 @@ export function App({connector=connect}) {
   async function start(){setError('');try{const next=await connector();const list=await next.rooms();setApi(next);setRooms(list);const requested=new URLSearchParams(location.search).get('room');setRoom(list.some(r=>r.id===requested)?requested:(next.session.initialRoom||list[0]?.id||''));setOnline(true);}catch(e){setError(errorText(e));}}
   useEffect(()=>{start();},[connector]);
   async function refreshRooms(){if(roomsRefreshing.current)return;roomsRefreshing.current=true;try{const list=await api.rooms();setRooms(list);roomsFailed.current=false;setRoomsError('');}catch(e){roomsFailed.current=true;setRoomsError(errorText(e));}finally{roomsRefreshing.current=false;}}
-  useEffect(()=>{if(!api||!room)return;let stopped=false,inFlight=false;setEvents([]);setReplyTo(null);setFilter(null);
-    async function refresh(){if(inFlight)return;inFlight=true;try{const result=await api.timeline(room);if(!stopped){setEvents(result);setTimelineError('');setOnline(true);if(roomsFailed.current)refreshRooms();}}
-      catch(e){if(!stopped){setTimelineError(errorText(e));setOnline(false);}}finally{inFlight=false}}
-    refresh();const timer=setInterval(refresh,2000);return()=>{stopped=true;clearInterval(timer)};
+  useEffect(()=>{if(!api||!room)return;let stopped=false,inFlight=false,initialized=false,olderBusy=false,revision=0,current=[],cursor=null;
+    setEvents([]);setReplyTo(null);setFilter(null);setOlderCursor(null);setLoadingOlder(false);setHistoryError('');setHistoryNotice('');historyScroll.current=null;
+    async function refresh(){if(inFlight)return;inFlight=true;try{
+      const page=api.timelinePage?await api.timelinePage(room):{events:await api.timeline(room),previousCursor:null};
+      if(!stopped){
+        const gap=initialized&&current.length&&page.events.length&&!current.some(old=>page.events.some(next=>old.id===next.id));
+        if(!initialized||gap){current=page.events;cursor=page.previousCursor;initialized=true;if(gap){revision++;setHistoryNotice('Recent messages advanced beyond the loaded page. Load earlier messages again to reconnect history.');}}
+        else current=mergeMessages(current,page.events);
+        setEvents(current);setOlderCursor(cursor);setTimelineError('');setOnline(true);if(roomsFailed.current)refreshRooms();
+      }
+    }catch(e){if(!stopped){setTimelineError(errorText(e));setOnline(false);}}finally{inFlight=false}}
+    const older=async()=>{if(stopped||olderBusy||!cursor||!api.timelinePage)return;olderBusy=true;setLoadingOlder(true);setHistoryError('');const expected=revision,from=cursor;
+      try{const page=await api.timelinePage(room,from);if(stopped||expected!==revision)return;
+        const merged=mergeMessages(page.events,current),node=timelineRef.current;if(node&&merged.length!==current.length)historyScroll.current={height:node.scrollHeight,top:node.scrollTop};
+        current=merged;cursor=page.previousCursor===from?null:page.previousCursor;setEvents(current);setOlderCursor(cursor);
+      }catch(e){if(!stopped&&expected===revision)setHistoryError(errorText(e)+' Earlier messages were not loaded. Retry; your messages and draft are kept.');}
+      finally{olderBusy=false;if(!stopped)setLoadingOlder(false);}
+    };
+    loadOlderAction.current=older;refresh();const timer=setInterval(refresh,2000);return()=>{stopped=true;clearInterval(timer);if(loadOlderAction.current===older)loadOlderAction.current=null};
   },[api,room]);
   useEffect(()=>{if(!api)return;const timer=setInterval(refreshRooms,10000);return()=>clearInterval(timer)},[api]);
   useEffect(()=>{if(!api||!tasks.some(t=>!['done','failed','cancelled'].includes(t.status)))return;let cancelled=false,inFlight=false;
@@ -280,9 +298,12 @@ export function App({connector=connect}) {
       <aside className={'collaboration-panel '+(!panel?'panel-closed':'')} aria-label="Collaboration panel"><header className="panel-heading"><div><h2>{panel==='agent'?'Example Agent':'Discussion'}</h2><span>{selected?.name||'Room'}</span></div><button aria-label="Close collaboration panel" onClick={()=>setPanel(null)}><X size={18}/></button></header>
         <div className="panel-tabs"><button className={panel==='discussion'?'active':''} onClick={()=>setPanel('discussion')}>Messages</button><button className={panel==='agent'?'active':''} onClick={()=>setPanel('agent')}>Example Agent</button></div>
         {panel==='agent'&&<div className="agent-disclosure"><Bot size={18}/><div><strong>Deterministic example</strong><p>Repeats messages and handles explicit Git requests. No LLM or intelligent editing is connected.</p></div></div>}
-        {filter&&<div className="reply-banner">Thread {short(filter)}<button onClick={()=>setFilter(null)}>All messages</button></div>}
+        {filter&&<div className="reply-banner"><span>Thread {short(filter)}</span> · <span>Loaded messages only</span><button onClick={()=>setFilter(null)}>All messages</button></div>}
         {timelineError&&<div className="panel-error" role="alert">{timelineError} Your draft is preserved; reconnecting automatically.</div>}
-        <div className="timeline" ref={timelineRef} aria-live="polite">{!displayed.length?<div className="panel-empty"><MessageSquare size={25}/><h3>Start a conversation</h3><p>Discuss this workspace, or mention the example Agent to see a real response.</p></div>:displayed.map(event=>{
+        <div className="timeline" ref={timelineRef} aria-live="polite">
+          {olderCursor&&<button disabled={loadingOlder} onClick={()=>loadOlderAction.current?.()}>{loadingOlder?'Loading earlier messages…':'Load earlier messages'}</button>}
+          {historyError&&<p role="alert">{historyError}</p>}{historyNotice&&<p role="status">{historyNotice}</p>}
+          {!displayed.length?<div className="panel-empty"><MessageSquare size={25}/><h3>Start a conversation</h3><p>Discuss this workspace, or mention the example Agent to see a real response.</p></div>:displayed.map(event=>{
           const agent=event.sender===api.session.agentId,relation=event.content['m.relates_to'];
           const root=relation?.rel_type==='m.thread'?relation.event_id:event.id;
           return <article className={'message '+(agent?'agent':'')} key={event.id}><span className={'avatar '+(agent?'agent-avatar':'')}>{agent?<Bot size={15}/>:'Y'}</span><div className="message-main"><div className="message-meta"><strong>{agent?'Example Agent':event.sender===api.session.userId?'You':event.sender.split(':')[0]}</strong><time>{new Date(event.time||Date.now()).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</time></div>{relation?.rel_type==='m.thread'&&<button className="thread-link" onClick={()=>setFilter(root)}>Reply in thread</button>}<MessageBody body={event.content.body} version={documentVersion(event,api.session.agentId,api.session.synthetic,api.session.userId)} disabled={docMeta.busy||docMeta.reading||docMeta.composing} onOpenVersion={commit=>{setRequestedVersion({commit});setMode('read');setHistoryOpen(true)}}/><div className="message-actions"><button onClick={()=>setReplyTo(root)}>Reply</button><button onClick={()=>setFilter(root)}>View thread</button></div></div></article>;
