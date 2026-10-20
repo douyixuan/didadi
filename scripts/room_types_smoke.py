@@ -17,9 +17,17 @@ def run(base,matrix_url,state_file):
     assert bob in session['roomCreation']['contacts'];rooms=[]
     def api(path,body=None,method=None):
         req=Request(base+path,method=method or ('POST' if body is not None else 'GET'),headers={'X-CSRF-Token':csrf,'Content-Type':'application/json'},data=json.dumps(body).encode() if body is not None else None)
-        try:
-            with urlopen(req,timeout=20) as response:return response.status,json.load(response)
-        except HTTPError as error:return error.code,json.load(error)
+        started=time.monotonic()
+        for attempt in range(8):
+            try:
+                with urlopen(req,timeout=20) as response:return response.status,json.load(response)
+            except HTTPError as error:
+                status,value=error.code,json.load(error)
+                if status!=429 or attempt==7:return status,value
+                hint=value.get('retry_after_ms',2000)
+                wait=max(.1,hint/1000) if type(hint) in {int,float} and hint>=0 else 2
+                if time.monotonic()-started+wait>60:return status,value
+                time.sleep(wait)
     def room_state(room):
         status,events=api('/matrix'+PREFIX+'/rooms/'+segment(room)+'/state');assert status==200;return events
     def roster(room):return {event['state_key']:event['content']['membership'] for event in room_state(room) if event['type']=='m.room.member'}

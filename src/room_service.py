@@ -45,6 +45,9 @@ class RoomService:
                 try:
                     room=self.api('POST','/createRoom',{'preset':'private_chat','visibility':'private','name':name,'room_alias_name':alias,'is_direct':kind=='direct','invite':peers+([AGENT] if invite_agent else []),'creation_content':{'m.federate':False},'initial_state':[{'type':ROOM_KIND,'state_key':'','content':marker},{'type':'m.room.guest_access','state_key':'','content':{'guest_access':'forbidden'}},{'type':'m.room.history_visibility','state_key':'','content':{'history_visibility':'invited'}}]})['room_id']
                 except MatrixError as error:
+                    # Keep the existing safe HTTP 429 response and wait hint. The UI
+                    # retains this intent, including a potentially partial creation.
+                    if error.status==429:raise
                     if error.body.get('errcode')!='M_ROOM_IN_USE':raise RoomError(503,'Room creation is unconfirmed. Retry the same options and operation.') from None
                     server=self.user_id.split(':',1)[1]
                     try:room=self.api('GET','/directory/room/'+segment('#'+alias+':'+server))['room_id']

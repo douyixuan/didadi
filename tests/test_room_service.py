@@ -6,6 +6,7 @@ import unittest
 from src.room_service import RoomService,RoomError,ROOM_KIND
 from src.matrix_as import AGENT
 from src.matrix_http import MatrixError
+from unittest.mock import patch
 
 class RoomServiceTests(unittest.TestCase):
     def setUp(self):
@@ -34,6 +35,13 @@ class RoomServiceTests(unittest.TestCase):
             with self.subTest(change=change),self.assertRaises(RoomError) as error:self.service.create({**self.data,**change})
             self.assertEqual(error.exception.status,409)
         self.payload=None;self.service.create({**self.data,'operation':'channel-operation','kind':'channel'});self.assertEqual(next(item['content']['kind'] for item in self.payload['initial_state'] if item['type']==ROOM_KIND),'channel');self.assertEqual(self.payload['invite'],[])
+    def test_throttling_preserves_hint_and_original_intent(self):
+        error=MatrixError(429,{'errcode':'M_LIMIT_EXCEEDED','retry_after_ms':3500})
+        with patch.object(self.service,'api',side_effect=error):
+            with self.assertRaises(MatrixError) as caught:self.service.create(self.data)
+        self.assertIs(caught.exception,error)
+        with self.assertRaises(RoomError):self.service.create({**self.data,'name':'different'})
+        self.assertEqual(self.service.create(self.data)['room_id'],'!created:didadi.localhost')
     def test_direct_and_explicit_agent_invitation_have_distinct_rosters(self):
         self.service.create({**self.data,'kind':'direct','participants':[self.peer]});self.assertEqual(self.payload['invite'],[self.peer]);self.assertTrue(self.payload['is_direct'])
         self.payload=None;self.service.create({**self.data,'operation':'agent-group','invite_agent':True,'participants':[self.peer]});self.assertEqual(self.payload['invite'],[self.peer,AGENT]);self.assertFalse(self.payload['is_direct'])
