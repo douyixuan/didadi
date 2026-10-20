@@ -66,7 +66,8 @@ def main():
         runtime(args,token);return
     state=json.loads(Path(args.state_file).read_text())
     with tempfile.TemporaryDirectory(prefix='didadi-body-api-') as directory:
-        root=Path(directory);store=GitDocs(root/'docs.git');source=root/'source';source.mkdir()
+        root=Path(directory);published=GitDocs(root/'published.git')
+        store=GitDocs(root/'docs.git',published.root);source=root/'source';source.mkdir()
         source_text='SYNTHETIC_SOURCE_BODY_'+secrets.token_hex(12)+'\n'
         (source/'example.py').write_text(source_text)
         subprocess.run(['git','init','-q',str(source)],check=True)
@@ -84,7 +85,7 @@ def main():
         for thread in threads:thread.start()
         body='SYNTHETIC_DOCUMENT_BODY_'+secrets.token_hex(12)+'\n'+'x'*7000
         try:
-            receipts=[]
+            receipts=[];task_ids=[]
             commands=[('write',{'org.didadi.document':{'action':'write','base_blob':None}},body),
                       ('read',{'org.didadi.document':{'action':'read'}},body),
                       ('source',{'org.didadi.repository':{'action':'read','repository':'fixture','path':'example.py'}},source_text)]
@@ -92,6 +93,7 @@ def main():
                 event=request(args.matrix_url,'PUT',PREFIX+'/rooms/'+segment(state['room'])+'/send/m.room.message/'+secrets.token_hex(12),
                     state['tokens'][0],{'msgtype':'m.text','body':'Synthetic metadata-only resource task',
                     'm.mentions':{'user_ids':[AGENT]},**command})['event_id']
+                task_ids.append(event)
                 deadline=time.monotonic()+30
                 while time.monotonic()<deadline:
                     task=request(args.gateway_url,'GET','/agent/status',token,query={'id':event})['task']
@@ -110,6 +112,11 @@ def main():
                 assert receipt['content']['org.didadi.task.result']==task['outcome']
                 receipts.append(task['outcome'])
             assert store.read('demo.md')==body and len(store.history('demo.md'))==1 and store.pending()==[]
+            public_log=published._git('log','--format=%an%n%B','main')
+            assert public_log.startswith(AGENT+'\n') and 'docs(demo.md): update from workspace' in public_log
+            assert state['room'] not in public_log and all(identifier not in public_log for identifier in task_ids)
+            assert published._git('for-each-ref','--format=%(refname)','refs/didadi/')==''
+            print('PASS real Agent author/readable public Git log; private room/task IDs and intent refs are not pushed')
             assert receipts[0]['commit']==receipts[1]['commit']
             assert receipts[2]['resource']['commit']==commit
             messages=request(args.matrix_url,'GET',PREFIX+'/rooms/'+segment(state['room'])+'/messages',state['tokens'][0],query={'dir':'b','limit':100})

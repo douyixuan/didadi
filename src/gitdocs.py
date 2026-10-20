@@ -220,7 +220,52 @@ class GitDocs:
         result = []
         for revision in self._git('rev-list', head).splitlines():
             try:
-                metadata = json.loads(self._git('show', '-s', '--format=%B', revision))
+                message = self._git('show', '-s', '--format=%B%x00%(trailers:only,unfold)', revision)
+                body, trailers = message.split('\0', 1)
+                try:
+                    metadata = json.loads(body)  # Existing repositories remain readable.
+                except ValueError:
+                    fields = {}
+                    for line in trailers.splitlines():
+                        key, separator, value = line.partition(': ')
+                        if key.startswith('Didadi-') and separator:
+                            if key in fields:
+                                raise ValueError('duplicate operation trailer')
+                            fields[key] = value
+                    if (set(fields) != {'Didadi-Format', 'Didadi-Path', 'Didadi-Operation',
+                                        'Didadi-Request-Hash', 'Didadi-Merged'} or
+                            fields['Didadi-Format'] != '2' or
+                            not re.fullmatch('[0-9a-f]{64}', fields['Didadi-Operation']) or
+                            not re.fullmatch('[0-9a-f]{64}', fields['Didadi-Request-Hash']) or
+                            fields['Didadi-Merged'] not in {'true', 'false'}):
+                        continue
+                    key = fields['Didadi-Operation']
+                    metadata = {'operation': 'sha256:' + key, 'operation_key': key,
+                                'name': json.loads(fields['Didadi-Path']),
+                                'request_hash': fields['Didadi-Request-Hash'], 'notification': None}
+                    if fields['Didadi-Merged'] == 'true':
+                        metadata['merged'] = True
+                    intent_ref = 'refs/didadi/intents/' + key
+                    intent_blob = self._ref(intent_ref)
+                    if intent_blob:
+                        try:
+                            intent = json.loads(self._git('cat-file', 'blob', intent_blob))
+                        except (ValueError, RuntimeError):
+                            raise RuntimeError('private operation intent is unreadable') from None
+                        required = {'operation', 'name', 'request_hash', 'notification', 'commit'}
+                        if (not isinstance(intent, dict) or not required <= set(intent) or
+                                not set(intent) <= required | {'merged'} or
+                                not isinstance(intent['operation'], str) or
+                                not 0 < len(intent['operation']) <= 1000):
+                            raise RuntimeError('private operation intent has invalid fields')
+                        try:
+                            intent_key = self._operation_ref(intent['operation']).rsplit('/', 1)[1]
+                        except ValueError:
+                            raise RuntimeError('private operation intent has invalid fields') from None
+                        if (intent['commit'] != revision or intent_key != key or
+                                any(intent.get(k) != metadata.get(k) for k in ('name', 'request_hash', 'merged'))):
+                            raise RuntimeError('private operation intent does not match committed version')
+                        metadata = {**intent, 'operation_key': key}
                 if (not isinstance(metadata, dict) or not isinstance(metadata.get('operation'), str)
                     or not isinstance(metadata.get('request_hash'), str)):
                     continue
@@ -233,7 +278,23 @@ class GitDocs:
 
     def _operation(self, ref):
         return next((item for item in self._operations()
-                     if self._operation_ref(item['operation']) == ref), None)
+                     if ('refs/didadi/operations/' + item['operation_key'] if 'operation_key' in item
+                         else self._operation_ref(item['operation'])) == ref), None)
+
+    def _retain_intent(self, metadata, revision):
+        """Private refs are backed up with the bare repository, never pushed with main."""
+        key = self._operation_ref(metadata['operation']).rsplit('/', 1)[1]
+        payload = {k: v for k, v in metadata.items() if k not in {'operation_key', 'blob', 'commit'}}
+        blob = self._git('hash-object', '-w', '--stdin',
+                         input=json.dumps({**payload, 'commit': revision}, sort_keys=True)).strip()
+        self._git('update-ref', 'refs/didadi/intents/' + key, blob)
+
+    def _recover_imported_intent(self, previous, operation, notification):
+        # Only a matching original request can restore an imported operation's routing.
+        if previous['operation'] != operation:
+            previous = {**previous, 'operation': operation, 'notification': notification}
+            self._retain_intent(previous, previous['commit'])
+        return previous
 
     def _portable_name(self, name, head):
         """Reject case-folding collisions before they can make a clone lose a file."""
@@ -302,19 +363,24 @@ class GitDocs:
         request_fields = [name, content, base_blob, notification] + ([author] if author is not None else [])
         request_hash = hashlib.sha256(json.dumps(request_fields,
                                                sort_keys=True).encode()).hexdigest()
+        legacy_hash = hashlib.sha256(json.dumps(request_fields[:4], sort_keys=True).encode()).hexdigest()
         with self._locked():
             previous = self._operation(opref)
             if previous:
-                if previous['request_hash'] != request_hash:
+                if previous['request_hash'] != request_hash and not (
+                        'operation_key' not in previous and previous['request_hash'] == legacy_hash):
                     raise Conflict('operation ID reused with different request')
+                previous = self._recover_imported_intent(previous, operation, notification)
                 self._publish()
                 return previous
             self._sync()
             # Synchronization can import an operation completed by another store.
             previous = self._operation(opref)
             if previous:
-                if previous['request_hash'] != request_hash:
+                if previous['request_hash'] != request_hash and not (
+                        'operation_key' not in previous and previous['request_hash'] == legacy_hash):
                     raise Conflict('operation ID reused with different request')
+                previous = self._recover_imported_intent(previous, operation, notification)
                 self._publish()
                 return previous
             head = self._ref(self.branch)
@@ -336,10 +402,17 @@ class GitDocs:
                         'notification': notification}
             if merged:metadata['merged']=True
             parent = ['-p', head] if head else []
-            revision = self._git('commit-tree', tree, *parent, input=json.dumps(metadata, sort_keys=True),
+            key = opref.rsplit('/', 1)[1]
+            message = ('docs(' + name + '): update from workspace\n\nDidadi-Format: 2\n' +
+                       'Didadi-Path: ' + json.dumps(name) + '\nDidadi-Operation: ' + key +
+                       '\nDidadi-Request-Hash: ' + request_hash +
+                       '\nDidadi-Merged: ' + str(merged).lower() + '\n')
+            revision = self._git('commit-tree', tree, *parent, input=message,
                 env={'GIT_AUTHOR_NAME':author['name'], 'GIT_AUTHOR_EMAIL':author['email']} if author is not None else None).strip()
-            # One atomic branch ref is the commit point. The commit message contains the
-            # outbox intent, so no multi-ref or Git/SQLite dual-write gap can lose a notification.
+            # Persist private routing first. Only reachable main commits produce pending
+            # notifications; an intent orphaned before this CAS is never delivered.
+            self._retain_intent(metadata, revision)
+            # main remains the single commit point. A crash after CAS keeps the intent.
             self._git('update-ref', self.branch, revision, head or '0' * 40)
             self._publish()
             return {**metadata, 'commit': revision, 'blob': blob}

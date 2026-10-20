@@ -1,0 +1,7 @@
+# 独立只读审查
+
+review_merge_documents对原增量及需求计划静态审查：发现P2，合法JSON但缺operation的私有intent被通用KeyError跳过，可能静默失去通知。已补必需字段/类型/哈希及commit一致性检查，错误统一RuntimeError；增加缺operation、错误类型/哈希、缺notification重启回归。
+
+第二次独立只读复核确认P2关闭，当前diff无新增具体阻塞。核对了intent先写/main CAS后写且只扫描main可达、remote main正常push不携带私有refs、匹配完整请求才重建远端导入路由、旧JSON作者hash兼容仅作用于旧格式、Agent作者来自权威任务。审查员未自行运行测试，运行结果由主任务提供；这不是GitHub正式approval。
+
+剩余边界：完整bare及Gateway联合备份；旧JSON历史保留；没有#12索引/大规模性能承诺；ADR41设计和operation-ID约束不改；最终提交CI与合入后main CI必须另验。

@@ -56,6 +56,10 @@ class AgentDocumentAPITests(unittest.TestCase):
         response=self.execute(task)
         self.assertEqual(response['outcome']['status'],'saved')
         self.assertEqual(self.store.read('demo.md'),'# authoritative\r\n')
+        self.assertEqual(self.store._git('show','-s','--format=%an',response['outcome']['commit']).strip(),AGENT)
+        message=self.store._git('show','-s','--format=%B',response['outcome']['commit'])
+        self.assertNotIn(task['id'],message)
+        self.assertNotIn(task['event']['room_id'],message)
         self.assertEqual(self.execute(task)['outcome'],response['outcome'])
         self.assertEqual(len(self.store.history('demo.md')),1)
     def test_expired_replaced_cancelled_and_revoked_scopes_cannot_write(self):
