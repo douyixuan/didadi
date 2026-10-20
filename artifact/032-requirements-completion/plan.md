@@ -136,3 +136,13 @@ The follow-up preserves Matrix429 and the existing sanitized retry_after_ms HTTP
 登录/注销最小安全切片审计：当前Workspace使用state.tokens[0]与全局csrf、Git/SQLite和固定documentRoom，浏览器只有占位token，未实现用户认证会话。直接POST logout会撤销所有共用该测试token的旧预览，禁止把它接到现有界面。首个可真实验收切片应是一个独立临时device/session的登录与仅当前设备注销，采用服务端token保存、随机HttpOnly/SameSite会话cookie、每会话CSRF/TTL/注销失效、身份隔离的Workspace和仓库/房间映射；不得沿用Alice的文件/receipt/授权给Bob。生产需要HTTPS/安全cookie与明确SSO/OAuth或密码流程；不把任意homeserver URL作为可请求目标，不将密码/token放URL、日志、浏览器存储或Git。权限仍由现有Matrix/资源服务核验，不借认证流程接管PR41的Agent grants。
 
 真实登录验收所需的具体追加步骤供父端审批：只在独立隔离Synapse的已有合成账户，为本次验收创建一个临时设备会话（可能产生短时测试token），只保存在测试进程内存，使用独立cookie jar和repo/metadata；核对whoami/切人隔离/CSRF/过期；仅注销这个新device token并证明旧共享fixture token仍有效，最后销毁内存会话。不得读取真实用户密码，不生成/配置生产凭据、不扩大持久权限。本轮没有执行新设备登录或撤销任何现有token；无此追加步骤时只交付审计，不伪称真实登录/注销已实现或验证。
+
+## 虚构登录/注销服务契约（2026-10-20）
+
+父端明确授权不依赖真实会话的UI/接口/内存隔离实现；既有33报告仍正确描述真实Matrix登录未做。独立候选新增完全独立的contract入口和loopback server，不接入Workspace固定token、不导入Matrix认证、不创建真实凭据。身份只有Alice/Bob、设备A/B固定虚构值，无密码框。fake session/CSRF相关标识明确非凭据（仅固定虚构身份/设备输入，内部generation防旧标识碰撞）、只在内存中用于契约测试，重启清空；不使用localStorage/cookie保存。此预览没有真实认证保证，界面始终标注虚构数据、未登录Matrix。
+
+接口：login仅接受fixture_identity/device；workspace与文档只能由当前fake session推导身份，不能传user覆盖；文档按身份隔离，房间ID/文档名故意相同以验证不会误用room/path作唯一键。save以每会话operation绑定内容/base_version，未知响应原操作重试；logout仅接受current_device，不存在all_devices动作，另一个设备保持有效。服务对象是可注入契约实现，实际实现只有FakeIdentityService；不写真实登录适配器或接收用户密码。
+
+失败规则：登录失败仅保留选择，不显示旧数据；登录成功/加载失败只保留当前session供重试，401清空身份/房间/文档/草稿。保存失败保留当前草稿，未知结果冻结原请求，换人/注销立即清所有工作区状态并以epoch忽略旧响应。注销发起即隐藏全部数据，只在内存隔离区保留原设备的注销请求；网络/5xx未知则禁止下一登录、仅重试原设备，401视为旧会话已失效。不能把本地隐藏说成服务端注销成功。每次登录新epoch，服务只替换同身份同设备的旧fake session，另一设备不受影响。
+
+验证包括pure fake服务与真实loopback HTTP契约、未知保存/注销响应、过期/401清空、当前设备语义、身份相同room/path碰撞、迟到请求和浏览器内存/网络边界。现有Matrix运行路径保持原样，CI仍运行其完整回归；新增预览单独构建和验收。真实Matrix登录、密码/SSO、安全cookie和真实token撤销仍未完成，需要先前记录的独立临时设备授权，不以fake通过替代。

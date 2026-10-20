@@ -122,3 +122,13 @@ The follow-up preserves Matrix429 and the existing sanitized retry_after_ms HTTP
 真实浏览器通过标签计数/房间badge、账户数据读失败清旧标签而房间列表仍可用、刷新后远端删除/添加可见，以及已存Git引导文档截图；浏览器不新增邀请。首次browser helper直接执行隐藏目录脚本导致import src失败，finally恢复也受相同错误影响；此时未执行原生偏好修改。保留日志，修正fixture模块路径与finally确保关闭浏览器后通过。独立静态审查无阻断，未冒称它运行测试。
 
 标准Matrix整事件PUT没有CAS，本实现不能保证未观察到的任意同时写入不丢失；每次重试读最新数据，只保证保留已观察到的其他条目，不冒称原子并发合并。只写当前actor的m.direct；邀请方与接收方各自客户端管理自己的偏好，不自动修改Bob账户数据。标签不改变成员/房间访问，GET结果只包含allowed+joined房间；通用授权设计仍归PR41。登录/注销只完成plan中的安全审计，无真实登录/撤销token，无此功能实现或验收声明。先前62本机重复完整协议429超预算停止的历史不变。最终提交、真实服务进程重启、额外Bob账户未改断言和精确head CI仍须分别核验。
+
+## 虚构登录/注销契约（2026-10-20）
+
+独立session-contract.html入口与src.session_contract_server（loopback8860）仅使用FakeIdentityService。固定Alice/Bob、A/B虚构输入，无密码框/真实密码字段，只有非凭据的fictional相关标识；进程内generation防止重启后旧标识与新身份碰撞，不产生Matrix token。与真实Workspace、Git/Matrix凭据和localDrafts持久存储分离。真实Matrix认证、SSO、安全cookie和真实token注销均未实现/未调用。
+
+196完整Python（125.522秒）、初194完整前端/build通过；独立review发现P2重载期间可编辑/保存并被旧响应覆盖，已加loading状态/同步ref锁及generation隔离，重载不阻塞注销。修复后11定向frontend/build通过，复审关闭P2且无剩余阻断；审查者未跑测试或真实认证。最终完整frontend195项及build通过；390×844虚构预览无横向溢出、登录/注销控件可达。精确提交CI另核。
+
+8项fake服务/HTTP测试涵盖相同room ID/文档名的跨身份隔离、操作绑定/幂等、过期、同设备替换、其他设备有效、服务重建不恢复旧会话及身份覆盖/Origin/CSRF/真实路由拒绝。独立HTTP脚本证明已构建入口、Alice保存Bob不可见、丢注销响应后401恢复、current_device、不接受password字段，真实Matrix调用和token创建为0。首次smoke错误地按源资源名断言构建HTML，失败日志保留；修正为实际页面标题后通过，不改变产品行为。
+
+实际浏览器仅允许8860，固定虚构值操作：保存已提交丢响应→原draft/op/version重试；另一个Alice B保持有效；延迟Alice保存→A注销响应丢失→仅原设备重试401→Bob登录→放行旧Alice响应仍只显示Bob。401清工作区/草稿，无cookie/会话持久化，预置无关存储sentinel保持；无外部/Matrix请求。证据.local/sessions/{browser.log,browser-proof.json,preview.png}，图已检查。最终提交的进程重启/浏览器再验与CI另核；fake通过不替代真实登录验收。旧62真实429超预算未通过边界保留，PR41/Issue12/共享token/ModelBench未触碰。

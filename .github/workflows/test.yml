@@ -42,6 +42,8 @@ jobs:
             client/.local/source-performance.json
           if-no-files-found: error
       - run: npm --prefix client run build
+      - name: Fictional-only login logout HTTP contract
+        run: python3 -m scripts.session_contract_smoke --dist client/dist
   matrix-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 12
