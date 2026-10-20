@@ -215,3 +215,51 @@ class DocumentServiceTests(unittest.TestCase):
         result=self.service.move(payload)
         self.assertEqual(result['commit'],committed)
         self.assertEqual(result['blob'],made['blob'])
+
+    def test_from_messages_reads_canonical_events_and_retains_source_links(self):
+        body='First message\n```\n<script>untrusted</script>\n```'
+        sources={event:{'event_id':event,'room_id':'!doc:local','type':'m.room.message','sender':'@bob:local',
+                 'origin_server_ts':42,'content':{'msgtype':'m.text','body':text}} for event,text in [('$first',body),('$second','Second message')]}
+        calls=[]
+        def source_api(method,path,data=None):
+            if '/event/' in path:
+                from urllib.parse import unquote
+                key=unquote(path.rsplit('/',1)[1]);calls.append(key);return sources[key]
+            return self.api(method,path,data)
+        self.service.api=source_api
+        payload={'room':'!doc:local','name':'Discussion/Selected.md','events':['$first','$second'],'operation':str(uuid.uuid4())}
+        saved=self.service.from_messages(payload);text=self.store.read(payload['name'])
+        self.assertIn(body,text);self.assertIn('https://matrix.to/#/%21doc%3Alocal/%24first',text)
+        self.assertIn('````text\n'+body+'\n````',text);self.assertLess(text.index('$first') if '$first' in text else text.index('%24first'),text.index('%24second'))
+        self.assertEqual(calls,['$first','$second'])
+        self.assertEqual(self.service.from_messages(payload)['commit'],saved['commit'])
+        self.assertEqual(len(self.events),1)
+        receipt=list(self.events.values())[0]['content'];self.assertNotIn(body,str(receipt))
+        self.assertEqual(receipt['org.didadi.document.commit']['path'],payload['name'])
+        with self.assertRaises(DocumentError):self.service.from_messages({**payload,'content':'spoofed body'})
+
+    def test_from_messages_rejects_redaction_invalid_selection_and_other_room_before_writing(self):
+        payload={'room':'!doc:local','name':'Selected.md','events':['$redacted'],'operation':str(uuid.uuid4())}
+        def source_api(method,path,data=None):
+            if '/event/' in path:return {'event_id':'$redacted','type':'m.room.message','sender':'@bob:local','content':{}}
+            return self.api(method,path,data)
+        self.service.api=source_api
+        for changes in [{'events':[]},{'events':['$a','$a']},{'events':['$a']*21},{'events':[{}]},{'events':['$redacted']},{'room':'!other'}]:
+            with self.subTest(changes=changes),self.assertRaises(DocumentError) as error:self.service.from_messages({**payload,**changes})
+            self.assertIn(error.exception.status,{400,403})
+        self.assertEqual(self.store.documents()['documents'],[])
+        self.assertEqual(self.events,{})
+
+    def test_from_messages_size_or_unavailable_event_never_partially_creates(self):
+        payload={'room':'!doc:local','name':'Selected.md','events':['$one'],'operation':str(uuid.uuid4())}
+        def source_api(method,path,data=None):
+            if '/event/' in path:return {'event_id':'$one','type':'m.room.message','sender':'@bob:local','content':{'msgtype':'m.text','body':'x'*65536}}
+            return self.api(method,path,data)
+        self.service.api=source_api
+        with self.assertRaises(DocumentError) as large:self.service.from_messages(payload)
+        self.assertEqual(large.exception.status,400)
+        self.assertEqual(self.store.documents()['documents'],[])
+        self.service.api=lambda method,path,data=None: (_ for _ in ()).throw(MatrixError(404,{})) if '/event/' in path else self.api(method,path,data)
+        with self.assertRaises(DocumentError) as missing:self.service.from_messages(payload)
+        self.assertEqual(missing.exception.status,400)
+        self.assertEqual(self.store.documents()['documents'],[])

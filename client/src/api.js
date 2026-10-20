@@ -53,6 +53,7 @@ export async function connect() {
     send:(room, content, txn)=>client.sendEvent(room, 'm.room.message', content, txn),
     createRoom:(name, operation)=>api('/api/rooms', {name,operation}),
     documents:room=>api('/api/documents?room='+encodeURIComponent(room)),
+    fromMessages:request=>api('/api/documents/from-messages',request),
     moveDocument:(room,request)=>api('/api/documents/move',{room,...request}),
     createDocument:(room,name,operation)=>api('/api/documents',{room,name,operation,content:''}),
     document:(room, commit,name='demo.md')=>api('/api/document?room='+encodeURIComponent(room)+(commit?'&commit='+encodeURIComponent(commit):'')+'&path='+encodeURIComponent(name)),

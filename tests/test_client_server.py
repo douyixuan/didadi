@@ -95,6 +95,8 @@ class ClientServerTests(unittest.TestCase):
 
     def test_named_document_http_creation_errors_and_room_boundary(self):
         def document_api(method, path, data=None):
+            if method=='GET' and '/event/' in path:
+                return {'event_id':'$source','room_id':'!seed:local','type':'m.room.message','sender':'@human:local','origin_server_ts':1,'content':{'msgtype':'m.text','body':'Canonical HTTP source'}}
             if method == 'GET':
                 return [{'type': 'm.room.member', 'state_key': '@human:local', 'content': {'membership': 'join'}},
                         {'type': 'm.room.power_levels', 'content': {'users': {'@human:local': 100}}}]
@@ -136,6 +138,13 @@ class ClientServerTests(unittest.TestCase):
             with self.assertRaises(HTTPError) as forbidden_move:
                 fetch('/api/documents/move','POST',{**move,'source':'Archive/Moved.md','name':'Other.md','room':'!other:local','operation':str(uuid.uuid4())})
             self.assertEqual(forbidden_move.exception.code,403)
+            selection={'room':'!seed:local','name':'Selected.md','events':['$source'],'operation':str(uuid.uuid4())}
+            selected=fetch('/api/documents/from-messages','POST',selection)
+            self.assertIn('Canonical HTTP source',self.workspace.docs.read('Selected.md'))
+            self.assertEqual(fetch('/api/documents/from-messages','POST',selection)['commit'],selected['commit'])
+            with self.assertRaises(HTTPError) as spoofed:
+                fetch('/api/documents/from-messages','POST',{**selection,'content':'Spoofed'})
+            self.assertEqual(spoofed.exception.code,400)
         finally:
             server.shutdown()
             server.server_close()
