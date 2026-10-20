@@ -54,7 +54,16 @@ class DocumentService:
             raise DocumentError(400, 'Expected room, operation, content and name.')
         return self.save({key: data[key] for key in ('room', 'operation', 'content')} | {'base_blob': None}, data['name'], create=True)
 
-    def save(self, data, name='demo.md', *, create=False):
+    def move(self, data):
+        if not isinstance(data, dict) or set(data) != {'room', 'operation', 'source', 'name', 'base_blob'}:
+            raise DocumentError(400, 'Expected room, operation, source, name and base_blob.')
+        self.store._name(data['source'])
+        if data['source'] == data['name'] or data['base_blob'] is None:
+            raise DocumentError(400, 'Move needs a distinct destination and the current source blob.')
+        return self.save({key: data[key] for key in ('room', 'operation', 'base_blob')} | {'content': ''},
+                         data['name'], move_from=data['source'])
+
+    def save(self, data, name='demo.md', *, create=False, move_from=None):
         if not isinstance(data, dict) or set(data) != {'room', 'operation', 'content', 'base_blob'}:
             raise DocumentError(400, 'Expected room, operation, content and base_blob.')
         self.store._name(name)
@@ -72,7 +81,7 @@ class DocumentService:
         notice = {'kind': 'document_commit', 'version': 1, 'room_id': self.room, 'author': self.user_id}
         try:
             item = self.store.write(name, content, base, operation=key, notification=notice,
-                merge_non_overlapping=not create, author={'name': self.user_id, 'email': hashlib.sha256(self.user_id.encode()).hexdigest()[:24] + '@matrix.invalid'})
+                merge_non_overlapping=not create and move_from is None, move_from=move_from, author={'name': self.user_id, 'email': hashlib.sha256(self.user_id.encode()).hexdigest()[:24] + '@matrix.invalid'})
         except RemoteDiverged as error:
             raise DocumentError(503, str(error), status='remote_diverged', recovery=error.recovery) from None
         except PublicationPending:

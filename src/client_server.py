@@ -197,6 +197,8 @@ def handler(workspace, dist, port):
                     result = workspace.documents.documents(query.get('room', [''])[0])
                 elif parsed.path == '/api/documents' and method == 'POST':
                     result = workspace.documents.create(body)
+                elif parsed.path == '/api/documents/move' and method == 'POST':
+                    result = workspace.documents.move(body)
                 elif parsed.path.startswith('/api/documents/') and method == 'PUT':
                     name = unquote(parsed.path[len('/api/documents/'):], errors='strict')
                     result = workspace.documents.save(body, name)

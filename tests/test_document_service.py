@@ -161,3 +161,57 @@ class DocumentServiceTests(unittest.TestCase):
         gateway.accept('one',[event]);claimed=gateway.claim();self.level=0
         with self.assertRaises(TaskError):gateway.validate(claimed['id'],claimed['lease'])
         self.assertIsNone(self.store.snapshot('demo.md')['commit'])
+    def test_move_is_atomic_byte_exact_and_idempotent(self):
+        content='---\r\ntitle: Preserve\r\n---\r\n\r\n# 原文\r\n'
+        created=self.service.create({'room':'!doc:local','name':'Original.md','content':content,'operation':str(uuid.uuid4())})
+        payload={'room':'!doc:local','source':'Original.md','name':'Archive/Renamed.md','base_blob':created['blob'],'operation':str(uuid.uuid4())}
+        moved=self.service.move(payload)
+        self.assertEqual(moved['blob'],created['blob'])
+        self.assertEqual(self.store.read(payload['name']),content)
+        self.assertIsNone(self.store.blob_version('Original.md'))
+        head=self.store._ref(self.store.branch)
+        self.assertEqual(self.service.move(payload)['commit'],moved['commit'])
+        self.assertEqual(self.store._ref(self.store.branch),head)
+        self.assertEqual(self.store.read('Original.md',created['commit']),content)
+        self.assertEqual(list(self.events.values())[-1]['content']['org.didadi.document.commit']['path'],payload['name'])
+        reloaded=DocumentService(GitDocs(self.root),self.api,'@alice:local','!doc:local')
+        self.assertEqual(reloaded.move(payload)['commit'],moved['commit'])
+
+    def test_move_rejects_stale_source_existing_destination_and_cross_room(self):
+        created=self.service.create({'room':'!doc:local','name':'A.md','content':'# A','operation':str(uuid.uuid4())})
+        other=self.service.create({'room':'!doc:local','name':'B.md','content':'# B','operation':str(uuid.uuid4())})
+        payload={'room':'!doc:local','source':'A.md','name':'B.md','base_blob':created['blob'],'operation':str(uuid.uuid4())}
+        with self.assertRaises(DocumentError) as conflict:self.service.move(payload)
+        self.assertEqual(conflict.exception.status,409)
+        self.assertEqual(self.store.read('A.md'),'# A');self.assertEqual(self.store.read('B.md'),'# B')
+        newer=self.service.save(self.payload(content='# Updated',base_blob=created['blob']),'A.md')
+        with self.assertRaises(DocumentError):self.service.move({**payload,'name':'C.md','operation':str(uuid.uuid4())})
+        with self.assertRaises(DocumentError) as forbidden:self.service.move({**payload,'room':'!other','name':'C.md','base_blob':newer['blob']})
+        self.assertEqual(forbidden.exception.status,403)
+        with self.assertRaises(DocumentError) as missing:self.service.move({**payload,'name':'C.md','base_blob':None})
+        self.assertEqual(missing.exception.status,400)
+        self.assertEqual(self.store.read('A.md'),'# Updated')
+        self.assertIsNone(self.store.blob_version('C.md'))
+
+    def test_competing_moves_have_one_winner_and_preserve_source_blob(self):
+        made=self.service.create({'room':'!doc:local','name':'Source.md','content':'# Original','operation':str(uuid.uuid4())})
+        def attempt(name):
+            try:return self.service.move({'room':'!doc:local','source':'Source.md','name':name,'base_blob':made['blob'],'operation':str(uuid.uuid4())})
+            except DocumentError as error:return error.status
+        with ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(attempt,['One.md','Two.md']))
+        self.assertEqual(sum(isinstance(result,dict) for result in results),1)
+        self.assertEqual(results.count(409),1)
+        files=self.service.documents('!doc:local')['documents']
+        self.assertEqual(len(files),1);self.assertEqual(files[0]['blob'],made['blob'])
+
+    def test_move_publication_retry_does_not_create_a_second_commit(self):
+        made=self.service.create({'room':'!doc:local','name':'Source.md','content':'# Source','operation':str(uuid.uuid4())})
+        payload={'room':'!doc:local','source':'Source.md','name':'Moved.md','base_blob':made['blob'],'operation':str(uuid.uuid4())}
+        with patch.object(self.store,'_publish',side_effect=PublicationPending('offline')):
+            with self.assertRaises(DocumentError) as pending:self.service.move(payload)
+        self.assertEqual(pending.exception.status,503)
+        committed=self.store._ref(self.store.branch)
+        self.assertIsNone(self.store.blob_version('Source.md'))
+        result=self.service.move(payload)
+        self.assertEqual(result['commit'],committed)
+        self.assertEqual(result['blob'],made['blob'])
