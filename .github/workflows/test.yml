@@ -128,6 +128,7 @@ jobs:
           node client/scripts/attachment-smoke.mjs http://127.0.0.1:8767
           node client/scripts/quote-smoke.mjs http://127.0.0.1:8767
           node client/scripts/source-reference-smoke.mjs http://127.0.0.1:8767
+          node client/scripts/people-smoke.mjs http://127.0.0.1:8767
       - name: Diagnostics
         if: failure()
         run: |
