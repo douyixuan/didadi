@@ -42,6 +42,14 @@ export async function connect() {
   const timelinePage=(room,from=null)=>messagePage(client,room,from);
   return {
     session,
+    async uploadAttachment(room,file,operation,root=null){
+      const query=new URLSearchParams({room,name:file.name,operation,type:file.type||'application/octet-stream'});if(root)query.set('root',root);
+      const response=await fetchLocal('/api/attachments?'+query,{method:'POST',headers:{'Content-Type':file.type||'application/octet-stream'},body:file});const data=await response.json();if(!response.ok){const error=new Error(data.error||'Attachment failed. Retry with the same file.');error.status=response.status;throw error;}return data;
+    },
+    async downloadAttachment(room,event){
+      const response=await fetchLocal('/api/attachments/download?'+new URLSearchParams({room,event}));if(!response.ok){const data=await response.json();const error=new Error(data.error||'Download unavailable.');error.status=response.status;throw error;}
+      const header=response.headers.get('Content-Disposition')||'',match=header.match(/filename\*=UTF-8''([^;]+)/i);return {blob:await response.blob(),name:match?decodeURIComponent(match[1]):'attachment'};
+    },
     async saveDocument(room,content,base_blob,operation,name='demo.md'){
       const response=await fetchLocal('/api/documents/'+encodeURIComponent(name),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({room,content,base_blob,operation})});
       const data=await response.json();if(!response.ok){const error=new Error(data.error||'Save failed. Keep your draft.');error.status=response.status;error.data=data;throw error;}return data;

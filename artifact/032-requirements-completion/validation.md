@@ -51,3 +51,12 @@ SDK relations独立取root+50回复，现有白名单固定v1 GET，无身份覆
 ## 正文搜索候选（2026-10-20）
 
 155完整Python/151完整前端/build通过，4搜索service及25定向后端通过。真实8842/Matrix查到24条已超recent50的正文命中、两页取回；Git21份文件名无查询词、正文第3行命中，20+1分页同snapshot，未授权房间拒绝。隔离已安装Chrome完成24消息分页并打开历史thread；文档第一页后将第21份当前内容改写，注入一次分页503后同query/cursor/commit重试保留20结果，最终21结果并打开旧匹配版本；当前Git仍是新内容。证据.local/search/protocol.log/browser-proof.json/results.png/preview.png。首次protocol请求早于server启动ECONNREFUSED已保留protocol-startup-race.log，确认监听后重跑成功。Reviewer静态无阻断。最后补房间类型400验证；精确提交CI仍需观察。
+
+
+## Message attachments candidate (2026-10-20)
+
+The message composer uploads a file of up to 5 MiB as m.file. The server uses the current Matrix identity and checks joined, unencrypted room access and message power levels. Downloads require a canonical file event in an allowed room and a CSRF token. Only local-homeserver media is accepted. Downloads use attachment disposition, application/octet-stream and nosniff. No remote redirects or inline HTML rendering are allowed.
+
+An uncertain send keeps the original bytes, operation UUID and thread root. A retry reuses the cached media URI and Matrix message transaction. Losing an upload response before the URI is recorded can leave an orphan media object; exactly-once media storage is not claimed. Markdown embedding, inline images, encrypted files and remote media remain pending.
+
+161 full Python tests and 155 frontend tests plus build passed. Final targeted76 frontend tests/build passed after the file-message selection guard. Actual Matrix protocol proved byte-exact download, one message on retry, conflicting bytes409 and ungranted room403. Isolated installed Chrome used the real file input, injected a lost response after server commit, retried the same operation/root, downloaded57 exact bytes and did not execute HTML. Evidence: .local/attachments/protocol.log, browser-proof.json and preview.png. CI runs attachment-smoke.mjs; final commit CI must be checked separately.

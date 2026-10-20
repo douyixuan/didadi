@@ -123,3 +123,12 @@ Choose Search in the header. Messages searches content.body through Matrix in th
 Documents searches regular Markdown bodies in the granted Git document repository. Results include line, excerpt, blob and a fixed reachable commit. Each page scans up to50 files and returns up to20 matching files; an empty page can still have more files. Later pages keep the same Git snapshot even if documents change. Open matched version reads that historical content and preserves draft navigation guards. A file larger than64KiB or with unsupported text encoding is skipped with a visible count. Query text is literal and case-insensitive. The existing sidebar field remains a navigation filter.
 
 The endpoints POST /api/search/messages and POST /api/search/documents retain the current Matrix identity, room allowlist and document-room authorization. They do not search ungranted repositories, attachments or private runtime data. Search responses are rendered as text. No persistent index, production authorization change or paused performance work is introduced.
+
+
+## Message attachments candidate (2026-10-20)
+
+The message composer uploads a file of up to 5 MiB as m.file. The server uses the current Matrix identity and checks joined, unencrypted room access and message power levels. Downloads require a canonical file event in an allowed room and a CSRF token. Only local-homeserver media is accepted. Downloads use attachment disposition, application/octet-stream and nosniff. No remote redirects or inline HTML rendering are allowed.
+
+An uncertain send keeps the original bytes, operation UUID and thread root. A retry reuses the cached media URI and Matrix message transaction. Losing an upload response before the URI is recorded can leave an orphan media object; exactly-once media storage is not claimed. Markdown embedding, inline images, encrypted files and remote media remain pending.
+
+161 full Python tests and 155 frontend tests plus build passed. Final targeted76 frontend tests/build passed after the file-message selection guard. Actual Matrix protocol proved byte-exact download, one message on retry, conflicting bytes409 and ungranted room403. Isolated installed Chrome used the real file input, injected a lost response after server commit, retried the same operation/root, downloaded57 exact bytes and did not execute HTML. Evidence: .local/attachments/protocol.log, browser-proof.json and preview.png. CI runs attachment-smoke.mjs; final commit CI must be checked separately.

@@ -23,6 +23,7 @@ class ClientError(Exception):
 
 
 from src.search_service import SearchService
+from src.attachment_service import AttachmentService,MAX_ATTACHMENT_BYTES
 
 
 class Workspace:
@@ -38,6 +39,7 @@ class Workspace:
         self.user_id = self.api('GET', '/account/whoami')['user_id']
         self.documents = DocumentService(self.docs, self.api, self.user_id, state['room'])
         self.search = SearchService(self.documents,self.api,self.allowed)
+        self.attachments=AttachmentService(self.metadata,self.api,self.allowed,self.matrix_url,self.user_id,self.state['tokens'][0])
         self.repository_reads = []
         if repositories is not None:
             for alias, grant in repositories.grants.items():
@@ -173,7 +175,7 @@ def handler(workspace, dist, port):
         def log_message(self, *args):
             pass
 
-        def respond(self, status, data, kind='application/json'):
+        def respond(self, status, data, kind='application/json', headers=None):
             payload = json.dumps(data).encode() if kind == 'application/json' else data
             self.send_response(status)
             self.send_header('Content-Type', kind)
@@ -181,6 +183,7 @@ def handler(workspace, dist, port):
             self.send_header('Cache-Control', 'no-store')
             self.send_header('X-Content-Type-Options', 'nosniff')
             self.send_header('Content-Security-Policy', "default-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'")
+            for key,value in (headers or {}).items():self.send_header(key,value)
             self.end_headers()
             self.wfile.write(payload)
 
@@ -199,13 +202,27 @@ def handler(workspace, dist, port):
                 body = None
                 if method != 'GET':
                     size = int(self.headers.get('Content-Length', '0'))
-                    if not 0 < size < 500000:
-                        raise ClientError(400, 'Invalid request size.')
-                    body = json.loads(self.rfile.read(size))
+                    if parsed.path=='/api/attachments' and method=='POST':
+                        if not 0<=size<=MAX_ATTACHMENT_BYTES:raise ClientError(413,'Attachments must be at most 5 MiB.')
+                        body=self.rfile.read(size)
+                    else:
+                        if not 0 < size < 500000:
+                            raise ClientError(400, 'Invalid request size.')
+                        body = json.loads(self.rfile.read(size))
                 if parsed.path == '/api/session' and method == 'GET':
                     result = {'csrf': workspace.csrf, 'userId': workspace.user_id, 'agentId': AGENT,
                               'initialRoom': workspace.state['room'], 'documentRoom': workspace.state['room'], 'documentSave': 'direct-v1', 'qa': getattr(workspace, 'qa', None), 'agentLabel': 'Example echo agent · no LLM',
                               'repositoryReads': workspace.repository_choices()}
+                elif parsed.path=='/api/attachments' and method=='POST':
+                    if set(query)-{'room','name','operation','type','root'} or any(len(values)!=1 for values in query.values()):raise ClientError(400,'Unknown attachment parameter.')
+                    result=workspace.attachments.upload(query.get('room',[''])[0],query.get('name',[''])[0],query.get('operation',[''])[0],query.get('type',['application/octet-stream'])[0],body,query.get('root',[None])[0])
+                elif parsed.path=='/api/attachments/download' and method=='GET':
+                    if set(query)!={'room','event'} or any(len(values)!=1 for values in query.values()):raise ClientError(400,'Use one room and one attachment event.')
+                    if not hmac.compare_digest(self.headers.get('X-CSRF-Token',''),workspace.csrf):raise ClientError(403,'Use the current local session to download attachments.')
+                    name,payload=workspace.attachments.download(query.get('room',[''])[0],query.get('event',[''])[0])
+                    from urllib.parse import quote
+                    self.respond(200,payload,'application/octet-stream',{'Content-Disposition':"attachment; filename*=UTF-8''"+quote(name,safe='')})
+                    return
                 elif parsed.path == '/api/search/messages' and method == 'POST':
                     result = workspace.search.messages(body)
                 elif parsed.path == '/api/search/documents' and method == 'POST':
