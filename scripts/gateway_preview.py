@@ -7,6 +7,7 @@ from pathlib import Path
 import secrets
 import threading
 import time
+import uuid
 from urllib.parse import parse_qs, urlsplit
 
 from scripts.agent_worker import once
@@ -28,6 +29,11 @@ def serve(state, worker_token, port=8765, document_repo=None,
     def api(method, path, data=None, query=None):
         return request(matrix_url, method, PREFIX + path, state['tokens'][0], data, query)
 
+    documents = None
+    if store:
+        from src.document_service import DocumentService
+        documents = DocumentService(store, api, api('GET', '/account/whoami')['user_id'], state['room'])
+
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
@@ -37,6 +43,24 @@ def serve(state, worker_token, port=8765, document_repo=None,
                 self.send_error(403)
                 return False
             return True
+
+        def document_failure(self, status, message, form):
+            # Keep the exact submitted draft and operation on errors; never send it to Matrix.
+            hidden = ''.join('<input type="hidden" name="' + key + '" value="' +
+                             escape(form.get(key, [''])[0], quote=True) + '">'
+                             for key in ('csrf', 'operation', 'base', 'revision'))
+            body = ('<!doctype html><meta charset="utf-8"><title>Document save needs attention</title>' +
+                    '<h1>Document save needs attention</h1><p>' + escape(message) + '</p>' +
+                    '<form method="post">' + hidden +
+                    '<textarea aria-label="Preserved Markdown draft" name="doc-content" rows="16">\n' +
+                    escape(form.get('doc-content', [''])[0]) + '</textarea>' +
+                    '<button name="action" value="doc-save">Retry the same save</button></form>' +
+                    '<p><a href="/">Review latest Git version</a>. Keep a copy of this draft before leaving.</p>')
+            self.send_response(status)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Cache-Control', 'no-store')
+            self.end_headers()
+            self.wfile.write(body.encode())
 
         def do_GET(self):
             if not self.valid_host():
@@ -62,16 +86,17 @@ def serve(state, worker_token, port=8765, document_repo=None,
                 editor = ''
                 if store:
                     revision = query.get('commit', [None])[0]
-                    snapshot = store.snapshot('demo.md', revision)
+                    snapshot = documents.read(state['room'], revision)
                     history = ' · '.join('<a href="/?commit=' + h + '">' + h[:10] + '</a>'
                                          for h in store.history('demo.md'))
                     editor = ('<article><small>GIT DOCUMENT / demo.md</small><p>Version: <code>' +
                               escape(snapshot['commit'] or 'not created') + '</code></p>' +
-                              '<p class="note">Save sends a Matrix task. The external worker commits to Git and replies in the thread.</p>' +
-                              '<form method="post"><textarea aria-label="Markdown document" name="doc-content" maxlength="6000" rows="10">' +
+                              '<p class="note">Save writes directly to Git. Matrix receives a version receipt, never this document body.</p>' +
+                              '<form method="post"><textarea aria-label="Markdown document" name="doc-content" rows="10">\n' +
                               escape(snapshot['content'] or '') + '</textarea><input type="hidden" name="base" value="' +
                               (snapshot['blob'] or '') + '"><input type="hidden" name="csrf" value="' + csrf +
-                              '"><button name="action" value="doc-save">Save to Git via agent</button>' +
+                              '"><input type="hidden" name="operation" value="' + str(uuid.uuid4()) +
+                              '"><button name="action" value="doc-save">Save directly to Git</button>' +
                               '<input type="hidden" name="revision" value="' + (revision or '') +
                               '"><button name="action" value="doc-read">Ask agent to read Git</button></form>' +
                               '<p>Immutable versions: ' + history + ' · <a href="/">Latest</a></p></article>')
@@ -101,7 +126,7 @@ a{color:#83ddc6}.note{color:#a8b8cb}form{margin:30px 0;display:flex;gap:10px;fle
             if not self.valid_host():
                 return
             size = int(self.headers.get('Content-Length', '0'))
-            if not 0 < size < 100000:
+            if not 0 < size < 600000:
                 self.send_error(400)
                 return
             form = parse_qs(self.rfile.read(size).decode())
@@ -115,13 +140,21 @@ a{color:#83ddc6}.note{color:#a8b8cb}form{margin:30px 0;display:flex;gap:10px;fle
                     self.send_error(400)
                     return
                 if action == 'doc-save':
-                    content = form.get('doc-content', [''])[0]
-                    if len(content) > 6000:
-                        self.send_error(400)
+                    from src.document_service import DocumentError
+                    try:
+                        documents.save({'room':state['room'], 'operation':form.get('operation',[''])[0],
+                                        'content':form.get('doc-content',[''])[0],
+                                        'base_blob':form.get('base',[''])[0] or None})
+                    except DocumentError as error:
+                        self.document_failure(error.status, 'Document save rejected. Keep this draft and review the latest Git version before retrying.', form)
                         return
-                    document = {'action': 'write', 'content': content,
-                                'base_blob': form.get('base', [''])[0] or None}
-                    body = 'Save demo.md from document editor'
+                    except Exception:
+                        self.document_failure(503, 'Document save unavailable. Keep this draft and retry the same request.', form)
+                        return
+                    self.send_response(303)
+                    self.send_header('Location', '/')
+                    self.end_headers()
+                    return
                 elif action == 'doc-read':
                     document = {'action': 'read'}
                     if form.get('revision', [''])[0]:

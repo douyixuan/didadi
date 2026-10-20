@@ -66,6 +66,21 @@ class ClientServerTests(unittest.TestCase):
         content['org.didadi.document']={'action':'write','content':'safe','name':'../escape.md'}
         with self.assertRaises(ClientError):self.workspace.proxy('PUT','/rooms/!seed:local/send/m.room.message/one',{},content)
 
+    def test_platform_matrix_proxy_rejects_document_bodies_before_send(self):
+        for command in ({'action':'write','content':'private draft','base_blob':None},
+                        {'action':'write','base_blob':None},
+                        {'action':'read','content':'private draft'}):
+            self.calls.clear()
+            content={'msgtype':'m.text','body':'request','m.mentions':{'user_ids':[AGENT]},
+                     'org.didadi.document':command}
+            with self.subTest(command=command),self.assertRaises(ClientError) as error:
+                self.workspace.proxy('PUT','/rooms/!seed:local/send/m.room.message/task',{},content)
+            self.assertEqual(error.exception.status,400)
+            self.assertFalse(any('/send/' in call[1] for call in self.calls))
+        self.calls.clear()
+        content['org.didadi.document']={'action':'read'}
+        self.assertEqual(self.workspace.proxy('PUT','/rooms/!seed:local/send/m.room.message/read',{},content),{'event_id':'$one'})
+
     def test_room_creation_is_idempotent_and_recovers_after_lost_record(self):
         first=self.workspace.create_room('stable-request-id','Client room')
         second=self.workspace.create_room('stable-request-id','Client room')

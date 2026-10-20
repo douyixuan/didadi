@@ -135,12 +135,9 @@ class Workspace:
         if isinstance(repository, dict) and repository.get('action') == 'report':
             self.documents.authorize(room, write=True)
         if command is not None:
-            if not isinstance(command, dict) or command.get('action') not in {'read', 'write'} or mentions != [AGENT]:
-                raise ClientError(400, 'Invalid document request.')
-            if command['action'] == 'write' and (not isinstance(command.get('content'), str) or len(command['content']) > 6000):
-                raise ClientError(400, 'Document text must contain at most 6000 characters.')
-            if any(key not in {'action', 'content', 'base_blob', 'commit'} for key in command):
-                raise ClientError(400, 'Document paths and grants cannot be selected by messages.')
+            if (not isinstance(command, dict) or command.get('action') != 'read' or
+                    mentions != [AGENT] or set(command) - {'action', 'commit'}):
+                raise ClientError(400, 'Use the direct document API to save. Matrix document requests contain read metadata only.')
         if mentions and not any(event['type'] == 'm.room.member' and event.get('state_key') == AGENT and
                                 event['content'].get('membership') == 'join' for event in state):
             raise ClientError(409, 'The example agent is still joining. Refresh and retry.')
