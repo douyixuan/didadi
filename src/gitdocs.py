@@ -262,10 +262,21 @@ class GitDocs:
                             intent_key = self._operation_ref(intent['operation']).rsplit('/', 1)[1]
                         except ValueError:
                             raise RuntimeError('private operation intent has invalid fields') from None
-                        if (intent['commit'] != revision or intent_key != key or
-                                any(intent.get(k) != metadata.get(k) for k in ('name', 'request_hash', 'merged'))):
+                        if intent_key != key:
                             raise RuntimeError('private operation intent does not match committed version')
-                        metadata = {**intent, 'operation_key': key}
+                        if intent['commit'] != revision:
+                            old = intent['commit']
+                            if (not isinstance(old, str) or not re.fullmatch('[0-9a-f]{40}', old) or
+                                    self._git('merge-base', old, head, check=False).strip() == old):
+                                raise RuntimeError('private operation intent does not match committed version')
+                            # A failed pre-main CAS can leave an unreachable intent. A
+                            # GC may already have pruned that failed candidate. The
+                            # later imported operation is authoritative, but its private
+                            # routing remains absent until a full request-hash match.
+                        else:
+                            if any(intent.get(k) != metadata.get(k) for k in ('name', 'request_hash', 'merged')):
+                                raise RuntimeError('private operation intent does not match committed version')
+                            metadata = {**intent, 'operation_key': key}
                 if (not isinstance(metadata, dict) or not isinstance(metadata.get('operation'), str)
                     or not isinstance(metadata.get('request_hash'), str)):
                     continue
