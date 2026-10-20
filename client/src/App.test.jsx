@@ -675,7 +675,7 @@ it('keeps a confirmed created document accessible when refreshing its list fails
  api.createDocument=vi.fn(async(_room,name)=>{created=true;return {status:'saved',path:name,commit:doc.commit,blob:doc.blob}});
  api.document.mockImplementation(async(_room,_version,name='demo.md')=>({...doc,name,content:name==='demo.md'?doc.content:'# Created despite list failure'}));
  render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Team handbook'});fireEvent.change(screen.getByLabelText('New document path'),{target:{value:'Created.md'}});fireEvent.click(screen.getByRole('button',{name:'Create document'}));
- await screen.findByRole('button',{name:'Created.md, current document'});await screen.findByText(/Document list offline/);fireEvent.click(screen.getByRole('button',{name:'demo.md',exact:true}));await screen.findByRole('heading',{name:'Team handbook'});expect(screen.getByRole('button',{name:'Created.md',exact:true})).toBeInTheDocument();
+ await screen.findByRole('button',{name:'Created.md, current document'});await screen.findByText(/Document list offline/);await waitFor(()=>expect(screen.getByRole('button',{name:'demo.md',exact:true})).toBeEnabled());fireEvent.click(screen.getByRole('button',{name:'demo.md',exact:true}));await screen.findByRole('heading',{name:'Team handbook'});expect(screen.getByRole('button',{name:'Created.md',exact:true})).toBeInTheDocument();
 });
 
 it('blocks document navigation when the dirty draft cannot be stored locally',async()=>{
