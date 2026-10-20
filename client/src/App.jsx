@@ -1,3 +1,4 @@
+import {QuotedMessage,replyBody} from './QuotedMessage';
 import {AttachmentComposer,FileAttachment} from './Attachments';
 import {WorkspaceSearch} from './WorkspaceSearch';
 import {useThread} from './useThread';
@@ -16,33 +17,40 @@ import {draftContext,useLocalDrafts} from './localDrafts';
 import {BookOpen, Search, ChevronDown, ChevronRight, FileText, MessageSquare, Bot, History, Plus, ArrowUp, X, Check, AlertCircle, RefreshCw, Bold, Italic, Heading2, List, Code2} from 'lucide-react';
 const short = value => value?.slice(0,10) || 'not created';
 
-export function Composer({onSend, busyRoom, agentId, replyTo, clearReply, onSent, defaultMention=true}) {
+export function Composer({onSend, busyRoom, agentId, replyTo, clearReply, onSent, defaultMention=true,quote=null,clearQuote=()=>{}}) {
   const [text,setText]=useState('');
   const [mention,setMention]=useState(defaultMention);
   useEffect(()=>setMention(defaultMention),[defaultMention]);
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState('');
-  const attempt=useRef(null), lock=useRef(false),drafts=useRef({}),currentRoom=useRef(busyRoom);
+  const attempt=useRef({}), lock=useRef(false),drafts=useRef({}),currentRoom=useRef(busyRoom);
   currentRoom.current=busyRoom;
   useEffect(()=>{setText(drafts.current[busyRoom]||'');setError('');},[busyRoom]);
+  const frozen=attempt.current[busyRoom]?.uncertain?attempt.current[busyRoom]:null;
+  const shownQuote=frozen?frozen.quote:quote;
+  const shownReply=frozen?frozen.replyTo:replyTo;
   async function send(event) {
     event.preventDefault();
     if(lock.current || !text.trim()) return;
     lock.current=true; setBusy(true); setError('');
-    const content={msgtype:'m.text',body:text,'m.mentions':{user_ids:mention?[agentId]:[]}};
+    let content={msgtype:'m.text',body:text,'m.mentions':{user_ids:mention?[agentId]:[]}};
     if(replyTo) content['m.relates_to']={rel_type:'m.thread',event_id:replyTo};
+    if(quote) content['m.relates_to']={...content['m.relates_to'],'m.in_reply_to':{event_id:quote.id}};
     const key=JSON.stringify([busyRoom,content]);
-    if(attempt.current?.key!==key) attempt.current={key,id:crypto.randomUUID()};
-    try { const result=await onSend(content,attempt.current.id); if(currentRoom.current===busyRoom){setText('');clearReply();} delete drafts.current[busyRoom];attempt.current=null;
-       onSent(result.event_id,mention,busyRoom); }
-    catch(error){setError(errorText(error));}
+    if(!attempt.current[busyRoom]?.uncertain && attempt.current[busyRoom]?.key!==key) attempt.current[busyRoom]={key,id:crypto.randomUUID(),content,quote,replyTo};
+    const operation=attempt.current[busyRoom];content=operation.content;
+    try { const result=await onSend(content,operation.id); if(currentRoom.current===busyRoom){setText('');clearReply();clearQuote();} delete drafts.current[busyRoom];delete attempt.current[busyRoom];
+       onSent(result.event_id,content['m.mentions'].user_ids.length>0,busyRoom); }
+    catch(error){const status=error.httpStatus||error.status;operation.uncertain=!(status>=400&&status<500&&status!==408);if(currentRoom.current===busyRoom)setError(errorText(error));}
     finally {lock.current=false;setBusy(false);}
   }
   return <form className="composer" onSubmit={send}>
-    {replyTo&&<div className="reply-banner">Reply in thread {short(replyTo)} <button type="button" onClick={clearReply}>Cancel reply</button></div>}
+    {shownQuote&&<div className="reply-banner">Quoting {shownQuote.sender}: {replyBody(shownQuote.content).slice(0,160)} <button type="button" disabled={busy||Boolean(frozen)} onClick={clearQuote}>Cancel quote</button></div>}
+    {shownReply&&<div className="reply-banner">Reply in thread {short(shownReply)} <button type="button" disabled={busy||Boolean(frozen)} onClick={clearReply}>Cancel reply</button></div>}
     <label className="sr-only" htmlFor="message">Message</label>
-    <textarea id="message" value={text} onChange={e=>{setText(e.target.value);drafts.current[busyRoom]=e.target.value;}} placeholder="Write a message to this room…" maxLength={4000} disabled={busy}/>
-    <div className="composer-actions"><label><input type="checkbox" checked={mention} onChange={e=>setMention(e.target.checked)} disabled={busy}/> Mention example Agent</label><button disabled={busy||!text.trim()}>{busy?'Sending…':<>Send <ArrowUp size={15}/></>}</button></div>
+    <textarea id="message" value={text} onChange={e=>{setText(e.target.value);drafts.current[busyRoom]=e.target.value;}} placeholder="Write a message to this room…" maxLength={4000} disabled={busy||Boolean(frozen)}/>
+    <div className="composer-actions"><label><input type="checkbox" checked={mention} onChange={e=>setMention(e.target.checked)} disabled={busy||Boolean(frozen)}/> Mention example Agent</label><button disabled={busy||!text.trim()}>{busy?'Sending…':<>Send <ArrowUp size={15}/></>}</button></div>
+    {frozen&&<p role="status">The send result is unknown. Retry keeps the original message and references.</p>}
     {error&&<p className="error" role="alert">{error} <span>Retry sends the same request; your draft is kept.</span></p>}
   </form>;
 }
@@ -219,6 +227,7 @@ function MessageBody({body='',version,onOpenVersion,disabled=false}) {
 
 export function App({connector=connect}) {
   const [api,setApi]=useState(null),[error,setError]=useState(''),[rooms,setRooms]=useState([]),[room,setRoom]=useState('');
+  const [quote,setQuote]=useState(null);
   const [events,setEvents]=useState([]),[timelineError,setTimelineError]=useState(''),[roomsError,setRoomsError]=useState(''),[replyTo,setReplyTo]=useState(null),[filter,setFilter]=useState(null);
   const [olderCursor,setOlderCursor]=useState(null),[loadingOlder,setLoadingOlder]=useState(false),[historyError,setHistoryError]=useState(''),[historyNotice,setHistoryNotice]=useState('');
   const loadOlderAction=useRef(null),historyScroll=useRef(null);
@@ -276,7 +285,7 @@ export function App({connector=connect}) {
   }
   async function refreshRooms(){if(roomsRefreshing.current)return;roomsRefreshing.current=true;try{const list=await api.rooms();setRooms(list);roomsFailed.current=false;setRoomsError('');}catch(e){roomsFailed.current=true;setRoomsError(errorText(e));}finally{roomsRefreshing.current=false;}}
   useEffect(()=>{if(!api||!room)return;let stopped=false,inFlight=false,initialized=false,olderBusy=false,revision=0,current=[],cursor=null;
-    setEvents([]);setReplyTo(null);setFilter(null);setOlderCursor(null);setLoadingOlder(false);setHistoryError('');setHistoryNotice('');historyScroll.current=null;
+    setEvents([]);setReplyTo(null);setQuote(null);setFilter(null);setOlderCursor(null);setLoadingOlder(false);setHistoryError('');setHistoryNotice('');historyScroll.current=null;
     async function refresh(){if(inFlight)return;inFlight=true;try{
       const page=api.timelinePage?await api.timelinePage(room):{events:await api.timeline(room),previousCursor:null};
       if(!stopped){
@@ -359,7 +368,7 @@ export function App({connector=connect}) {
           {!displayed.length?<div className="panel-empty"><MessageSquare size={25}/><h3>{filter?'No thread messages loaded':'Start a conversation'}</h3><p>{filter?'Retry the thread request or return to all messages.':'Discuss this workspace, or mention the example Agent to see a real response.'}</p></div>:displayed.map(event=>{
           const agent=event.sender===api.session.agentId,relation=event.content['m.relates_to'];
           const root=relation?.rel_type==='m.thread'?relation.event_id:event.id;
-          return <article className={'message '+(agent?'agent':'')} key={event.id}><span className={'avatar '+(agent?'agent-avatar':'')}>{agent?<Bot size={15}/>:'Y'}</span><div className="message-main"><div className="message-meta"><strong>{agent?'Example Agent':event.sender===api.session.userId?'You':event.sender.split(':')[0]}</strong><time>{new Date(event.time||Date.now()).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</time></div>{relation?.rel_type==='m.thread'&&<button className="thread-link" onClick={()=>setFilter(root)}>Reply in thread</button>}{event.content.msgtype==='m.file'?<FileAttachment api={api} room={room} event={event}/>:<MessageBody body={event.content.body} version={documentVersion(event,api.session.agentId,api.session.synthetic,api.session.userId,activeDocument)} disabled={docMeta.busy||docMeta.reading||docMeta.composing} onOpenVersion={commit=>{setRequestedVersion({commit});setMode('read');setHistoryOpen(true)}}/>}<div className="message-actions">{api.fromMessages&&<label><input type="checkbox" aria-label={'Select message '+event.id} checked={selectedMessages.includes(event.id)} disabled={Boolean(event.content.msgtype&&!['m.text','m.notice','m.emote'].includes(event.content.msgtype))||fromMessagesBusy||fromMessagesUncertain||room!==documentRoom||(!selectedMessages.includes(event.id)&&selectedMessages.length>=20)} onChange={eventChange=>setSelectedMessages(old=>eventChange.target.checked?[...old,event.id]:old.filter(id=>id!==event.id))}/>Select</label>}<button onClick={()=>setReplyTo(root)}>Reply</button><button onClick={()=>setFilter(root)}>View thread</button></div></div></article>;
+          return <article className={'message '+(agent?'agent':'')} key={event.id}><span className={'avatar '+(agent?'agent-avatar':'')}>{agent?<Bot size={15}/>:'Y'}</span><div className="message-main"><div className="message-meta"><strong>{agent?'Example Agent':event.sender===api.session.userId?'You':event.sender.split(':')[0]}</strong><time>{new Date(event.time||Date.now()).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</time></div>{relation?.rel_type==='m.thread'&&<button className="thread-link" onClick={()=>setFilter(root)}>Reply in thread</button>}{relation?.['m.in_reply_to']?.event_id&&<QuotedMessage key={room+event.id} api={api} room={room} id={relation['m.in_reply_to'].event_id} onOpen={setFilter}/>} {event.content.msgtype==='m.file'?<FileAttachment api={api} room={room} event={event}/>:<MessageBody body={replyBody(event.content)} version={documentVersion(event,api.session.agentId,api.session.synthetic,api.session.userId,activeDocument)} disabled={docMeta.busy||docMeta.reading||docMeta.composing} onOpenVersion={commit=>{setRequestedVersion({commit});setMode('read');setHistoryOpen(true)}}/>}<div className="message-actions">{api.fromMessages&&<label><input type="checkbox" aria-label={'Select message '+event.id} checked={selectedMessages.includes(event.id)} disabled={Boolean(event.content.msgtype&&!['m.text','m.notice','m.emote'].includes(event.content.msgtype))||fromMessagesBusy||fromMessagesUncertain||room!==documentRoom||(!selectedMessages.includes(event.id)&&selectedMessages.length>=20)} onChange={eventChange=>setSelectedMessages(old=>eventChange.target.checked?[...old,event.id]:old.filter(id=>id!==event.id))}/>Select</label>}<button onClick={()=>{setQuote(null);setReplyTo(root)}}>Reply</button>{api.message&&<button onClick={()=>{setQuote(event);setReplyTo(relation?.rel_type==='m.thread'?root:null)}}>Quote</button>}<button onClick={()=>setFilter(root)}>View thread</button></div></div></article>;
         })}</div>
         <details className="task-details"><summary>Agent activity {tasks.filter(t=>t.room===room).length?`(${tasks.filter(t=>t.room===room).length})`:''}</summary>{tasks.filter(t=>t.room===room).map(t=><div key={t.id} className="task-control"><div className="task">{t.status==='done'?<Check size={13}/>:['failed','cancelled'].includes(t.status)?<AlertCircle size={13}/>:<RefreshCw size={13}/>}<span>{taskState(t).label}</span><code>{short(t.id)}</code></div>{!['done','failed','cancelled'].includes(t.status)&&<p className="quiet-status">{taskState(t).detail} {taskState(t).connection}</p>}
           {!api.session.synthetic&&<div className="message-actions"><button disabled={t.cancelling||!['pending','unverified'].includes(t.status)} onClick={()=>cancelTask(t)}>{t.cancelling?'Cancelling…':'Cancel task'}</button><button disabled={t.historyBusy} onClick={()=>taskHistory(t)}>View execution history</button></div>}
@@ -367,7 +376,7 @@ export function App({connector=connect}) {
           {t.history&&<ol aria-label="Task execution history">{t.history.length?t.history.map(entry=><li key={entry.sequence}><span>{({accepted:'Accepted',leased:'Lease granted',result_ready:'Result recorded',completed:'Reply delivered',retry_scheduled:'Retry scheduled',failed:'Failed',cancelled:'Cancelled'})[entry.action]||entry.action}</span>{({room_forbidden:'Room access revoked',delivery_forbidden:'Reply permission revoked',task_cancelled:'Cancelled by request',attempts_exhausted:'Retry limit reached',runtime_error:'Runtime error',room_unavailable:'Room temporarily unavailable'})[entry.reason]&&<span> · {({room_forbidden:'Room access revoked',delivery_forbidden:'Reply permission revoked',task_cancelled:'Cancelled by request',attempts_exhausted:'Retry limit reached',runtime_error:'Runtime error',room_unavailable:'Room temporarily unavailable'})[entry.reason]}</span>}<time> · {new Date(entry.at*1000).toLocaleTimeString()}</time></li>):<li>This task has no recorded execution history.</li>}</ol>}
         </div>)}{!tasks.filter(t=>t.room===room).length&&<p>No tasks sent in this session.</p>}</details>
         <AttachmentComposer api={api} room={room} replyTo={replyTo} onSent={sent}/>
-        <Composer busyRoom={room} agentId={api.session.agentId} onSend={(content,id)=>api.send(room,content,id)} onSent={sent} replyTo={replyTo} clearReply={()=>setReplyTo(null)} defaultMention={panel==='agent'}/>
+        <Composer busyRoom={room} agentId={api.session.agentId} onSend={(content,id)=>api.send(room,content,id)} onSent={sent} replyTo={replyTo} clearReply={()=>setReplyTo(null)} quote={quote} clearQuote={()=>setQuote(null)} defaultMention={panel==='agent'}/>
       </aside>
     </div>
   </main></div></>;
