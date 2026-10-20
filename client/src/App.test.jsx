@@ -628,12 +628,14 @@ it('keeps loaded history on refresh and discards a pending page when a genuine r
   .mockResolvedValueOnce({events:[message('$old-one',1)],previousCursor:'two'})
   .mockResolvedValueOnce({events:[message('$recent-one',3),message('$recent-two',4)],previousCursor:'new'})
   .mockImplementationOnce(()=>new Promise(r=>resolve=r))
-  .mockResolvedValueOnce({events:[message('$after-gap',100)],previousCursor:'gap'});
+  .mockResolvedValueOnce({events:[message('$after-gap',100)],previousCursor:'gap'})
+  .mockResolvedValueOnce({events:[message('$gap-filled',90)],previousCursor:null});
  const timer=vi.spyOn(globalThis,'setInterval').mockImplementation((callback,ms)=>{intervals.set(ms,callback);return ms;});
  try{render(<App connector={async()=>api}/>);await screen.findByText('$recent-one');fireEvent.click(screen.getByRole('button',{name:'Discussion',exact:true}));
   fireEvent.click(screen.getByRole('button',{name:'Load earlier messages'}));await screen.findByText('$old-one');await act(async()=>intervals.get(2000)());await screen.findByText('$recent-two');expect(screen.getByText('$old-one')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button',{name:'Load earlier messages'}));await act(async()=>intervals.get(2000)());await screen.findByText('$after-gap');await screen.findByText(/Recent messages advanced/);
   await act(async()=>resolve({events:[message('$stale-page',0)],previousCursor:null}));expect(screen.queryByText('$stale-page')).toBeNull();expect(screen.queryByText('$old-one')).toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:'Load earlier messages'}));await screen.findByText('$gap-filled');expect(screen.queryByText(/Recent messages advanced/)).toBeNull();
  }finally{timer.mockRestore()}
 });
 
