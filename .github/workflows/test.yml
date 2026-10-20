@@ -130,7 +130,9 @@ jobs:
           node client/scripts/quote-smoke.mjs http://127.0.0.1:8767
           node client/scripts/source-reference-smoke.mjs http://127.0.0.1:8767
           node client/scripts/people-smoke.mjs http://127.0.0.1:8767
-          python3 -m scripts.room_types_smoke --url http://127.0.0.1:8767 --matrix-url http://127.0.0.1:8008 --state-file .local/smoke-state.json
+          python3 -m scripts.room_types_smoke --url http://127.0.0.1:8767 --matrix-url http://127.0.0.1:8008 --state-file .local/smoke-state.json | tee .local/room-types-proof.json
+          other_room=$(python3 -c 'import json; print(json.load(open(".local/room-types-proof.json"))["direct"])')
+          python3 -m scripts.direct_chats_smoke --url http://127.0.0.1:8767 --matrix-url http://127.0.0.1:8008 --state-file .local/smoke-state.json --other-room "$other_room"
       - name: Diagnostics
         if: failure()
         run: |

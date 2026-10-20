@@ -49,6 +49,7 @@ export async function connect() {
   return {
     session,
     members:room=>roomMembers(client,room),
+    ...(session.directChats?{directChats:()=>api('/api/direct-chats'),retryDirect:room=>api('/api/direct-chats/retry',{room})}:{}),
     readSource:(room,repository,path)=>api('/api/repositories/read',{room,repository,path}),
     async uploadAttachment(room,file,operation,root=null){
       const query=new URLSearchParams({room,name:file.name,operation,type:file.type||'application/octet-stream'});if(root)query.set('root',root);
@@ -64,9 +65,11 @@ export async function connect() {
     },
     async rooms() {
       const {joined_rooms: ids} = await client.getJoinedRooms();
+      let direct=null;if(session.directChats){try{direct=await api('/api/direct-chats')}catch{/* Preference errors are shown separately; messaging remains available. */}}
       return Promise.all(ids.map(async id => {
         const state = await client.roomState(id);
         return {id, name:state.find(e=>e.type==='m.room.name')?.content.name || 'Untitled room',
+          directForYou:Boolean(direct?.mapped[id]?.length),
           encrypted:state.some(e=>e.type==='m.room.encryption'),
           kind:state.find(e=>e.type==='org.didadi.room')?.content.kind||'room',joinRule:state.find(e=>e.type==='m.room.join_rules')?.content.join_rule||'unknown',
           agentJoined:state.some(e=>e.type==='m.room.member' && e.state_key===session.agentId && e.content.membership==='join')};

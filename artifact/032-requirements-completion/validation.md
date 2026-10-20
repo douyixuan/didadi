@@ -114,3 +114,11 @@ Earlier local validation failures are preserved: system Python lacked websockets
 The first committed head8356766 passed all three jobs in push39426107868 and PR39426155877. A later repeated local protocol got503 (unconfirmed creation); its upstream cause was not captured and is not asserted to be429. A stale launcher record pointed to dead72521 while the actual owned listener65042 remained; the exact listener command was verified, then only that process was stopped and final source restarted, retaining Git/SQLite. Failed restart/protocol logs remain separate.
 
 The follow-up preserves Matrix429 and the existing sanitized retry_after_ms HTTP response instead of converting it to generic503. The intent remains bound, and the UI already freezes429 for the same-operation retry. The protocol fixture waits only on429, at most8 attempts/60seconds, respecting its body hint with the identical request. No rate setting changes,503 retry or attribution of the earlier503 to throttling is made.24 targeted backend/HTTP/helper tests passed. This follow-up requires its own exact-head CI; the earlier green runs are historical evidence for8356766.
+
+## m.direct 当前用户私聊偏好（2026-10-20）
+
+188完整Python（121.248秒）、184完整前端及build、33定向backend/HTTP测试通过。真实隔离Synapse创建一个私聊后写入m.direct，重复创建同room且数组无重复；保留既有映射；独立原生HTTP客户端更新/删除标签，本地可读取并尊重删除，不因旧创建请求复活。注入PUT已提交响应丢失后pending持久记录重建，再读已存在映射，不重复PUT且保留期间远端新增；标准/sync顶层account_data返回同一m.direct。原始账户数据代理403。此处原生客户端复用现有Alice合成token，并非创建另一个设备/新token。
+
+真实浏览器通过标签计数/房间badge、账户数据读失败清旧标签而房间列表仍可用、刷新后远端删除/添加可见，以及已存Git引导文档截图；浏览器不新增邀请。首次browser helper直接执行隐藏目录脚本导致import src失败，finally恢复也受相同错误影响；此时未执行原生偏好修改。保留日志，修正fixture模块路径与finally确保关闭浏览器后通过。独立静态审查无阻断，未冒称它运行测试。
+
+标准Matrix整事件PUT没有CAS，本实现不能保证未观察到的任意同时写入不丢失；每次重试读最新数据，只保证保留已观察到的其他条目，不冒称原子并发合并。只写当前actor的m.direct；邀请方与接收方各自客户端管理自己的偏好，不自动修改Bob账户数据。标签不改变成员/房间访问，GET结果只包含allowed+joined房间；通用授权设计仍归PR41。登录/注销只完成plan中的安全审计，无真实登录/撤销token，无此功能实现或验收声明。先前62本机重复完整协议429超预算停止的历史不变。最终提交、真实服务进程重启、额外Bob账户未改断言和精确head CI仍须分别核验。

@@ -126,3 +126,13 @@ Earlier local validation failures are preserved: system Python lacked websockets
 The first committed head8356766 passed all three jobs in push39426107868 and PR39426155877. A later repeated local protocol got503 (unconfirmed creation); its upstream cause was not captured and is not asserted to be429. A stale launcher record pointed to dead72521 while the actual owned listener65042 remained; the exact listener command was verified, then only that process was stopped and final source restarted, retaining Git/SQLite. Failed restart/protocol logs remain separate.
 
 The follow-up preserves Matrix429 and the existing sanitized retry_after_ms HTTP response instead of converting it to generic503. The intent remains bound, and the UI already freezes429 for the same-operation retry. The protocol fixture waits only on429, at most8 attempts/60seconds, respecting its body hint with the identical request. No rate setting changes,503 retry or attribution of the earlier503 to throttling is made.24 targeted backend/HTTP/helper tests passed. This follow-up requires its own exact-head CI; the earlier green runs are historical evidence for8356766.
+
+## 当前用户的私聊偏好与登录审计（2026-10-20）
+
+本切片在候选62上添加标准 Matrix m.direct 账户数据同步，不修改 PR41 Proposed Document Service ADR/通用Agent授权归属。账户数据是当前人的偏好，不是房间访问权；任何远端映射均不能把未获准房间纳入本地 allowed 集。创建私聊后独立持久化 actor/room/peer 的待同步项，失败保留已建房间，专用端点只重试既有绑定，不接受任意人/账户数据对象。每次先读最新整图再加自己的room，验证并有界再读；成功后尊重其他客户端删除，不自动复活旧偏好。远端标签通过刷新/10秒轮询读取，浏览器只得 allowed且joined房间的标签，原始account_data不开放代理。标准整事件PUT无CAS，无法保证未观察到的任意并发写入无损；不以有界回读冒称原子合并。
+
+验证规划：合并保留既有私聊/失败GET零PUT/PUT已提交丢响应/持久receipt重建/远端更新和删除/身份和房间边界；真实隔离Synapse通过现有Alice身份的独立原生HTTP客户端与本地受限适配器，核对m.direct、标准sync账户事件及重试。独立原生HTTP客户端复用既有合成token，不声称新设备token/另一个真实账户。保持实际429重跑未通过记录，不关限流。前端覆盖独立pending反馈、失败重试、不重复创建、刷新/迟到隔离。
+
+登录/注销最小安全切片审计：当前Workspace使用state.tokens[0]与全局csrf、Git/SQLite和固定documentRoom，浏览器只有占位token，未实现用户认证会话。直接POST logout会撤销所有共用该测试token的旧预览，禁止把它接到现有界面。首个可真实验收切片应是一个独立临时device/session的登录与仅当前设备注销，采用服务端token保存、随机HttpOnly/SameSite会话cookie、每会话CSRF/TTL/注销失效、身份隔离的Workspace和仓库/房间映射；不得沿用Alice的文件/receipt/授权给Bob。生产需要HTTPS/安全cookie与明确SSO/OAuth或密码流程；不把任意homeserver URL作为可请求目标，不将密码/token放URL、日志、浏览器存储或Git。权限仍由现有Matrix/资源服务核验，不借认证流程接管PR41的Agent grants。
+
+真实登录验收所需的具体追加步骤供父端审批：只在独立隔离Synapse的已有合成账户，为本次验收创建一个临时设备会话（可能产生短时测试token），只保存在测试进程内存，使用独立cookie jar和repo/metadata；核对whoami/切人隔离/CSRF/过期；仅注销这个新device token并证明旧共享fixture token仍有效，最后销毁内存会话。不得读取真实用户密码，不生成/配置生产凭据、不扩大持久权限。本轮没有执行新设备登录或撤销任何现有token；无此追加步骤时只交付审计，不伪称真实登录/注销已实现或验证。

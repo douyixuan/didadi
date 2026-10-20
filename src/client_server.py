@@ -23,6 +23,7 @@ class ClientError(Exception):
 
 
 from src.room_service import RoomService,RoomError
+from src.direct_chats import DirectChats,DirectChatError
 from src.source_references import SourceReferences
 from src.search_service import SearchService
 from src.attachment_service import AttachmentService,MAX_ATTACHMENT_BYTES
@@ -53,6 +54,7 @@ class Workspace:
             db.execute('CREATE TABLE IF NOT EXISTS rooms (id TEXT PRIMARY KEY, operation TEXT UNIQUE)')
             db.execute('INSERT OR IGNORE INTO rooms VALUES (?,?)', (state['room'], 'seed'))
         self.room_service=RoomService(self.metadata,self.api,self.user_id,fixture_contacts)
+        self.direct_chats=DirectChats(self.metadata,self.api,self.user_id,self.allowed)
 
     def api(self, method, path, data=None, query=None):
         return request(self.matrix_url, method, PREFIX + path, self.state['tokens'][0], data, query)
@@ -80,7 +82,7 @@ class Workspace:
         return request(self.gateway_url,'POST','/agent/cancel',self.token,{'id':task_id})
 
     def create_room(self,operation,name,**options):
-        try:return self.room_service.create({'operation':operation,'name':name,**options})
+        try:return self.direct_chats.after_create(self.room_service.create({'operation':operation,'name':name,**options}))
         except RoomError as error:raise ClientError(error.status,error.message) from None
 
     def thread_relations(self, method, path, query):
@@ -216,7 +218,7 @@ def handler(workspace, dist, port):
                 if parsed.path == '/api/session' and method == 'GET':
                     result = {'csrf': workspace.csrf, 'userId': workspace.user_id, 'agentId': AGENT,
                               'initialRoom': workspace.state['room'], 'documentRoom': workspace.state['room'], 'documentSave': 'direct-v1', 'qa': getattr(workspace, 'qa', None), 'agentLabel': 'Example echo agent · no LLM',
-                              'repositoryReads': workspace.repository_choices(), 'roomCreation':{'version':1,'visibility':'private','kinds':['direct','group','channel'],'contacts':list(workspace.room_service.contacts)}}
+                              'directChats':True, 'repositoryReads': workspace.repository_choices(), 'roomCreation':{'version':1,'visibility':'private','kinds':['direct','group','channel'],'contacts':list(workspace.room_service.contacts)}}
                 elif parsed.path=='/api/attachments' and method=='POST':
                     if set(query)-{'room','name','operation','type','root'} or any(len(values)!=1 for values in query.values()):raise ClientError(400,'Unknown attachment parameter.')
                     result=workspace.attachments.upload(query.get('room',[''])[0],query.get('name',[''])[0],query.get('operation',[''])[0],query.get('type',['application/octet-stream'])[0],body,query.get('root',[None])[0])
@@ -251,8 +253,14 @@ def handler(workspace, dist, port):
                     room=query.get('room',[''])[0];task_id=query.get('id',[''])[0]
                     workspace.task_event(room,task_id)
                     result=request(workspace.gateway_url,'GET','/agent/audit',workspace.token,query={'id':task_id})
+                elif parsed.path=='/api/direct-chats' and method=='GET':
+                    if query:raise ClientError(400,'Direct-chat preferences use the current identity only.')
+                    result=workspace.direct_chats.snapshot()
+                elif parsed.path=='/api/direct-chats/retry' and method=='POST':
+                    if query or not isinstance(body,dict) or set(body)!={'room'} or not isinstance(body['room'],str):raise ClientError(400,'Use only the existing room for synchronization retry.')
+                    result=workspace.direct_chats.retry(body['room'])
                 elif parsed.path == '/api/rooms' and method == 'POST':
-                    try:result=workspace.room_service.create(body)
+                    try:result=workspace.direct_chats.after_create(workspace.room_service.create(body))
                     except RoomError as error:raise ClientError(error.status,error.message) from None
                 elif parsed.path == '/matrix/_matrix/client/versions' and method == 'GET':
                     result = request(workspace.matrix_url, 'GET', '/_matrix/client/versions')
@@ -284,6 +292,8 @@ def handler(workspace, dist, port):
                 else:
                     raise ClientError(404, 'Unknown client route.')
                 self.respond(200, result)
+            except DirectChatError as error:
+                self.respond(error.status, {'error':error.message})
             except DocumentError as error:
                 self.respond(error.status, error.data)
             except ClientError as error:
