@@ -1,3 +1,4 @@
+import {RoomCreator} from './RoomCreator';
 import {RoomPeople} from './RoomPeople';
 import {SourceViewer} from './SourceViewer';
 import {QuotedMessage,replyBody} from './QuotedMessage';
@@ -19,7 +20,7 @@ import {draftContext,useLocalDrafts} from './localDrafts';
 import {BookOpen, Search, ChevronDown, ChevronRight, FileText, MessageSquare, Bot, History, Plus, ArrowUp, X, Check, AlertCircle, RefreshCw, Bold, Italic, Heading2, List, Code2} from 'lucide-react';
 const short = value => value?.slice(0,10) || 'not created';
 
-export function Composer({onSend, busyRoom, agentId, replyTo, clearReply, onSent, defaultMention=true,quote=null,clearQuote=()=>{}}) {
+export function Composer({onSend, busyRoom, agentId, replyTo, clearReply, onSent, defaultMention=true,agentAvailable=true,quote=null,clearQuote=()=>{}}) {
   const [text,setText]=useState('');
   const [mention,setMention]=useState(defaultMention);
   useEffect(()=>setMention(defaultMention),[defaultMention]);
@@ -51,7 +52,7 @@ export function Composer({onSend, busyRoom, agentId, replyTo, clearReply, onSent
     {shownReply&&<div className="reply-banner">Reply in thread {short(shownReply)} <button type="button" disabled={busy||Boolean(frozen)} onClick={clearReply}>Cancel reply</button></div>}
     <label className="sr-only" htmlFor="message">Message</label>
     <textarea id="message" value={text} onChange={e=>{setText(e.target.value);drafts.current[busyRoom]=e.target.value;}} placeholder="Write a message to this room…" maxLength={4000} disabled={busy||Boolean(frozen)}/>
-    <div className="composer-actions"><label><input type="checkbox" checked={mention} onChange={e=>setMention(e.target.checked)} disabled={busy||Boolean(frozen)}/> Mention example Agent</label><button disabled={busy||!text.trim()}>{busy?'Sending…':<>Send <ArrowUp size={15}/></>}</button></div>
+    <div className="composer-actions"><label><input type="checkbox" checked={mention} onChange={e=>setMention(e.target.checked)} disabled={busy||Boolean(frozen)||!agentAvailable}/> Mention example Agent</label><button disabled={busy||!text.trim()}>{busy?'Sending…':<>Send <ArrowUp size={15}/></>}</button></div>
     {frozen&&<p role="status">The send result is unknown. Retry keeps the original message and references.</p>}
     {error&&<p className="error" role="alert">{error} <span>Retry sends the same request; your draft is kept.</span></p>}
   </form>;
@@ -235,7 +236,7 @@ export function App({connector=connect}) {
   const [events,setEvents]=useState([]),[timelineError,setTimelineError]=useState(''),[roomsError,setRoomsError]=useState(''),[replyTo,setReplyTo]=useState(null),[filter,setFilter]=useState(null);
   const [olderCursor,setOlderCursor]=useState(null),[loadingOlder,setLoadingOlder]=useState(false),[historyError,setHistoryError]=useState(''),[historyNotice,setHistoryNotice]=useState('');
   const loadOlderAction=useRef(null),historyScroll=useRef(null);
-  const [tasks,setTasks]=useState([]),[newName,setNewName]=useState(''),[creating,setCreating]=useState(false),[online,setOnline]=useState(false);
+  const [tasks,setTasks]=useState([]),[online,setOnline]=useState(false);
   const [panel,setPanel]=useState(null),[mode,setMode]=useState('read'),[historyOpen,setHistoryOpen]=useState(false),[requestedVersion,setRequestedVersion]=useState(null);
   const [documentNames,setDocumentNames]=useState([{name:'demo.md'}]),[activeDocument,setActiveDocument]=useState('demo.md'),[newDocumentName,setNewDocumentName]=useState(''),[documentCreating,setDocumentCreating]=useState(false),[documentsError,setDocumentsError]=useState('');
   const [moveName,setMoveName]=useState(''),[documentMoving,setDocumentMoving]=useState(false),[moveError,setMoveError]=useState('');
@@ -254,7 +255,7 @@ export function App({connector=connect}) {
   const roomsFailed=useRef(false),roomsRefreshing=useRef(false);
   const roomCurrent=useRef(room);roomCurrent.current=room;
   useEffect(()=>{if(room&&location.protocol.startsWith('http')){const url=new URL(location.href);url.searchParams.set('room',room);window.history.replaceState({},'',url);}},[room]);
-  const createAttempt=useRef(null),createLock=useRef(false);
+
   async function start(){setError('');try{const next=await connector();const list=await next.rooms();setApi(next);setRooms(list);const requested=new URLSearchParams(location.search).get('room');setRoom(list.some(r=>r.id===requested)?requested:(next.session.initialRoom||list[0]?.id||''));setOnline(true);refreshDocuments(next);}catch(e){setError(errorText(e));}}
   useEffect(()=>{start();},[connector]);
   async function refreshDocuments(current=api){
@@ -327,10 +328,6 @@ export function App({connector=connect}) {
     finally{updateTask(task.id,{historyBusy:false})}
   }
   function sent(id,mentioned,sourceRoom=roomCurrent.current){if(mentioned)setTasks(old=>[{id,room:sourceRoom,status:'queued'},...old.filter(t=>t.id!==id)].slice(0,8));}
-  async function createRoom(e){e.preventDefault();if(createLock.current||!newName.trim())return;createLock.current=true;setCreating(true);setError('');
-    if(createAttempt.current?.name!==newName)createAttempt.current={name:newName,id:crypto.randomUUID()};
-    try{const result=await api.createRoom(newName,createAttempt.current.id);await refreshRooms();setRoom(result.room_id);setNewName('');createAttempt.current=null;}
-    catch(e){setError(errorText(e));}finally{createLock.current=false;setCreating(false)}}
   if(!api)return <main className="startup"><BookOpen size={30}/><h1>Didadi</h1><p>{error||'Opening your workspace…'}</p>{error&&<button className="primary" onClick={start}>Retry connection</button>}<span>Local workspace · example Agent, no LLM</span></main>;
   const selected=rooms.find(r=>r.id===room);
   const documentRoom=api.session.documentRoom||api.session.initialRoom||room;
@@ -349,8 +346,8 @@ export function App({connector=connect}) {
       {documentsError&&<p role="alert">{documentsError}<button onClick={()=>refreshDocuments()}>Refresh documents</button></p>}
     </div>
     <div className="nav-section rooms-section"><div className="section-heading"><span>Rooms</span><button aria-label="Refresh rooms" onClick={refreshRooms}><RefreshCw size={13}/></button></div>
-      <nav aria-label="Rooms">{rooms.filter(r=>r.name.toLowerCase().includes(search.toLowerCase())).map(r=><button className={'room '+(r.id===room?'room-selected':'')} key={r.id} onClick={()=>{setRoom(r.id);setNavOpen(false)}}><MessageSquare size={15}/><span>{r.name}</span></button>)}</nav>
-      <form className="new-room" onSubmit={createRoom}><input aria-label="New local room name" value={newName} onChange={e=>setNewName(e.target.value)} placeholder="New local room" maxLength={60} disabled={creating}/><button disabled={creating||!newName.trim()} aria-label="Create local room"><Plus size={16}/></button></form>
+      <nav aria-label="Rooms">{rooms.filter(r=>r.name.toLowerCase().includes(search.toLowerCase())).map(r=><button className={'room '+(r.id===room?'room-selected':'')} key={r.id} onClick={()=>{setRoom(r.id);setNavOpen(false)}}><MessageSquare size={15}/><span>{r.name}{r.kind&&<small>{r.kind==='direct'?'Private conversation':r.kind==='channel'?'Channel':r.kind==='group'?'Group':'Room'} · {r.joinRule==='invite'?'invite only':r.joinRule||'unknown access'}</small>}</span></button>)}</nav>
+      <RoomCreator api={api} onCreated={async result=>{setRooms(old=>old.some(item=>item.id===result.room_id)?old:[...old,{id:result.room_id,name:result.name,kind:result.kind,joinRule:'invite',agentJoined:false}]);setRoom(result.room_id);await refreshRooms();}}/>
     </div>
     <div className="sidebar-bottom"><button className="agent-nav" onClick={()=>setPanel('agent')}><Bot size={17}/><span>Example Agent<small>Echo runtime · no LLM</small></span></button><div className="session-note"><span className={'available-dot '+(!online?'offline':'')}/>{online?(api.session.synthetic?'Browser-only preview':'Connected to local workspace'):'Reconnecting to workspace'}</div></div>
   </aside>
@@ -361,7 +358,7 @@ export function App({connector=connect}) {
     <div className="content-layout"><Documents api={api} externalBusy={documentMoving} name={activeDocument} room={documentRoom} onSent={sent} mode={mode} setMode={setMode} historyOpen={historyOpen} onCloseHistory={()=>setHistoryOpen(false)} onMeta={setDocMeta} requestedVersion={requestedVersion} canDiscussVersion={Boolean(docMeta.commit)&&events.some(event=>documentVersion(event,api.session.agentId,api.session.synthetic,api.session.userId,activeDocument)===docMeta.commit)} onDiscussVersion={commit=>{const event=events.find(event=>documentVersion(event,api.session.agentId,api.session.synthetic,api.session.userId,activeDocument)===commit);if(event){setPanel('discussion');setFilter(event.content['m.relates_to']?.event_id||event.id)}}}/>
       <aside className={'collaboration-panel '+(!panel?'panel-closed':'')} aria-label="Collaboration panel"><header className="panel-heading"><div><h2>{panel==='agent'?'Example Agent':'Discussion'}</h2><span>{selected?.name||'Room'}</span></div><button aria-label="Close collaboration panel" onClick={()=>setPanel(null)}><X size={18}/></button></header>
         <div className="panel-tabs"><button className={panel==='discussion'?'active':''} onClick={()=>setPanel('discussion')}>Messages</button><button className={panel==='agent'?'active':''} onClick={()=>setPanel('agent')}>Example Agent</button></div>
-        {panel==='agent'&&<div className="agent-disclosure"><Bot size={18}/><div><strong>Deterministic example</strong><p>Repeats messages and handles explicit Git requests. No LLM or intelligent editing is connected.</p></div></div>}
+        {panel==='agent'&&!selected?.agentJoined&&<p role="status">The example Agent is not joined to this room. New rooms do not invite it unless you explicitly choose it.</p>}{panel==='agent'&&<div className="agent-disclosure"><Bot size={18}/><div><strong>Deterministic example</strong><p>Repeats messages and handles explicit Git requests. No LLM or intelligent editing is connected.</p></div></div>}
         {api.fromMessages&&<form className="message-document-form" onSubmit={createFromMessages}><p>{selectedMessages.length} messages selected · copies source text with links</p><input aria-label="Document path from messages" value={messagesDocumentName} onChange={event=>setMessagesDocumentName(event.target.value)} placeholder="Discussion notes.md" disabled={fromMessagesBusy||fromMessagesUncertain}/><button disabled={fromMessagesBusy||documentCreating||documentMoving||room!==documentRoom||!messagesDocumentName.trim()||(!fromMessagesAttempt.current&&!selectedMessages.length)}>Create document from messages</button>{room!==documentRoom&&<p>Choose the workspace discussion to create a document.</p>}{fromMessagesNotice&&<p role="status">{fromMessagesNotice}</p>}</form>}
         {filter&&<div className="reply-banner"><span>Thread {short(filter)}</span> · <span>{api.threadPage?'Thread history · load earlier replies':'Loaded messages only'}</span><button onClick={()=>setFilter(null)}>All messages</button></div>}
         {timelineError&&<div className="panel-error" role="alert">{timelineError} Your draft is preserved; reconnecting automatically.</div>}
@@ -380,7 +377,7 @@ export function App({connector=connect}) {
           {t.history&&<ol aria-label="Task execution history">{t.history.length?t.history.map(entry=><li key={entry.sequence}><span>{({accepted:'Accepted',leased:'Lease granted',result_ready:'Result recorded',completed:'Reply delivered',retry_scheduled:'Retry scheduled',failed:'Failed',cancelled:'Cancelled'})[entry.action]||entry.action}</span>{({room_forbidden:'Room access revoked',delivery_forbidden:'Reply permission revoked',task_cancelled:'Cancelled by request',attempts_exhausted:'Retry limit reached',runtime_error:'Runtime error',room_unavailable:'Room temporarily unavailable'})[entry.reason]&&<span> · {({room_forbidden:'Room access revoked',delivery_forbidden:'Reply permission revoked',task_cancelled:'Cancelled by request',attempts_exhausted:'Retry limit reached',runtime_error:'Runtime error',room_unavailable:'Room temporarily unavailable'})[entry.reason]}</span>}<time> · {new Date(entry.at*1000).toLocaleTimeString()}</time></li>):<li>This task has no recorded execution history.</li>}</ol>}
         </div>)}{!tasks.filter(t=>t.room===room).length&&<p>No tasks sent in this session.</p>}</details>
         <AttachmentComposer api={api} room={room} replyTo={replyTo} onSent={sent}/>
-        <Composer busyRoom={room} agentId={api.session.agentId} onSend={(content,id)=>api.send(room,content,id)} onSent={sent} replyTo={replyTo} clearReply={()=>setReplyTo(null)} quote={quote} clearQuote={()=>setQuote(null)} defaultMention={panel==='agent'}/>
+        <Composer busyRoom={room} agentId={api.session.agentId} onSend={(content,id)=>api.send(room,content,id)} onSent={sent} replyTo={replyTo} clearReply={()=>setReplyTo(null)} quote={quote} clearQuote={()=>setQuote(null)} agentAvailable={selected?.agentJoined===true} defaultMention={panel==='agent'&&selected?.agentJoined===true}/>
       </aside>
     </div>
   </main></div></>;

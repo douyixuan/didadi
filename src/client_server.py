@@ -22,13 +22,14 @@ class ClientError(Exception):
         self.status, self.message = status, message
 
 
+from src.room_service import RoomService,RoomError
 from src.source_references import SourceReferences
 from src.search_service import SearchService
 from src.attachment_service import AttachmentService,MAX_ATTACHMENT_BYTES
 
 
 class Workspace:
-    def __init__(self, state, token, repo, metadata, matrix_url, gateway_url, repositories=None):
+    def __init__(self, state, token, repo, metadata, matrix_url, gateway_url, repositories=None, fixture_contacts=()):
         for base in [matrix_url, gateway_url]:
             url = urlsplit(base)
             if url.scheme != 'http' or url.hostname not in {'127.0.0.1', 'localhost'}:
@@ -51,6 +52,7 @@ class Workspace:
         with sqlite3.connect(self.metadata) as db:
             db.execute('CREATE TABLE IF NOT EXISTS rooms (id TEXT PRIMARY KEY, operation TEXT UNIQUE)')
             db.execute('INSERT OR IGNORE INTO rooms VALUES (?,?)', (state['room'], 'seed'))
+        self.room_service=RoomService(self.metadata,self.api,self.user_id,fixture_contacts)
 
     def api(self, method, path, data=None, query=None):
         return request(self.matrix_url, method, PREFIX + path, self.state['tokens'][0], data, query)
@@ -77,29 +79,9 @@ class Workspace:
             raise ClientError(403,'Only the original requester can cancel this task.')
         return request(self.gateway_url,'POST','/agent/cancel',self.token,{'id':task_id})
 
-    def create_room(self, operation, name):
-        if (not isinstance(operation, str) or not re.fullmatch(r'[a-zA-Z0-9-]{8,80}', operation) or
-            not isinstance(name, str) or not 1 <= len(name.strip()) <= 60):
-            raise ClientError(400, 'Enter a room name of 1–60 characters.')
-        alias = 'didadi-client-' + hashlib.sha256(operation.encode()).hexdigest()[:32]
-        with sqlite3.connect(self.metadata, timeout=30) as db:
-            db.execute('BEGIN IMMEDIATE')
-            old = db.execute('SELECT id FROM rooms WHERE operation=?', (operation,)).fetchone()
-            if old:
-                return {'room_id': old[0]}
-            try:
-                room = self.api('POST', '/createRoom', {'preset': 'private_chat', 'name': name.strip(),
-                                'room_alias_name': alias, 'invite': [AGENT]})['room_id']
-            except MatrixError as error:
-                if error.body.get('errcode') != 'M_ROOM_IN_USE':
-                    raise
-                server = self.user_id.split(':', 1)[1]
-                room = self.api('GET', '/directory/room/' + segment('#' + alias + ':' + server))['room_id']
-                membership = self.api('GET', '/rooms/' + segment(room) + '/state/m.room.member/' + segment(self.user_id))
-                if membership.get('membership') != 'join':
-                    raise ClientError(403, 'Recovered room is not joined by this demo identity.')
-            db.execute('INSERT INTO rooms VALUES (?,?)', (room, operation))
-            return {'room_id': room}
+    def create_room(self,operation,name,**options):
+        try:return self.room_service.create({'operation':operation,'name':name,**options})
+        except RoomError as error:raise ClientError(error.status,error.message) from None
 
     def thread_relations(self, method, path, query):
         match=re.fullmatch(r'/rooms/([^/]+)/relations/([^/]+)/m\.thread/m\.room\.message',path)
@@ -157,7 +139,7 @@ class Workspace:
                 raise ClientError(400, 'Use the direct document API to save. Matrix document requests contain read metadata only.')
         if mentions and not any(event['type'] == 'm.room.member' and event.get('state_key') == AGENT and
                                 event['content'].get('membership') == 'join' for event in state):
-            raise ClientError(409, 'The example agent is still joining. Refresh and retry.')
+            raise ClientError(409, 'The example Agent is not joined to this room. It must be explicitly invited before it can receive messages.')
         content = {'msgtype': 'm.text', 'body': data['body'], 'm.mentions': {'user_ids': mentions}}
         if command:
             content['org.didadi.document'] = command
@@ -234,7 +216,7 @@ def handler(workspace, dist, port):
                 if parsed.path == '/api/session' and method == 'GET':
                     result = {'csrf': workspace.csrf, 'userId': workspace.user_id, 'agentId': AGENT,
                               'initialRoom': workspace.state['room'], 'documentRoom': workspace.state['room'], 'documentSave': 'direct-v1', 'qa': getattr(workspace, 'qa', None), 'agentLabel': 'Example echo agent · no LLM',
-                              'repositoryReads': workspace.repository_choices()}
+                              'repositoryReads': workspace.repository_choices(), 'roomCreation':{'version':1,'visibility':'private','kinds':['direct','group','channel'],'contacts':list(workspace.room_service.contacts)}}
                 elif parsed.path=='/api/attachments' and method=='POST':
                     if set(query)-{'room','name','operation','type','root'} or any(len(values)!=1 for values in query.values()):raise ClientError(400,'Unknown attachment parameter.')
                     result=workspace.attachments.upload(query.get('room',[''])[0],query.get('name',[''])[0],query.get('operation',[''])[0],query.get('type',['application/octet-stream'])[0],body,query.get('root',[None])[0])
@@ -270,7 +252,8 @@ def handler(workspace, dist, port):
                     workspace.task_event(room,task_id)
                     result=request(workspace.gateway_url,'GET','/agent/audit',workspace.token,query={'id':task_id})
                 elif parsed.path == '/api/rooms' and method == 'POST':
-                    result = workspace.create_room(body['operation'], body['name'])
+                    try:result=workspace.room_service.create(body)
+                    except RoomError as error:raise ClientError(error.status,error.message) from None
                 elif parsed.path == '/matrix/_matrix/client/versions' and method == 'GET':
                     result = request(workspace.matrix_url, 'GET', '/_matrix/client/versions')
                 elif parsed.path.startswith('/matrix/_matrix/client/v1/'):
@@ -339,6 +322,8 @@ if __name__ == '__main__':
     parser.add_argument('--token-file', required=True)
     parser.add_argument('--repo', required=True)
     parser.add_argument('--repository-grants', help='advertise explicitly configured read choices; runtime independently enforces grants')
+    parser.add_argument('--fixture-contacts',help='JSON list of explicitly configured local test identity IDs; contains no tokens')
+    parser.add_argument('--fixture-contact',action='append',default=[],help='explicit local test identities available for room invitations; no credentials')
     parser.add_argument('--metadata', required=True)
     parser.add_argument('--dist', default='client/dist')
     parser.add_argument('--matrix-url', default='http://127.0.0.1:8009')
@@ -347,7 +332,9 @@ if __name__ == '__main__':
     args = parser.parse_args()
     from src.repository_read import RepositoryReader
     repositories = RepositoryReader.from_file(args.repository_grants) if args.repository_grants else None
+    fixture_contacts=json.loads(Path(args.fixture_contacts).read_text()) if args.fixture_contacts else []
+    if not isinstance(fixture_contacts,list):parser.error('--fixture-contacts must contain a JSON list of identity IDs')
     workspace = Workspace(json.loads(Path(args.state_file).read_text()), Path(args.token_file).read_text().strip(),
-                          args.repo, args.metadata, args.matrix_url, args.gateway_url, repositories)
+                          args.repo, args.metadata, args.matrix_url, args.gateway_url, repositories, args.fixture_contact + fixture_contacts)
     print(f'React workspace http://127.0.0.1:{args.port}', flush=True)
     ThreadingHTTPServer(('127.0.0.1', args.port), handler(workspace, Path(args.dist), args.port)).serve_forever()

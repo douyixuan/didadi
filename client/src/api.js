@@ -68,6 +68,7 @@ export async function connect() {
         const state = await client.roomState(id);
         return {id, name:state.find(e=>e.type==='m.room.name')?.content.name || 'Untitled room',
           encrypted:state.some(e=>e.type==='m.room.encryption'),
+          kind:state.find(e=>e.type==='org.didadi.room')?.content.kind||'room',joinRule:state.find(e=>e.type==='m.room.join_rules')?.content.join_rule||'unknown',
           agentJoined:state.some(e=>e.type==='m.room.member' && e.state_key===session.agentId && e.content.membership==='join')};
       }));
     },
@@ -76,7 +77,7 @@ export async function connect() {
     timelinePage,
     timeline:async room=>(await timelinePage(room)).events,
     send:(room, content, txn)=>client.sendEvent(room, 'm.room.message', content, txn),
-    createRoom:(name, operation)=>api('/api/rooms', {name,operation}),
+    createRoom:(name,operation,options={})=>api('/api/rooms',{name,operation,...options}),
     searchMessages:(room,query,next_batch=null)=>api('/api/search/messages',{room,query,next_batch}),
     searchDocuments:(room,query,after=null,commit=null)=>api('/api/search/documents',{room,query,after,commit}),
     documents:room=>api('/api/documents?room='+encodeURIComponent(room)),

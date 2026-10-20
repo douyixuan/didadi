@@ -16,7 +16,7 @@ export function createDemo(storage=localStorage) {
     },
     async rooms(){return read().rooms},
     async timeline(room){return read().events[room]||[]},
-    async createRoom(name,operation){const s=read();const key='room:'+operation;if(s.transactions[key])return s.transactions[key];const result={room_id:'sample-'+crypto.randomUUID()};s.rooms.push({id:result.room_id,name,agentJoined:true});s.transactions[key]=result;write(s);return result},
+    async createRoom(name,operation){const s=read();const key='room:'+operation;if(s.transactions[key])return s.transactions[key];const result={room_id:'sample-'+crypto.randomUUID()};s.rooms.push({id:result.room_id,name,agentJoined:false});s.transactions[key]=result;write(s);return result},
     async document(room,commit){const versions=read().versions;const doc=commit?versions.find(v=>v.commit===commit):versions[0];if(!doc)throw Error('Sample version not found');return {...doc}},
     async history(){return {commits:read().versions.map(v=>v.commit)}},
     async task(room,id){return {task:read().tasks[id]}},

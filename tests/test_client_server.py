@@ -32,9 +32,13 @@ class ClientServerTests(unittest.TestCase):
         if path=='/joined_rooms':return {'joined_rooms':['!seed:local','!ungranted:local','!created:local']}
         if path=='/createRoom':
             if self.alias_exists:raise MatrixError(400,{'errcode':'M_ROOM_IN_USE'})
+            self.created_payload=data
             return {'room_id':'!created:local'}
         if path.startswith('/directory/room/'):return {'room_id':'!created:local'}
         if '/state/m.room.member/' in path:return {'membership':'join'}
+        if path.startswith('/directory/list/room/'):return {'visibility':'private'}
+        if 'created' in path and path.endswith('/state') and hasattr(self,'created_payload'):
+            return [{'type':'m.room.create','sender':'@human:local','content':{'creator':'@human:local','m.federate':False}},{'type':'m.room.join_rules','state_key':'','content':{'join_rule':'invite'}},{'type':'m.room.member','state_key':'@human:local','content':{'membership':'join'}},*self.created_payload['initial_state']]
         if path.endswith('/state'):
             return ([{'type':'m.room.encryption','content':{}}] if self.encrypted else [])+[
                 {'type':'m.room.member','state_key':AGENT,'content':{'membership':'join'}}]
@@ -119,8 +123,9 @@ class ClientServerTests(unittest.TestCase):
         self.assertEqual(sum(path=='/createRoom' for _,path,_,_ in self.calls),1)
         with sqlite3.connect(self.workspace.metadata) as db:
             db.execute("DELETE FROM rooms WHERE operation='stable-request-id'")
+            db.execute("UPDATE room_intents SET room_id=NULL WHERE operation='stable-request-id'")
         self.alias_exists=True
-        self.assertEqual(self.workspace.create_room('stable-request-id','Recovered room')['room_id'],'!created:local')
+        self.assertEqual(self.workspace.create_room('stable-request-id','Client room')['room_id'],'!created:local')
         self.workspace.allowed('!created:local')
 
     def test_named_document_http_creation_errors_and_room_boundary(self):
