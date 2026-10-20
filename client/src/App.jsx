@@ -263,7 +263,7 @@ export function App({connector=connect}) {
     const older=async()=>{if(stopped||olderBusy||!cursor||!api.timelinePage)return;olderBusy=true;setLoadingOlder(true);setHistoryError('');const expected=revision,from=cursor;
       try{const page=await api.timelinePage(room,from);if(stopped||expected!==revision)return;
         const merged=mergeMessages(page.events,current),node=timelineRef.current;if(node&&merged.length!==current.length)historyScroll.current={height:node.scrollHeight,top:node.scrollTop};
-        current=merged;cursor=page.previousCursor===from?null:page.previousCursor;setEvents(current);setOlderCursor(cursor);
+        current=merged;cursor=page.previousCursor===from?null:page.previousCursor;setEvents(current);setOlderCursor(cursor);if(page.events.length)setHistoryNotice('');
       }catch(e){if(!stopped&&expected===revision)setHistoryError(errorText(e)+' Earlier messages were not loaded. Retry; your messages and draft are kept.');}
       finally{olderBusy=false;if(!stopped)setLoadingOlder(false);}
     };
