@@ -108,3 +108,47 @@ class CommitMetadataTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'private operation intent'):
                     GitDocs(self.store.root).pending()
         self.assertEqual(self.store.read('demo.md', item['commit']), 'hello')
+
+    def test_orphaned_intent_does_not_block_matching_remote_operation(self):
+        self.check_orphan_recovery(prune=False)
+
+    def test_pruned_orphan_intent_does_not_block_matching_remote_operation(self):
+        self.check_orphan_recovery(prune=True)
+
+    def check_orphan_recovery(self, prune):
+        remote = GitDocs(self.root / 'remote.git')
+        failed = GitDocs(self.root / 'failed.git', remote.root)
+        original = failed._git
+        def fail_main(*args, **kwargs):
+            if args[0] == 'commit-tree':
+                kwargs['env'] = {**kwargs.get('env', {}), 'GIT_AUTHOR_DATE':'2001-01-01T00:00:00Z',
+                                 'GIT_COMMITTER_DATE':'2001-01-01T00:00:00Z'}
+            if args[:2] == ('update-ref', failed.branch):
+                raise RuntimeError('simulated lost main CAS')
+            return original(*args, **kwargs)
+        failed._git = fail_main
+        with self.assertRaisesRegex(RuntimeError, 'lost main CAS'):
+            failed.write('demo.md', 'hello', operation=self.operation,
+                         notification=self.notice, author=self.author)
+        key = hashlib.sha256(self.operation.encode()).hexdigest()
+        ref = 'refs/didadi/intents/' + key
+        orphan_blob = original('rev-parse', ref).strip()
+        if prune:
+            old_commit = json.loads(original('cat-file', 'blob', orphan_blob))['commit']
+            original('reflog', 'expire', '--expire=now', '--all')
+            original('gc', '--prune=now')
+            self.assertIsNone(failed._ref(old_commit + '^{commit}'))
+        publisher = GitDocs(self.root / 'publisher.git', remote.root)
+        published = publisher.write('demo.md', 'hello', operation=self.operation,
+                                    notification=self.notice, author=self.author)
+        recovered = GitDocs(failed.root)
+        self.assertEqual(recovered.pending(), [])
+        with self.assertRaises(Conflict):
+            recovered.write('demo.md', 'different', operation=self.operation,
+                            notification=self.notice, author=self.author)
+        self.assertEqual(recovered._ref(ref), orphan_blob)
+        retry = recovered.write('demo.md', 'hello', operation=self.operation,
+                                notification=self.notice, author=self.author)
+        self.assertEqual(retry['commit'], published['commit'])
+        self.assertNotEqual(recovered._ref(ref), orphan_blob)
+        self.assertEqual([x['commit'] for x in GitDocs(recovered.root).pending()], [published['commit']])
