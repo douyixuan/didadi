@@ -93,6 +93,15 @@ class Workspace:
             db.execute('INSERT INTO rooms VALUES (?,?)', (room, operation))
             return {'room_id': room}
 
+    def thread_relations(self, method, path, query):
+        match=re.fullmatch(r'/rooms/([^/]+)/relations/([^/]+)/m\.thread/m\.room\.message',path)
+        if method!='GET' or not match or any(key in query for key in ['access_token','user_id']):
+            raise ClientError(403,'Unsupported thread route.')
+        self.allowed(unquote(match[1]))
+        filtered={key:values[0] for key,values in query.items() if key in {'from','to'}}
+        filtered.update({'limit':'50','dir':'b'})
+        return request(self.matrix_url,'GET','/_matrix/client/v1'+path,self.state['tokens'][0],query=filtered)
+
     def proxy(self, method, path, query, data=None):
         if any(key in query for key in ['access_token', 'user_id']):
             raise ClientError(403, 'Identity overrides are not permitted.')
@@ -214,6 +223,8 @@ def handler(workspace, dist, port):
                     result = workspace.create_room(body['operation'], body['name'])
                 elif parsed.path == '/matrix/_matrix/client/versions' and method == 'GET':
                     result = request(workspace.matrix_url, 'GET', '/_matrix/client/versions')
+                elif parsed.path.startswith('/matrix/_matrix/client/v1/'):
+                    result = workspace.thread_relations(method, parsed.path[len('/matrix/_matrix/client/v1'):], query)
                 elif parsed.path.startswith('/matrix' + PREFIX):
                     result = workspace.proxy(method, parsed.path[len('/matrix' + PREFIX):], query, body)
                 elif parsed.path in {'/api/document', '/api/history', '/api/task'} and method == 'GET':

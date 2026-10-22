@@ -1,3 +1,4 @@
+import {useThread} from './useThread';
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {connect, errorText} from './api';
 import ReactMarkdown from 'react-markdown';
@@ -232,7 +233,8 @@ export function App({connector=connect}) {
   const latestDocMeta=useRef(docMeta);latestDocMeta.current=docMeta;
   const searchRef=useRef(null);
   const timelineRef=useRef(null);
-  useEffect(()=>{const node=timelineRef.current;if(!node)return;if(historyScroll.current){const before=historyScroll.current;historyScroll.current=null;node.scrollTop=before.top+node.scrollHeight-before.height;}else node.scrollTop=node.scrollHeight;},[events.length,filter,panel]);
+  const thread=useThread(api,room,filter,()=>{const node=timelineRef.current;if(node)historyScroll.current={height:node.scrollHeight,top:node.scrollTop};});
+  useEffect(()=>{const node=timelineRef.current;if(!node)return;if(historyScroll.current){const before=historyScroll.current;historyScroll.current=null;node.scrollTop=before.top+node.scrollHeight-before.height;}else node.scrollTop=node.scrollHeight;},[filter&&api?.threadPage?thread.events.length:events.length,filter,panel]);
   const roomsFailed=useRef(false),roomsRefreshing=useRef(false);
   const roomCurrent=useRef(room);roomCurrent.current=room;
   useEffect(()=>{if(room&&location.protocol.startsWith('http')){const url=new URL(location.href);url.searchParams.set('room',room);window.history.replaceState({},'',url);}},[room]);
@@ -316,7 +318,7 @@ export function App({connector=connect}) {
   if(!api)return <main className="startup"><BookOpen size={30}/><h1>Didadi</h1><p>{error||'Opening your workspace…'}</p>{error&&<button className="primary" onClick={start}>Retry connection</button>}<span>Local workspace · example Agent, no LLM</span></main>;
   const selected=rooms.find(r=>r.id===room);
   const documentRoom=api.session.documentRoom||api.session.initialRoom||room;
-  const displayed=events.filter(e=>!filter||e.id===filter||e.content['m.relates_to']?.event_id===filter);
+  const displayed=filter&&api?.threadPage?thread.events:events.filter(e=>!filter||e.id===filter||e.content['m.relates_to']?.event_id===filter);
   return <>{api.session.synthetic&&<div className="preview-banner" role="note">Interactive UI preview · synthetic browser-only data · no Matrix/Git backend or LLM</div>}<div className="workspace"><aside className={'sidebar '+(navOpen?'nav-open':'')}>
     <div className="workspace-switch"><span className="workspace-logo"><BookOpen size={19}/></span><strong>Didadi</strong><ChevronDown size={15}/><span className="local-pill">{api.session.synthetic?'Preview':'Local'}</span></div>
     <div className="workspace-search"><Search size={16}/><input ref={searchRef} aria-label="Search workspace" placeholder="Search workspace" value={search} onChange={e=>setSearch(e.target.value)}/></div>
@@ -345,12 +347,13 @@ export function App({connector=connect}) {
         <div className="panel-tabs"><button className={panel==='discussion'?'active':''} onClick={()=>setPanel('discussion')}>Messages</button><button className={panel==='agent'?'active':''} onClick={()=>setPanel('agent')}>Example Agent</button></div>
         {panel==='agent'&&<div className="agent-disclosure"><Bot size={18}/><div><strong>Deterministic example</strong><p>Repeats messages and handles explicit Git requests. No LLM or intelligent editing is connected.</p></div></div>}
         {api.fromMessages&&<form className="message-document-form" onSubmit={createFromMessages}><p>{selectedMessages.length} messages selected · copies source text with links</p><input aria-label="Document path from messages" value={messagesDocumentName} onChange={event=>setMessagesDocumentName(event.target.value)} placeholder="Discussion notes.md" disabled={fromMessagesBusy||fromMessagesUncertain}/><button disabled={fromMessagesBusy||documentCreating||documentMoving||room!==documentRoom||!messagesDocumentName.trim()||(!fromMessagesAttempt.current&&!selectedMessages.length)}>Create document from messages</button>{room!==documentRoom&&<p>Choose the workspace discussion to create a document.</p>}{fromMessagesNotice&&<p role="status">{fromMessagesNotice}</p>}</form>}
-        {filter&&<div className="reply-banner"><span>Thread {short(filter)}</span> · <span>Loaded messages only</span><button onClick={()=>setFilter(null)}>All messages</button></div>}
+        {filter&&<div className="reply-banner"><span>Thread {short(filter)}</span> · <span>{api.threadPage?'Thread history · load earlier replies':'Loaded messages only'}</span><button onClick={()=>setFilter(null)}>All messages</button></div>}
         {timelineError&&<div className="panel-error" role="alert">{timelineError} Your draft is preserved; reconnecting automatically.</div>}
         <div className="timeline" ref={timelineRef} aria-live="polite">
-          {olderCursor&&<button disabled={loadingOlder} onClick={()=>loadOlderAction.current?.()}>{loadingOlder?'Loading earlier messages…':'Load earlier messages'}</button>}
-          {historyError&&<p role="alert">{historyError}</p>}{historyNotice&&<p role="status">{historyNotice}</p>}
-          {!displayed.length?<div className="panel-empty"><MessageSquare size={25}/><h3>Start a conversation</h3><p>Discuss this workspace, or mention the example Agent to see a real response.</p></div>:displayed.map(event=>{
+          {filter&&api.threadPage&&<>{thread.loading&&<p role="status">Loading thread…</p>}{thread.error&&<p role="alert">{thread.error} <button onClick={thread.refresh}>Retry thread</button></p>}{thread.olderError&&<p role="alert">{thread.olderError} <button onClick={thread.older}>Retry earlier thread replies</button></p>}{thread.notice&&<p role="status">{thread.notice}</p>}{thread.cursor&&<button disabled={thread.loadingOlder} onClick={thread.older}>{thread.loadingOlder?'Loading thread replies…':'Load earlier thread replies'}</button>}</>}
+          {!filter&&olderCursor&&<button disabled={loadingOlder} onClick={()=>loadOlderAction.current?.()}>{loadingOlder?'Loading earlier messages…':'Load earlier messages'}</button>}
+          {!filter&&historyError&&<p role="alert">{historyError}</p>}{!filter&&historyNotice&&<p role="status">{historyNotice}</p>}
+          {!displayed.length?<div className="panel-empty"><MessageSquare size={25}/><h3>{filter?'No thread messages loaded':'Start a conversation'}</h3><p>{filter?'Retry the thread request or return to all messages.':'Discuss this workspace, or mention the example Agent to see a real response.'}</p></div>:displayed.map(event=>{
           const agent=event.sender===api.session.agentId,relation=event.content['m.relates_to'];
           const root=relation?.rel_type==='m.thread'?relation.event_id:event.id;
           return <article className={'message '+(agent?'agent':'')} key={event.id}><span className={'avatar '+(agent?'agent-avatar':'')}>{agent?<Bot size={15}/>:'Y'}</span><div className="message-main"><div className="message-meta"><strong>{agent?'Example Agent':event.sender===api.session.userId?'You':event.sender.split(':')[0]}</strong><time>{new Date(event.time||Date.now()).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</time></div>{relation?.rel_type==='m.thread'&&<button className="thread-link" onClick={()=>setFilter(root)}>Reply in thread</button>}<MessageBody body={event.content.body} version={documentVersion(event,api.session.agentId,api.session.synthetic,api.session.userId,activeDocument)} disabled={docMeta.busy||docMeta.reading||docMeta.composing} onOpenVersion={commit=>{setRequestedVersion({commit});setMode('read');setHistoryOpen(true)}}/><div className="message-actions">{api.fromMessages&&<label><input type="checkbox" aria-label={'Select message '+event.id} checked={selectedMessages.includes(event.id)} disabled={fromMessagesBusy||fromMessagesUncertain||room!==documentRoom||(!selectedMessages.includes(event.id)&&selectedMessages.length>=20)} onChange={eventChange=>setSelectedMessages(old=>eventChange.target.checked?[...old,event.id]:old.filter(id=>id!==event.id))}/>Select</label>}<button onClick={()=>setReplyTo(root)}>Reply</button><button onClick={()=>setFilter(root)}>View thread</button></div></div></article>;
