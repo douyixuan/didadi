@@ -19,6 +19,12 @@ export async function threadPage(client,room,root,from=null){
   return {root:map(page.originalEvent),events:page.events.filter(event=>event.getType()==='m.room.message'&&event.getContent()['m.relates_to']?.rel_type==='m.thread'&&event.getContent()['m.relates_to'].event_id===root).reverse().map(map),previousCursor:typeof page.nextBatch==='string'&&page.nextBatch!==from?page.nextBatch:null};
 }
 
+export async function roomMembers(client,room){
+  const state=await client.roomState(room);if(!Array.isArray(state))throw new Error('Room people are unavailable. Retry the request.');
+  const members=new Map();for(const event of state){const membership=event?.content?.membership,id=event?.state_key;if(event?.type==='m.room.member'&&typeof id==='string'&&id.startsWith('@')&&['join','invite'].includes(membership))members.set(id,{id,name:typeof event.content.displayname==='string'&&event.content.displayname.trim()?event.content.displayname:id,membership});}
+  return [...members.values()].sort((a,b)=>a.name.localeCompare(b.name)||a.id.localeCompare(b.id));
+}
+
 export async function connect() {
   if(import.meta.env.VITE_PREVIEW_MODE==='synthetic')return (await import('./demo-api')).createDemo();
   const sessionResponse = await fetch('/api/session');
@@ -42,6 +48,7 @@ export async function connect() {
   const timelinePage=(room,from=null)=>messagePage(client,room,from);
   return {
     session,
+    members:room=>roomMembers(client,room),
     readSource:(room,repository,path)=>api('/api/repositories/read',{room,repository,path}),
     async uploadAttachment(room,file,operation,root=null){
       const query=new URLSearchParams({room,name:file.name,operation,type:file.type||'application/octet-stream'});if(root)query.set('root',root);
