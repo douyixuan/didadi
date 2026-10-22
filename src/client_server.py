@@ -22,6 +22,7 @@ class ClientError(Exception):
         self.status, self.message = status, message
 
 
+from src.source_references import SourceReferences
 from src.search_service import SearchService
 from src.attachment_service import AttachmentService,MAX_ATTACHMENT_BYTES
 
@@ -40,6 +41,7 @@ class Workspace:
         self.documents = DocumentService(self.docs, self.api, self.user_id, state['room'])
         self.search = SearchService(self.documents,self.api,self.allowed)
         self.attachments=AttachmentService(self.metadata,self.api,self.allowed,self.matrix_url,self.user_id,self.state['tokens'][0])
+        self.sources=SourceReferences(repositories,self.api,self.allowed,self.user_id)
         self.repository_reads = []
         if repositories is not None:
             for alias, grant in repositories.grants.items():
@@ -161,6 +163,13 @@ class Workspace:
             content['org.didadi.document'] = command
         if repository is not None:
             content['org.didadi.repository'] = repository
+        source=data.get('org.didadi.source_ref')
+        if source is not None:
+            try:expected=self.sources.reference(room,source)
+            except ValueError:raise ClientError(403,'Source reference is not available through the current grants.') from None
+            if data['body']!=expected or mentions or command is not None or repository is not None:
+                raise ClientError(400,'Send the canonical source excerpt without Agent commands or mentions.')
+            content['org.didadi.source_ref']=source
         relation = data.get('m.relates_to')
         if relation:
             if not isinstance(relation, dict) or set(relation)-{'rel_type','event_id','m.in_reply_to'}:
@@ -236,6 +245,9 @@ def handler(workspace, dist, port):
                     from urllib.parse import quote
                     self.respond(200,payload,'application/octet-stream',{'Content-Disposition':"attachment; filename*=UTF-8''"+quote(name,safe='')})
                     return
+                elif parsed.path == '/api/repositories/read' and method == 'POST':
+                    try:result=workspace.sources.read(body)
+                    except ValueError:raise ClientError(403,'Source is not available through the current grants.') from None
                 elif parsed.path == '/api/search/messages' and method == 'POST':
                     result = workspace.search.messages(body)
                 elif parsed.path == '/api/search/documents' and method == 'POST':
@@ -302,8 +314,11 @@ def handler(workspace, dist, port):
             except Conflict:
                 self.respond(409, {'error': 'Git publication requires reconciliation; your draft is preserved.'})
             except MatrixError as error:
-                self.respond(error.status if error.status < 500 else 503,
-                             {'error': 'Matrix request failed. Keep your draft and retry.', 'errcode': error.body.get('errcode', 'M_UNKNOWN')})
+                data={'error':'Matrix request failed. Keep your draft and retry.','errcode':error.body.get('errcode','M_UNKNOWN')}
+                wait=error.body.get('retry_after_ms')
+                if error.status==429 and type(wait) in {int,float} and 0<=wait<=86400000:
+                    data['retry_after_ms']=wait
+                self.respond(error.status if error.status < 500 else 503,data)
             except Exception:
                 self.respond(503, {'error': 'Local backend unavailable. Keep your draft and retry.'})
 

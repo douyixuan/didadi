@@ -1,6 +1,7 @@
+import {matrixFetch} from '../src/matrixFetch.js';
 import assert from 'node:assert/strict';import {randomUUID} from 'node:crypto';
-const base=process.argv[2]||'http://127.0.0.1:8767',session=await(await fetch(base+'/api/session')).json(),room=session.initialRoom;
-async function request(path,method='GET',body){const response=await fetch(base+path,{method,headers:{'X-CSRF-Token':session.csrf,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});return {status:response.status,data:await response.json()}}
+const base=process.argv[2]||'http://127.0.0.1:8767',session=await(await matrixFetch(base+'/api/session')).json(),room=session.initialRoom;
+async function request(path,method='GET',body){const response=await matrixFetch(base+path,{method,headers:{'X-CSRF-Token':session.csrf,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});return {status:response.status,data:await response.json()}}
 const nonce=randomUUID(),needle='bodyneedle'+nonce.replaceAll('-',''),messageIds=[];
 for(let i=0;i<24;i++){const sent=await request('/matrix/_matrix/client/v3/rooms/'+encodeURIComponent(room)+'/send/m.room.message/'+nonce+'-match-'+i,'PUT',{msgtype:'m.text',body:'Historical '+needle+' message '+i});assert.equal(sent.status,200);messageIds.push(sent.data.event_id)}
 for(let i=0;i<55;i++)assert.equal((await request('/matrix/_matrix/client/v3/rooms/'+encodeURIComponent(room)+'/send/m.room.message/'+nonce+'-filler-'+i,'PUT',{msgtype:'m.text',body:'Unrelated filler '+nonce+' '+i})).status,200);

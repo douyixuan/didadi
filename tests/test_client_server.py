@@ -82,6 +82,18 @@ class ClientServerTests(unittest.TestCase):
         content['org.didadi.document']={'action':'read'}
         self.assertEqual(self.workspace.proxy('PUT','/rooms/!seed:local/send/m.room.message/read',{},content),{'event_id':'$one'})
 
+    def test_source_references_require_canonical_body_and_reject_agent_commands(self):
+        reference={'repository':'repo','path':'a.py','commit':'a'*40,'blob':'b'*40,'start':1,'end':1}
+        self.workspace.sources=SimpleNamespace(reference=lambda room,ref:'canonical source')
+        content={'msgtype':'m.text','body':'canonical source','org.didadi.source_ref':reference}
+        path='/rooms/!seed:local/send/m.room.message/source'
+        self.workspace.proxy('PUT',path,{},content)
+        self.assertEqual(next(call[2] for call in self.calls if '/send/' in call[1])['org.didadi.source_ref'],reference)
+        for extra in ({'body':'spoof'},{'m.mentions':{'user_ids':[AGENT]}},{'org.didadi.document':{'action':'read'}}):
+            self.calls.clear()
+            with self.assertRaises(ClientError):self.workspace.proxy('PUT',path,{}, {**content,**extra})
+            self.assertFalse(any('/send/' in call[1] for call in self.calls))
+
     def test_quote_and_thread_references_are_validated_before_send(self):
         path='/rooms/!seed:local/send/m.room.message/quote'
         for relation in ({'m.in_reply_to':{'event_id':'$source'}},
@@ -223,6 +235,15 @@ class ClientServerTests(unittest.TestCase):
             for method,other,query in [('POST',path,{}),('GET',path,{'user_id':['@other']}),('GET',path.replace('seed','ungranted'),{}),('GET',path.replace('m.thread','m.replace'),{})]:
                 with self.assertRaises(ClientError):self.workspace.thread_relations(method,other,query)
             self.assertEqual(request.call_count,1)
+
+    def test_matrix_throttling_preserves_wait_hint_without_upstream_details(self):
+        self.workspace.proxy=lambda *args:(_ for _ in ()).throw(MatrixError(429,{'errcode':'M_LIMIT_EXCEEDED','retry_after_ms':2500,'error':'upstream private detail'}))
+        dist=self.root/'rate-dist';dist.mkdir();server=ThreadingHTTPServer(('127.0.0.1',0),lambda *args:None);server.RequestHandlerClass=handler(self.workspace,dist,server.server_port);thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+        try:
+            request=Request(f'http://127.0.0.1:{server.server_port}/matrix/_matrix/client/v3/rooms/!seed:local/send/m.room.message/rate',method='PUT',headers={'X-CSRF-Token':self.workspace.csrf,'Content-Type':'application/json'},data=b'{"msgtype":"m.text","body":"test"}')
+            with self.assertRaises(HTTPError) as error:urlopen(request,timeout=5)
+            self.assertEqual(error.exception.code,429);data=json.load(error.exception);self.assertEqual(data['retry_after_ms'],2500);self.assertEqual(data['errcode'],'M_LIMIT_EXCEEDED');self.assertNotIn('upstream private detail',json.dumps(data))
+        finally:server.shutdown();server.server_close();thread.join(timeout=2)
 
     def test_raw_attachment_upload_and_authenticated_forced_download(self):
         payload=b'<script>literal bytes</script>\r\n';events={};uploads=[]
