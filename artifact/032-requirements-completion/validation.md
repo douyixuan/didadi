@@ -31,20 +31,9 @@ Real loopback preview 8834 uses its own Git repository and metadata. documents-s
 
 ### PR52安全合入复核（2026-10-22）
 
-
-
-
-
-
 本次仅整理已发布PR的依赖与安全CI，未夹带本地未读、Runtime进度、任务产物或移动UI候选。保留main默认离线工作流及单独显式真实验收入口；命名文档增量经独立静态复审未见新阻断。离线guard增加DocumentService纯临时Git/假Matrix测试和文档引用、草稿、结果投影界面测试。WebSocket可选依赖延迟至实际bridge启动时导入，参数及权限规则不变；非普通Git模式测试直接重开合成Git索引，避免把远端传输混入文件模式检查。主执行离线Python14/14、前端82/82及构建通过。真实Matrix、认证、外部runtime、浏览器及远端Git验收未运行，不因此打勾。
 
-
 ### PR57附件重试复核（2026-10-22）
-
-
-
-
-
 
 独立审核发现并修复两项上下文问题：408超时保留原文件/线程/operation的不确定重试；文件下载在卸载、切房、换API或换事件后丢弃迟到结果与错误，旧请求不能释放新请求的锁，也不能触发离开界面后的下载。仅作用于既有附件流程，不增加存储、权限或任意URL能力。离线guard涵盖附件服务和纯注入组件测试：主执行Python30/30、前端104/104与构建通过。真实Matrix媒体上传、撤权时序和浏览器文件下载未运行，不视为真实验收。
 
@@ -53,3 +42,27 @@ Real loopback preview 8834 uses its own Git repository and metadata. documents-s
 按照新的明确合入授权，先完成ROADMAP PR66，再依序审核PR52–64；使用独立review工作树，未推送或混入未读3080c8f、进度a4cc1a00、产物0847411、集成46d07799或移动UI11d9391候选。PR41与Issue12不在本轮范围。旧分支默认Matrix/HTTP smoke、npm lifecycle与分支名条件均未带回；`.github/workflows`保持安全main定义不变。所有实际合入均使用普通merge及预期head校验，不绕过保护。各PR准确head与合入main的CI链接保留在GitHub Actions，TLS查询失败仅重试只读查询，不重复写入或触发CI。
 
 最终PR64合入前本地guard：Python62/62，前端144/144（16文件），构建通过。Python只运行临时Git、假Matrix/媒体适配、进程内代理、临时SQLite和纯内存SessionContract类；HTTP fixture类明确排除，传输及非临时Git子进程守卫保持启用。独立分组审核发现的附件408冻结重试及迟到下载问题已修并复审通过。纯虚构会话与真实身份认证分离；没有执行真实登录、注册、注销、媒体服务或真实数据迁移。历史PR说明中的真实验收不等于本轮重新验收，ROADMAP不据离线结果提前打钩。
+
+
+### 已合入提交与CI归档（2026-10-22）
+
+本表将本轮临时证据归入本验收记录，GitHub链接为持久来源。所列准确head与merge提交的Test离线工作流均已观察到成功；不证明真实Matrix、认证、部署或手机视觉验收。最终业务主线为 `e5b49d3f2e2479e92a49f027174455e0eaca5b31`。
+
+| PR | 审核head | head CI | 合入main | main CI |
+| --- | --- | --- | --- | --- |
+| [#66](https://github.com/douyixuan/didadi/pull/66) | `45f342f62b546c1e85b935ffcbaa032527c48e26` | [通过](https://github.com/douyixuan/didadi/actions/runs/39578980705) | `de0d24b172d197cad9795701bc245ed5dcaf4fa8` | [通过](https://github.com/douyixuan/didadi/actions/runs/39748440359) |
+| [#52](https://github.com/douyixuan/didadi/pull/52) | `6ba88b5263060fd4d636b0bc7cc5036f418dd565` | [通过](https://github.com/douyixuan/didadi/actions/runs/39749081642) | `d8f4035e8b83f4912d70c8bbfffde04012b7710c` | [通过](https://github.com/douyixuan/didadi/actions/runs/39749241374) |
+| [#53](https://github.com/douyixuan/didadi/pull/53) | `4ee3ffe75b6291f9703756b9faac13bc1bd44127` | [通过](https://github.com/douyixuan/didadi/actions/runs/39749505881) | `6aa03cd73edb630438c25507cc634ba2d629583a` | [通过](https://github.com/douyixuan/didadi/actions/runs/39749616706) |
+| [#54](https://github.com/douyixuan/didadi/pull/54) | `2e76a129a00c663df013b519626ef045161387c6` | [通过](https://github.com/douyixuan/didadi/actions/runs/39749823781) | `3a6722ad9f7fa36e7d0331de98d848347acac51f` | [通过](https://github.com/douyixuan/didadi/actions/runs/39749930923) |
+| [#55](https://github.com/douyixuan/didadi/pull/55) | `5325232d1d828b485fcd0b47739654539efd77a2` | [通过](https://github.com/douyixuan/didadi/actions/runs/39750131313) | `4c5f231337a99c3ccc6ef1e100d3f4f13898ec0c` | [通过](https://github.com/douyixuan/didadi/actions/runs/39750236981) |
+| [#56](https://github.com/douyixuan/didadi/pull/56) | `b3f96694847ebba735b3bb109ce75b89307676c7` | [通过](https://github.com/douyixuan/didadi/actions/runs/39750387764) | `1564fb8746651fe8a26d63a0e445e5f3a08f277a` | [通过](https://github.com/douyixuan/didadi/actions/runs/39750496799) |
+| [#57](https://github.com/douyixuan/didadi/pull/57) | `da38ff325f2ff3312febc3b27cafd0afe96adae7` | [通过](https://github.com/douyixuan/didadi/actions/runs/39750892411) | `3c9bf2c3ef7c211c3cd324ba2589994035639680` | [通过](https://github.com/douyixuan/didadi/actions/runs/39751009732) |
+| [#58](https://github.com/douyixuan/didadi/pull/58) | `a0641ce5c99da79c6fbaa32db9ce6b278bc5c2a3` | [通过](https://github.com/douyixuan/didadi/actions/runs/39751269715) | `2a7086352a2a511418333f39df807bbbd4a9296f` | [通过](https://github.com/douyixuan/didadi/actions/runs/39751397554) |
+| [#59](https://github.com/douyixuan/didadi/pull/59) | `2f305769e8fb4178c5dd4bd0f2362773bc9214f6` | [通过](https://github.com/douyixuan/didadi/actions/runs/39751659079) | `51c3dd4be6d0869114b4451d121ff346c6a326f7` | [通过](https://github.com/douyixuan/didadi/actions/runs/39751782644) |
+| [#60](https://github.com/douyixuan/didadi/pull/60) | `1b757995c08772d8f9e22b929fb882fc4a565080` | [通过](https://github.com/douyixuan/didadi/actions/runs/39752010705) | `a9ef603a6639821d170ca95ca1e4bef19628da75` | [通过](https://github.com/douyixuan/didadi/actions/runs/39752152362) |
+| [#61](https://github.com/douyixuan/didadi/pull/61) | `eadc8338701a3030842e09265505371401b2d05f` | [通过](https://github.com/douyixuan/didadi/actions/runs/39752306389) | `74fc924ad0332ff419a9306055906087ac50fd67` | [通过](https://github.com/douyixuan/didadi/actions/runs/39752420366) |
+| [#62](https://github.com/douyixuan/didadi/pull/62) | `478b161a585f3ce6fec33462519b08a9a3192591` | [通过](https://github.com/douyixuan/didadi/actions/runs/39752606643) | `b9f82976deffda109aec81aa7994874e67e4d212` | [通过](https://github.com/douyixuan/didadi/actions/runs/39752746802) |
+| [#63](https://github.com/douyixuan/didadi/pull/63) | `bfa21d0974af3ddf6e0b794f9e4cc77a1f1b0e22` | [通过](https://github.com/douyixuan/didadi/actions/runs/39753103323) | `16dffa40490c012d19cdbff3bfece00a547c6ed2` | [通过](https://github.com/douyixuan/didadi/actions/runs/39753440253) |
+| [#64](https://github.com/douyixuan/didadi/pull/64) | `f1e724273cd54748b5faf97bef70ff8d7484d269` | [通过](https://github.com/douyixuan/didadi/actions/runs/39753785838) | `e5b49d3f2e2479e92a49f027174455e0eaca5b31` | [通过](https://github.com/douyixuan/didadi/actions/runs/39753912477) |
+
+ROADMAP边界复核：本轮没有新增勾选。原有七个已勾叶子保留其既有范围证据；新增多文档、引用、搜索、附件、房间及纯虚构会话的代码合入不扩大既有真实验收。真实登录与退出仍待接入，未读/Runtime主动进度/任务产物/移动改版候选尚未合入。完整历史任务恢复仍缺本人授权分页枚举契约，不能把已加载消息的最近八项当作全部任务。
