@@ -30,3 +30,11 @@ it('opens a direct human receipt without a task or English body, but rejects a s
  expect(documentVersion(receipt,'@agent',false,'@human')).toBe(commit);
  expect(documentVersion({...receipt,sender:'@other'},'@agent',false,'@human')).toBeNull();
 });
+
+
+it('requires a matching document path before opening a named receipt',()=>{
+ const receipt={sender:'@human',content:{body:'Saved','org.didadi.document.commit':{version:1,path:'设计/Notes.md',commit,blob:'b'.repeat(40),author:'@human'}}};
+ expect(documentVersion(receipt,'@agent',false,'@human','设计/Notes.md')).toBe(commit);
+ expect(documentVersion(receipt,'@agent',false,'@human','Other.md')).toBeNull();
+ expect(documentVersion(event,'@agent',false,'@human','设计/Notes.md')).toBeNull();
+});

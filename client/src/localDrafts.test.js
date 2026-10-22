@@ -47,3 +47,9 @@ it('warns rather than hiding malformed JSON and refuses unsupported coordination
  const locks=navigator.locks;Object.defineProperty(navigator,'locks',{configurable:true,value:undefined});
  try{await expect(store.transaction(()=>store.write('unsafe','a'))).rejects.toThrow(/cannot coordinate/);}finally{Object.defineProperty(navigator,'locks',{configurable:true,value:locks});}
 });
+
+
+it('separates two document paths for the same Matrix user and room',()=>{
+ const session={userId:'@alice:local'},first=draftContext(session,'!room','first.md'),second=draftContext(session,'!room','second.md');
+ expect(first).not.toBe(second);const a=new LocalDraftStore(first),b=new LocalDraftStore(second);a.write('# First draft',null);b.write('# Second draft',null);expect(a.list().map(r=>r.content)).toEqual(['# First draft']);expect(b.list().map(r=>r.content)).toEqual(['# Second draft']);
+});

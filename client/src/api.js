@@ -35,8 +35,8 @@ export async function connect() {
   const timelinePage=(room,from=null)=>messagePage(client,room,from);
   return {
     session,
-    async saveDocument(room,content,base_blob,operation){
-      const response=await fetchLocal('/api/documents/demo.md',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({room,content,base_blob,operation})});
+    async saveDocument(room,content,base_blob,operation,name='demo.md'){
+      const response=await fetchLocal('/api/documents/'+encodeURIComponent(name),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({room,content,base_blob,operation})});
       const data=await response.json();if(!response.ok){const error=new Error(data.error||'Save failed. Keep your draft.');error.status=response.status;error.data=data;throw error;}return data;
     },
     async rooms() {
@@ -52,8 +52,10 @@ export async function connect() {
     timeline:async room=>(await timelinePage(room)).events,
     send:(room, content, txn)=>client.sendEvent(room, 'm.room.message', content, txn),
     createRoom:(name, operation)=>api('/api/rooms', {name,operation}),
-    document:(room, commit)=>api('/api/document?room='+encodeURIComponent(room)+(commit?'&commit='+encodeURIComponent(commit):'')),
-    history:room=>api('/api/history?room='+encodeURIComponent(room)),
+    documents:room=>api('/api/documents?room='+encodeURIComponent(room)),
+    createDocument:(room,name,operation)=>api('/api/documents',{room,name,operation,content:''}),
+    document:(room, commit,name='demo.md')=>api('/api/document?room='+encodeURIComponent(room)+(commit?'&commit='+encodeURIComponent(commit):'')+'&path='+encodeURIComponent(name)),
+    history:(room,name='demo.md')=>api('/api/history?room='+encodeURIComponent(room)+'&path='+encodeURIComponent(name)),
     task:(room,id)=>api('/api/task?room='+encodeURIComponent(room)+'&id='+encodeURIComponent(id)),
     cancel:(room,id)=>api('/api/task/cancel',{room,id}),
     audit:(room,id)=>api('/api/task/audit?room='+encodeURIComponent(room)+'&id='+encodeURIComponent(id)),

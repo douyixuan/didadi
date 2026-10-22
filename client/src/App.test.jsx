@@ -649,3 +649,47 @@ it('merges an older response with messages that refreshed while it was loading',
   await act(async()=>intervals.get(2000)());await screen.findByText('$arrived');await act(async()=>resolve({events:[message('$earlier')],previousCursor:null}));await screen.findByText('$earlier');expect(screen.getByText('$arrived')).toBeInTheDocument();expect(screen.getAllByText('$existing')).toHaveLength(1);
  }finally{timer.mockRestore()}
 });
+
+
+it('creates and opens a named document, saving only its path and protecting pending saves from navigation',async()=>{
+ const api=fixture();const documents=new Map([['demo.md',{...doc}]]);let pendingSave;
+ api.documents=vi.fn(async()=>({documents:[...documents.keys()].map(name=>({name}))}));
+ api.createDocument=vi.fn(async(_room,name)=>{documents.set(name,{...doc,name,content:'',blob:'d'.repeat(40)});return {path:name,status:'saved',commit:doc.commit,blob:doc.blob}});
+ api.document.mockImplementation(async(_room,_commit,name='demo.md')=>documents.get(name));
+ api.history.mockResolvedValue({commits:[doc.commit]});
+ api.saveDocument=vi.fn((_room,content,_base,_operation,name='demo.md')=>new Promise(resolve=>pendingSave=()=>{documents.set(name,{...doc,name,content});resolve({status:'saved',path:name,commit:doc.commit,blob:doc.blob})}));
+ render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Team handbook'});
+ fireEvent.change(screen.getByLabelText('New document path'),{target:{value:'设计/Notes.md'}});fireEvent.click(screen.getByRole('button',{name:'Create document'}));
+ await screen.findByRole('button',{name:'设计/Notes.md, current document'});const editor=await screen.findByLabelText('Markdown document');expect(editor).toHaveValue('');
+ fireEvent.change(editor,{target:{value:'# Named notes'}});await screen.findByText(/Unsaved draft kept/);fireEvent.click(screen.getByRole('button',{name:'Save changes'}));
+ expect(screen.getByRole('button',{name:'demo.md',exact:true})).toBeDisabled();await act(async()=>pendingSave());await screen.findByText(/Saved directly to Git/);
+ expect(api.saveDocument.mock.calls[0][4]).toBe('设计/Notes.md');expect(documents.get('demo.md').content).toBe(doc.content);
+ fireEvent.click(screen.getByRole('button',{name:'demo.md',exact:true}));await screen.findByRole('heading',{name:'Team handbook'});
+ await waitFor(()=>expect(screen.getByRole('button',{name:'设计/Notes.md',exact:true})).toBeEnabled());fireEvent.click(screen.getByRole('button',{name:'设计/Notes.md',exact:true}));await screen.findByRole('heading',{name:'Named notes'});
+});
+
+
+it('keeps a confirmed created document accessible when refreshing its list fails',async()=>{
+ const api=fixture();let created=false;
+ api.documents=vi.fn(async()=>{if(created)throw new Error('Document list offline');return {documents:[{name:'demo.md'}]}});
+ api.createDocument=vi.fn(async(_room,name)=>{created=true;return {status:'saved',path:name,commit:doc.commit,blob:doc.blob}});
+ api.document.mockImplementation(async(_room,_version,name='demo.md')=>({...doc,name,content:name==='demo.md'?doc.content:'# Created despite list failure'}));
+ render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Team handbook'});fireEvent.change(screen.getByLabelText('New document path'),{target:{value:'Created.md'}});fireEvent.click(screen.getByRole('button',{name:'Create document'}));
+ await screen.findByRole('button',{name:'Created.md, current document'});await screen.findByText(/Document list offline/);fireEvent.click(screen.getByRole('button',{name:'demo.md',exact:true}));await screen.findByRole('heading',{name:'Team handbook'});expect(screen.getByRole('button',{name:'Created.md',exact:true})).toBeInTheDocument();
+});
+
+it('blocks document navigation when the dirty draft cannot be stored locally',async()=>{
+ const api=fixture();api.documents=vi.fn(async()=>({documents:[{name:'demo.md'},{name:'Other.md'}]}));api.createDocument=vi.fn();
+ render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Team handbook'});await screen.findByRole('button',{name:'Other.md',exact:true});fireEvent.click(screen.getByRole('button',{name:'Edit',exact:true}));
+ const storage=vi.spyOn(Storage.prototype,'setItem').mockImplementation(()=>{throw new DOMException('Storage unavailable','SecurityError')});
+ try{fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# Must not lose'}});await screen.findByText(/Local draft storage is unavailable/);await waitFor(()=>expect(screen.getByRole('button',{name:'Other.md',exact:true})).toBeDisabled());expect(screen.getByRole('button',{name:'Create document'})).toBeDisabled();expect(screen.getByLabelText('Markdown document')).toHaveValue('# Must not lose');}
+ finally{storage.mockRestore()}
+});
+
+it('keeps the current editor when edits become unsafe during a delayed document create',async()=>{
+ const api=fixture();let finish;api.documents=vi.fn(async()=>({documents:[{name:'demo.md'}]}));api.createDocument=vi.fn(()=>new Promise(resolve=>finish=resolve));
+ render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Team handbook'});fireEvent.click(screen.getByRole('button',{name:'Edit',exact:true}));fireEvent.change(screen.getByLabelText('New document path'),{target:{value:'Delayed.md'}});fireEvent.click(screen.getByRole('button',{name:'Create document'}));
+ const storage=vi.spyOn(Storage.prototype,'setItem').mockImplementation(()=>{throw new DOMException('Denied','SecurityError')});
+ try{fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# Keep editor mounted'}});await screen.findByText(/Local draft storage is unavailable/);await act(async()=>finish({status:'saved',path:'Delayed.md',commit:doc.commit,blob:doc.blob}));await screen.findByText(/Document created. Finish or export/);expect(screen.getByLabelText('Markdown document')).toHaveValue('# Keep editor mounted');expect(screen.getByRole('button',{name:'Delayed.md',exact:true})).toBeDisabled();}
+ finally{storage.mockRestore()}
+});
