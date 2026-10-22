@@ -17,7 +17,7 @@
 | 选消息转新文档及来源引用 | 候选from-messages API/UI已实现选ID、服务端取原文、来源链接和确定性Markdown | draft54本地真实Matrix/Git/浏览器及精确head CI39409982536/39410003123通过；当前限绑定房间文本，无LLM |
 | Agent注册、能力、资源授权 | Gateway固定AGENT/单开发token，静态本地source白名单 | 部分实现；注册/授权可能涉及PR41原owner，需协调，不抢做 |
 | Agent真实进度API | 已有耐久状态/租约/退避/取消/执行审计；连接观测不冒充进度 | 部分实现；没有runtime主动上报进度的API |
-| Git关联、目录与代码行/Commit/PR引用 | 候选Git source直接查看既有grant固定SHA文件，选行引用消息及按commit/blob打开；仍8000字节上限 | 真实Git/Matrix/浏览器通过；仓库关联配置、目录浏览、任意Commit/PR引用待做 |
+| Git关联、目录与代码行/Commit/PR引用 | 候选Git source直接查看既有grant固定SHA文件，选行引用消息及按commit/blob打开；仍8000字节上限 | 真实Git/Matrix/浏览器通过；当前目录候选只浏览已有grant路径；仓库关联配置、任意Commit/PR引用待做 |
 | Git为Markdown唯一数据源、编辑/历史/冲突 | GitDocs/DocumentService/编辑器；历史初验139 Python/122前端，后续候选测试与真实运行结果见各PR | 已实现声明的固定文档范围；不推广成全部文档产品完成 |
 | 未恢复的V0.3条目和优先级 | 正文尚不可见，父端继续恢复 | 待证；不以推测替代，不宣布全部功能完成 |
 
