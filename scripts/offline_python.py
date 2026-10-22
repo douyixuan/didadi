@@ -9,7 +9,7 @@ from unittest.mock import patch
 from src import matrix_http  # Import inert stdlib HTTP definitions before guarding sockets.
 
 ROOT = Path(__file__).resolve().parents[1]
-FILES = ('test_gitdocs.py','test_document_service.py','test_search_service.py')
+FILES = ('test_gitdocs.py','test_document_service.py','test_search_service.py','test_attachment_service.py')
 
 
 def main():
