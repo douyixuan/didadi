@@ -78,7 +78,8 @@ class DocumentServiceTests(unittest.TestCase):
             tree = self.store._git('write-tree', env=env).strip()
         commit = self.store._git('commit-tree', tree, '-p', head, input='Imported non-regular Markdown fixture').strip()
         self.store._git('update-ref', self.store.branch, commit, head)
-        imported = GitDocs(Path(self.tmp.name) / 'imported.git', self.root)
+        # Reopen the synthetic Git index directly; this checks file modes, not remote transport.
+        imported = GitDocs(self.root)
         self.assertEqual([item['name'] for item in imported.documents()['documents']], ['Regular.md'])
         self.assertEqual(imported.read('Regular.md'), '# Regular')
 

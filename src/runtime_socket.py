@@ -7,8 +7,6 @@ import threading
 import time
 from urllib.parse import urlsplit
 
-from websockets.exceptions import ConnectionClosed
-from websockets.sync.server import serve
 from src.matrix_http import MatrixError, request
 
 
@@ -24,6 +22,9 @@ def bridge(base, token, port=9020, wait_seconds=20):
     loopback_url(base, 'http')
     if not token or not 0 < wait_seconds <= 20:
         raise ValueError('invalid runtime bridge configuration')
+    # Offline document helpers do not need the optional WebSocket runtime.
+    from websockets.exceptions import ConnectionClosed
+    from websockets.sync.server import serve
     def authenticate(connection, incoming):
         if (incoming.path != '/runtime' or not hmac.compare_digest(
             incoming.headers.get('Authorization', ''), 'Bearer ' + token)):
