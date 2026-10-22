@@ -1,3 +1,4 @@
+import {DirectChatPreferences} from './DirectChatPreferences';
 import {RoomCreator} from './RoomCreator';
 import {RoomPeople} from './RoomPeople';
 import {SourceViewer} from './SourceViewer';
@@ -346,7 +347,8 @@ export function App({connector=connect}) {
       {documentsError&&<p role="alert">{documentsError}<button onClick={()=>refreshDocuments()}>Refresh documents</button></p>}
     </div>
     <div className="nav-section rooms-section"><div className="section-heading"><span>Rooms</span><button aria-label="Refresh rooms" onClick={refreshRooms}><RefreshCw size={13}/></button></div>
-      <nav aria-label="Rooms">{rooms.filter(r=>r.name.toLowerCase().includes(search.toLowerCase())).map(r=><button className={'room '+(r.id===room?'room-selected':'')} key={r.id} onClick={()=>{setRoom(r.id);setNavOpen(false)}}><MessageSquare size={15}/><span>{r.name}{r.kind&&<small>{r.kind==='direct'?'Private conversation':r.kind==='channel'?'Channel':r.kind==='group'?'Group':'Room'} · {r.joinRule==='invite'?'invite only':r.joinRule||'unknown access'}</small>}</span></button>)}</nav>
+      <nav aria-label="Rooms">{rooms.filter(r=>r.name.toLowerCase().includes(search.toLowerCase())).map(r=><button className={'room '+(r.id===room?'room-selected':'')} key={r.id} onClick={()=>{setRoom(r.id);setNavOpen(false)}}><MessageSquare size={15}/><span>{r.name}{r.kind&&<small>{r.kind==='direct'?'Private conversation':r.kind==='channel'?'Channel':r.kind==='group'?'Group':'Room'} · {r.joinRule==='invite'?'invite only':r.joinRule||'unknown access'}{r.directForYou?' · Direct for you':''}</small>}</span></button>)}</nav>
+      {api.directChats&&<DirectChatPreferences api={api} revision={rooms.length} onRefresh={refreshRooms}/>}
       <RoomCreator api={api} onCreated={async result=>{setRooms(old=>old.some(item=>item.id===result.room_id)?old:[...old,{id:result.room_id,name:result.name,kind:result.kind,joinRule:'invite',agentJoined:false}]);setRoom(result.room_id);await refreshRooms();}}/>
     </div>
     <div className="sidebar-bottom"><button className="agent-nav" onClick={()=>setPanel('agent')}><Bot size={17}/><span>Example Agent<small>Echo runtime · no LLM</small></span></button><div className="session-note"><span className={'available-dot '+(!online?'offline':'')}/>{online?(api.session.synthetic?'Browser-only preview':'Connected to local workspace'):'Reconnecting to workspace'}</div></div>

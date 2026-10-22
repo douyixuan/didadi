@@ -274,3 +274,20 @@ class ClientServerTests(unittest.TestCase):
             with self.assertRaises(HTTPError) as forbidden:urlopen(Request(download.replace('!seed:local','!other'),headers={'X-CSRF-Token':self.workspace.csrf}),timeout=5)
             self.assertEqual(forbidden.exception.code,403)
         finally:server.shutdown();server.server_close();thread.join(timeout=2)
+
+    def test_direct_preference_routes_are_current_identity_and_existing_room_only(self):
+        from unittest.mock import Mock
+        self.workspace.direct_chats=Mock();self.workspace.direct_chats.snapshot.return_value={'mapped':{},'pending':[]};self.workspace.direct_chats.retry.return_value={'room':'!seed:local','status':'synced'}
+        dist=self.root/'direct-dist';dist.mkdir();server=ThreadingHTTPServer(('127.0.0.1',0),lambda *args:None);server.RequestHandlerClass=handler(self.workspace,dist,server.server_port);thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start();base=f'http://127.0.0.1:{server.server_port}'
+        try:
+            self.assertEqual(json.load(urlopen(base+'/api/direct-chats',timeout=5)),{'mapped':{},'pending':[]})
+            for path,body,csrf,status in [('/api/direct-chats?user_id=@other',None,True,400),('/api/direct-chats/retry',{'room':'!seed:local'},False,403),('/api/direct-chats/retry',{'room':'!seed:local','peer':'@other'},True,400),('/api/direct-chats/retry?user_id=@other',{'room':'!seed:local'},True,400)]:
+                req=Request(base+path,method='GET' if body is None else 'POST',headers={'Content-Type':'application/json',**({'X-CSRF-Token':self.workspace.csrf} if csrf else {})},data=None if body is None else json.dumps(body).encode())
+                with self.assertRaises(HTTPError) as error:urlopen(req,timeout=5)
+                self.assertEqual(error.exception.code,status)
+            self.workspace.direct_chats.retry.assert_not_called()
+            req=Request(base+'/api/direct-chats/retry',method='POST',headers={'Content-Type':'application/json','X-CSRF-Token':self.workspace.csrf},data=b'{"room":"!seed:local"}')
+            self.assertEqual(json.load(urlopen(req,timeout=5))['status'],'synced');self.workspace.direct_chats.retry.assert_called_once_with('!seed:local')
+            for method in ['GET','PUT']:
+                with self.assertRaises(ClientError):self.workspace.proxy(method,'/user/@other/account_data/m.direct',{}, {})
+        finally:server.shutdown();server.server_close();thread.join(timeout=2)
