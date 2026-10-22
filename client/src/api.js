@@ -64,6 +64,7 @@ export async function connect() {
       }));
     },
     threadPage:(room,root,from=null)=>threadPage(client,room,root,from),
+    async message(room,id){const raw=await client.fetchRoomEvent(room,id);if(raw.event_id!==id||raw.type!=='m.room.message'||(raw.room_id&&raw.room_id!==room))throw new Error('Quoted message is unavailable.');return {id:raw.event_id,sender:raw.sender,content:raw.content,time:raw.origin_server_ts};},
     timelinePage,
     timeline:async room=>(await timelinePage(room)).events,
     send:(room, content, txn)=>client.sendEvent(room, 'm.room.message', content, txn),

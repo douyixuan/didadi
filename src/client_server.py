@@ -163,9 +163,22 @@ class Workspace:
             content['org.didadi.repository'] = repository
         relation = data.get('m.relates_to')
         if relation:
-            if not isinstance(relation, dict) or relation.get('rel_type') != 'm.thread' or not isinstance(relation.get('event_id'), str):
-                raise ClientError(400, 'Invalid thread reference.')
-            self.api('GET', '/rooms/' + segment(room) + '/event/' + segment(relation['event_id']))
+            if not isinstance(relation, dict) or set(relation)-{'rel_type','event_id','m.in_reply_to'}:
+                raise ClientError(400, 'Invalid message reference.')
+            targets=[]
+            if 'rel_type' in relation or 'event_id' in relation:
+                if relation.get('rel_type')!='m.thread':
+                    raise ClientError(400, 'Invalid thread reference.')
+                targets.append(relation.get('event_id'))
+            if 'm.in_reply_to' in relation:
+                reply=relation['m.in_reply_to']
+                if not isinstance(reply,dict) or set(reply)!={'event_id'}:
+                    raise ClientError(400, 'Invalid quoted message reference.')
+                targets.append(reply['event_id'])
+            if not targets or any(not isinstance(target,str) or not target.startswith('$') or len(target)>512 for target in targets):
+                raise ClientError(400, 'Invalid message reference.')
+            for target in dict.fromkeys(targets):
+                self.api('GET', '/rooms/' + segment(room) + '/event/' + segment(target))
             content['m.relates_to'] = relation
         return self.api('PUT', path, content)
 

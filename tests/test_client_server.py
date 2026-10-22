@@ -82,6 +82,24 @@ class ClientServerTests(unittest.TestCase):
         content['org.didadi.document']={'action':'read'}
         self.assertEqual(self.workspace.proxy('PUT','/rooms/!seed:local/send/m.room.message/read',{},content),{'event_id':'$one'})
 
+    def test_quote_and_thread_references_are_validated_before_send(self):
+        path='/rooms/!seed:local/send/m.room.message/quote'
+        for relation in ({'m.in_reply_to':{'event_id':'$source'}},
+                         {'rel_type':'m.thread','event_id':'$root','m.in_reply_to':{'event_id':'$source'}}):
+            self.calls.clear()
+            result=self.workspace.proxy('PUT',path,{}, {'msgtype':'m.text','body':'reply','m.relates_to':relation})
+            self.assertEqual(result,{'event_id':'$one'})
+            sent=next(call[2] for call in self.calls if '/send/' in call[1])
+            self.assertEqual(sent['m.relates_to'],relation)
+            self.assertTrue(any('/event/%24source' in call[1] for call in self.calls))
+        for relation in ({'m.in_reply_to':{'event_id':'bad'}},{'m.in_reply_to':{'event_id':'$one','body':'spoof'}},
+                         {'rel_type':'m.replace','event_id':'$one'}, {'m.in_reply_to':{'event_id':'$one'},'user_id':'@other'},
+                         {'rel_type':'m.thread','event_id':'$'+'a'*513}):
+            self.calls.clear()
+            with self.assertRaises(ClientError):
+                self.workspace.proxy('PUT',path,{}, {'msgtype':'m.text','body':'reply','m.relates_to':relation})
+            self.assertFalse(any('/send/' in call[1] for call in self.calls))
+
     def test_room_creation_is_idempotent_and_recovers_after_lost_record(self):
         first=self.workspace.create_room('stable-request-id','Client room')
         second=self.workspace.create_room('stable-request-id','Client room')
