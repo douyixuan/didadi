@@ -58,3 +58,5 @@
 用户明确继续完整Thread后正文搜索。线程以SDK relations读取固定root与m.thread消息，独立于已加载时间线；50条反向分页、流序、去重、空页游标、错误原游标重试和房间/线程迟到隔离。现有房间白名单不变；仅增加固定v1 relations GET代理，强制limit50/dirb，拒绝身份覆盖和其他relation路由。保留synthetic旧接口兼容说明，不将其当真实后端验收。验证包括旧root在最近50之外、超过50回复、重试、滚动锚点、切房间及真实Matrix/隔离浏览器。
 
 #52–54依赖/审查/贡献范围已复核，全部精确CI通过；尝试按本轮合入授权将52转ready被自动审批拒绝，理由是旧“新PR保持draft”约束。停止该动作，无替代合入路径。该阻塞不停止线程与搜索实现。Issue12和PR41仍不接手。
+
+正文搜索：Matrix固定当前allowed room/content.body/recent/20，Opaque token分页，不接受客户端filter/identity。Git regular Markdown固定可达main历史snapshot，literal大小写不敏感匹配正文行；50文件scan/20匹配文件分页，超64KiB/非文本显式跳过，不能把未扫完空页当无结果。UI独立搜索弹窗，query/cursor/commit稳定重试、去重、context/seq隔离；打开文档匹配版本沿用现有草稿保护，消息结果打开独立thread。无持久索引，不恢复12，不改41授权设计。

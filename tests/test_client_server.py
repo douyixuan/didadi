@@ -145,6 +145,14 @@ class ClientServerTests(unittest.TestCase):
             with self.assertRaises(HTTPError) as spoofed:
                 fetch('/api/documents/from-messages','POST',{**selection,'content':'Spoofed'})
             self.assertEqual(spoofed.exception.code,400)
+            self.workspace.search.api=lambda method,path,data=None,query=None:{'search_categories':{'room_events':{'results':[{'result':{'event_id':'$search','room_id':'!seed:local','type':'m.room.message','sender':'@human:local','content':{'body':'Canonical HTTP source'}}}]}}}
+            searched=fetch('/api/search/messages','POST',{'room':'!seed:local','query':'Canonical','next_batch':None})
+            self.assertEqual(searched['events'][0]['id'],'$search')
+            files=fetch('/api/search/documents','POST',{'room':'!seed:local','query':'Canonical HTTP source','after':None,'commit':None})
+            self.assertEqual([item['name'] for item in files['results']],['Selected.md'])
+            for path,search in [('/api/search/messages',{'room':'!other:local','query':'Canonical','next_batch':None}),('/api/search/documents',{'room':'!other:local','query':'Canonical','after':None,'commit':None})]:
+                with self.assertRaises(HTTPError) as denied_search:fetch(path,'POST',search)
+                self.assertEqual(denied_search.exception.code,403)
         finally:
             server.shutdown()
             server.server_close()

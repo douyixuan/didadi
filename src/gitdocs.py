@@ -195,11 +195,18 @@ class GitDocs:
             content = self._git('cat-file', 'blob', blob) if blob else None
             return {'name': name, 'content': content, 'blob': blob, 'commit': revision}
 
-    def documents(self):
+    def documents(self, commit=None):
         """List valid Markdown blobs from one synchronized immutable Git tree."""
         with self._locked():
-            self._sync()
-            head = self._ref(self.branch)
+            if commit is None:
+                self._sync()
+                head = self._ref(self.branch)
+            else:
+                head=self._ref(self.branch)
+                if (not isinstance(commit,str) or not re.fullmatch('[0-9a-f]{40}',commit) or not head or
+                        self._git('merge-base',commit,head,check=False).strip()!=commit):
+                    raise ValueError('Search snapshot must belong to this document history')
+                head=commit
             if not head:
                 return {'documents': [], 'commit': None}
             documents = []

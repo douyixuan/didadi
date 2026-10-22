@@ -1,3 +1,4 @@
+import {WorkspaceSearch} from './WorkspaceSearch';
 import {useThread} from './useThread';
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {connect, errorText} from './api';
@@ -231,6 +232,7 @@ export function App({connector=connect}) {
   const documentCreateAttempt=useRef(null),documentCreateLock=useRef(false),documentsSequence=useRef(0);
   const [docMeta,setDocMeta]=useState({title:'Workspace document'}),[search,setSearch]=useState(''),[navOpen,setNavOpen]=useState(false);
   const latestDocMeta=useRef(docMeta);latestDocMeta.current=docMeta;
+  const [searchOpen,setSearchOpen]=useState(false);
   const searchRef=useRef(null);
   const timelineRef=useRef(null);
   const thread=useThread(api,room,filter,()=>{const node=timelineRef.current;if(node)historyScroll.current={height:node.scrollHeight,top:node.scrollTop};});
@@ -248,7 +250,7 @@ export function App({connector=connect}) {
     catch(error){if(sequence!==documentsSequence.current)return;setDocumentsError(errorText(error)+' Document list could not be refreshed; your current document and drafts are kept.');}
   }
   useEffect(()=>{if(api)refreshDocuments();},[api,docMeta.commit]);
-  function openDocument(name){if(documentMoving||documentCreating||docMeta.busy||docMeta.reading||docMeta.composing||docMeta.draftWorking||docMeta.draftUnsafe)return;setRequestedVersion(null);setActiveDocument(name);setMode('read');setNavOpen(false);}
+  function openDocument(name){if(documentMoving||documentCreating||docMeta.busy||docMeta.reading||docMeta.composing||docMeta.draftWorking||docMeta.draftUnsafe)return;setRequestedVersion(null);setActiveDocument(name);setMode('read');setNavOpen(false);return true;}
   async function createDocument(event){event.preventDefault();if(fromMessagesBusy||documentMoving||documentCreateLock.current||!newDocumentName.trim()||docMeta.busy||docMeta.reading||docMeta.composing||docMeta.draftWorking||docMeta.draftUnsafe)return;
     documentCreateLock.current=true;setDocumentCreating(true);setDocumentsError('');const name=newDocumentName;
     if(documentCreateAttempt.current?.name!==name)documentCreateAttempt.current={name,operation:crypto.randomUUID()};
@@ -319,7 +321,7 @@ export function App({connector=connect}) {
   const selected=rooms.find(r=>r.id===room);
   const documentRoom=api.session.documentRoom||api.session.initialRoom||room;
   const displayed=filter&&api?.threadPage?thread.events:events.filter(e=>!filter||e.id===filter||e.content['m.relates_to']?.event_id===filter);
-  return <>{api.session.synthetic&&<div className="preview-banner" role="note">Interactive UI preview · synthetic browser-only data · no Matrix/Git backend or LLM</div>}<div className="workspace"><aside className={'sidebar '+(navOpen?'nav-open':'')}>
+  return <>{searchOpen&&<WorkspaceSearch api={api} room={room} documentRoom={documentRoom} initialQuery={search} onClose={()=>setSearchOpen(false)} onDocument={result=>{if(!openDocument(result.name))return false;setRequestedVersion({commit:result.commit});return true;}} onMessage={result=>{setRoom(result.room);setPanel('discussion');setFilter(result.content['m.relates_to']?.rel_type==='m.thread'?result.content['m.relates_to'].event_id:result.id);return true;}}/>}{api.session.synthetic&&<div className="preview-banner" role="note">Interactive UI preview · synthetic browser-only data · no Matrix/Git backend or LLM</div>}<div className="workspace"><aside className={'sidebar '+(navOpen?'nav-open':'')}>
     <div className="workspace-switch"><span className="workspace-logo"><BookOpen size={19}/></span><strong>Didadi</strong><ChevronDown size={15}/><span className="local-pill">{api.session.synthetic?'Preview':'Local'}</span></div>
     <div className="workspace-search"><Search size={16}/><input ref={searchRef} aria-label="Search workspace" placeholder="Search workspace" value={search} onChange={e=>setSearch(e.target.value)}/></div>
     <div className="nav-section"><div className="section-heading"><span>Documents</span><span className="count">{documentNames.length}</span></div>
@@ -338,7 +340,7 @@ export function App({connector=connect}) {
     </div>
     <div className="sidebar-bottom"><button className="agent-nav" onClick={()=>setPanel('agent')}><Bot size={17}/><span>Example Agent<small>Echo runtime · no LLM</small></span></button><div className="session-note"><span className={'available-dot '+(!online?'offline':'')}/>{online?(api.session.synthetic?'Browser-only preview':'Connected to local workspace'):'Reconnecting to workspace'}</div></div>
   </aside>
-  <main className="main"><header className="workspace-header"><button className="mobile-nav" aria-label="Toggle navigation" onClick={()=>setNavOpen(!navOpen)}><BookOpen size={18}/></button><div className="breadcrumbs"><BookOpen size={15}/><span>Workspace</span><ChevronRight size={13}/><strong>{activeDocument}</strong></div><div className="header-actions"><div className="mode-switch"><button aria-pressed={mode==='read'} onClick={()=>setMode('read')}>Read</button><button aria-pressed={mode==='edit'} onClick={()=>setMode('edit')}>Edit</button></div><span className="header-divider"/><button className={historyOpen?'active':''} aria-label="Version history" onClick={()=>setHistoryOpen(!historyOpen)}><History size={17}/></button><button className={panel==='discussion'?'active':''} onClick={()=>setPanel(panel==='discussion'?null:'discussion')}><MessageSquare size={17}/><span>Discussion</span></button><button className={panel==='agent'?'active':''} onClick={()=>setPanel(panel==='agent'?null:'agent')}><Bot size={17}/><span>Agent</span></button></div></header>
+  <main className="main"><header className="workspace-header"><button className="mobile-nav" aria-label="Toggle navigation" onClick={()=>setNavOpen(!navOpen)}><BookOpen size={18}/></button><div className="breadcrumbs"><BookOpen size={15}/><span>Workspace</span><ChevronRight size={13}/><strong>{activeDocument}</strong></div><div className="header-actions">{api.searchMessages&&api.searchDocuments&&<button aria-label="Open full-text search" onClick={()=>setSearchOpen(true)}><Search size={17}/><span>Search</span></button>}<div className="mode-switch"><button aria-pressed={mode==='read'} onClick={()=>setMode('read')}>Read</button><button aria-pressed={mode==='edit'} onClick={()=>setMode('edit')}>Edit</button></div><span className="header-divider"/><button className={historyOpen?'active':''} aria-label="Version history" onClick={()=>setHistoryOpen(!historyOpen)}><History size={17}/></button><button className={panel==='discussion'?'active':''} onClick={()=>setPanel(panel==='discussion'?null:'discussion')}><MessageSquare size={17}/><span>Discussion</span></button><button className={panel==='agent'?'active':''} onClick={()=>setPanel(panel==='agent'?null:'agent')}><Bot size={17}/><span>Agent</span></button></div></header>
     {api.session.qa&&<div className="qa-banner">Visual regression capture · {api.session.qa} · isolated adapter</div>}
     {roomsError&&<div className="global-error" role="alert">Room list is reconnecting: {roomsError}</div>}
     {error&&<div className="global-error" role="alert"><AlertCircle size={16}/>{error}<button onClick={()=>setError('')} aria-label="Dismiss error"><X size={15}/></button></div>}

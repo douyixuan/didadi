@@ -115,3 +115,11 @@ Open Discussion in the bound workspace room. Select up to 20 messages, enter a n
 View thread fetches its root directly and reads m.thread replies independently of the recent room page. Load earlier thread replies paginates backward in pages of50. The UI preserves Matrix order, deduplicates boundaries and keeps the viewport anchor. Root and page failures have separate retries; a failed earlier page retains its cursor and the composer. Room/root changes hide old snapshots and discard late responses. Refreshes merge overlapping pages; if recent replies create a gap, a notice asks the user to reconnect history through earlier loading.
 
 The local v1 proxy permits only GET for the fixed m.thread/m.room.message relations path in the existing allowed rooms. It forces backward direction/50 and rejects identity overrides. Synthetic adapters without relations keep the explicit loaded-only fallback. The real Matrix smoke creates a root outside the latest50 messages and66 replies across two pages.
+
+## Search message and document bodies
+
+Choose Search in the header. Messages searches content.body through Matrix in the current allowed room, using recent order and20-result pages. It can find historical messages outside the loaded timeline; opening a result fetches that message as a thread root. Pagination errors retain results and retry the same opaque token.
+
+Documents searches regular Markdown bodies in the granted Git document repository. Results include line, excerpt, blob and a fixed reachable commit. Each page scans up to50 files and returns up to20 matching files; an empty page can still have more files. Later pages keep the same Git snapshot even if documents change. Open matched version reads that historical content and preserves draft navigation guards. A file larger than64KiB or with unsupported text encoding is skipped with a visible count. Query text is literal and case-insensitive. The existing sidebar field remains a navigation filter.
+
+The endpoints POST /api/search/messages and POST /api/search/documents retain the current Matrix identity, room allowlist and document-room authorization. They do not search ungranted repositories, attachments or private runtime data. Search responses are rendered as text. No persistent index, production authorization change or paused performance work is introduced.
