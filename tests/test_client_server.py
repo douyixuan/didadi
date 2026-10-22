@@ -205,3 +205,28 @@ class ClientServerTests(unittest.TestCase):
             for method,other,query in [('POST',path,{}),('GET',path,{'user_id':['@other']}),('GET',path.replace('seed','ungranted'),{}),('GET',path.replace('m.thread','m.replace'),{})]:
                 with self.assertRaises(ClientError):self.workspace.thread_relations(method,other,query)
             self.assertEqual(request.call_count,1)
+
+    def test_raw_attachment_upload_and_authenticated_forced_download(self):
+        payload=b'<script>literal bytes</script>\r\n';events={};uploads=[]
+        def attachment_api(method,path,data=None):
+            if path.endswith('/state'):return [{'type':'m.room.member','state_key':'@human:local','content':{'membership':'join'}},{'type':'m.room.power_levels','content':{'users':{'@human:local':0}}}]
+            if '/event/' in path:return events[path.rsplit('/',1)[1].replace('%24','$')]
+            events['$attachment']={'event_id':'$attachment','room_id':'!seed:local','type':'m.room.message','content':data};return {'event_id':'$attachment'}
+        def media(base,method,path,token,content=None,kind=None):
+            if method=='POST':uploads.append(content);return {'content_uri':'mxc://local/media123'}
+            return payload
+        self.workspace.attachments.api=attachment_api;self.workspace.attachments.media=media
+        dist=self.root/'attachment-dist';dist.mkdir();server=ThreadingHTTPServer(('127.0.0.1',0),lambda *args:None);server.RequestHandlerClass=handler(self.workspace,dist,server.server_port);thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start();base=f'http://127.0.0.1:{server.server_port}'
+        operation=str(uuid.uuid4());path='/api/attachments?room=!seed:local&name=page.html&type=text%2Fhtml&operation='+operation;headers={'X-CSRF-Token':self.workspace.csrf,'Content-Type':'text/html'}
+        try:
+            for _ in range(2):
+                with urlopen(Request(base+path,method='POST',headers=headers,data=payload),timeout=5) as response:self.assertEqual(json.load(response)['event_id'],'$attachment')
+            self.assertEqual(uploads,[payload])
+            download=base+'/api/attachments/download?room=!seed:local&event=$attachment'
+            with self.assertRaises(HTTPError) as missing_csrf:urlopen(download,timeout=5)
+            self.assertEqual(missing_csrf.exception.code,403)
+            with urlopen(Request(download,headers={'X-CSRF-Token':self.workspace.csrf}),timeout=5) as response:
+                self.assertEqual(response.read(),payload);self.assertEqual(response.headers['Content-Type'],'application/octet-stream');self.assertTrue(response.headers['Content-Disposition'].startswith('attachment;'));self.assertEqual(response.headers['X-Content-Type-Options'],'nosniff')
+            with self.assertRaises(HTTPError) as forbidden:urlopen(Request(download.replace('!seed:local','!other'),headers={'X-CSRF-Token':self.workspace.csrf}),timeout=5)
+            self.assertEqual(forbidden.exception.code,403)
+        finally:server.shutdown();server.server_close();thread.join(timeout=2)

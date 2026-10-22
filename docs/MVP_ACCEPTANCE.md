@@ -10,8 +10,8 @@
 |---|---|---|
 | 私聊、群组、频道与成员 | client_server固定state.tokens[0]，create_room只创建本地测试私有room；SDK消息真实运行 | 部分实现；无真实登录/注销及成员/私聊/频道产品入口 |
 | 消息历史、引用与话题 | main PR51已含主时间线游标分页；draft55独立relations读取历史root及50回复分页，不依赖已加载数组 | 主时间线已验；draft55真实Matrix/浏览器及精确head CI39411748523/39411776277通过；引用/其他话题入口仍逐项验收 |
-| 附件 | BlockEditor上传器禁用，消息Composer纯文本；无媒体上传/下载产品链路 | 未实现；不能再因Phase0未列而排除原需求 |
-| 搜索 | 候选Matrix content.body搜索及Git Markdown正文/行/固定版本搜索，独立于导航标题过滤 | 已本地真实Matrix/Git/浏览器验证；精确CI待完成；限已授权房间/文档、跳过>64KiB或非UTF8文件，附件/其他资源待做 |
+| 附件 | 候选消息Composer上传m.file并认证下载，5MiB上限，同事务重试 | 本地真实Matrix/浏览器字节一致和响应丢失重试通过；Markdown嵌入、内联图像、远端媒体及加密附件待做 |
+| 搜索 | 候选Matrix content.body搜索及Git Markdown正文/行/固定版本搜索，独立于导航标题过滤 | 已本地真实Matrix/Git/浏览器验证；搜索精确CI39413261124/39413266691通过；限已授权房间/文档、跳过>64KiB或非UTF8文件，附件/其他资源待做 |
 | 多文档创建、打开、move/重命名 | 本轮候选增加真实列表、创建、独立保存/历史/草稿；Agent动作仍限demo.md | draft52/53本地与各自精确head CI均通过；跨路径历史UI尚缺 |
 | 选消息转新文档及来源引用 | 候选from-messages API/UI已实现选ID、服务端取原文、来源链接和确定性Markdown | draft54本地真实Matrix/Git/浏览器及精确head CI39409982536/39410003123通过；当前限绑定房间文本，无LLM |
 | Agent注册、能力、资源授权 | Gateway固定AGENT/单开发token，静态本地source白名单 | 部分实现；注册/授权可能涉及PR41原owner，需协调，不抢做 |
