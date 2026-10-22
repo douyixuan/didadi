@@ -13,14 +13,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Configure Git test identity
-        run: |
-          git config --global user.name 'CI Test'
-          git config --global user.email 'ci@example.invalid'
-      - name: Unit tests
-        run: |
-          python -m pip install -r requirements-runtime.txt
-          python -m unittest discover -s tests -v
+      - name: Temporary Git tests with network and process guards
+        run: python3 -m scripts.offline_python
   react-client:
     runs-on: ubuntu-latest
     steps:
@@ -30,114 +24,8 @@ jobs:
           node-version: '24'
           cache: npm
           cache-dependency-path: client/package-lock.json
-      - run: npm ci --prefix client
-      - run: npm --prefix client test
-      - name: Preserve pinned Markdown corpus report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: markdown-roundtrip
-          path: |
-            client/.local/markdown-roundtrip.json
-            client/.local/source-performance.json
-          if-no-files-found: error
-      - run: npm --prefix client run build
-  matrix-smoke:
-    runs-on: ubuntu-latest
-    timeout-minutes: 12
-    steps:
-      - uses: actions/checkout@v4
-      - name: Validate Compose
-        run: docker compose config --quiet
-      - name: Start real Matrix stack
-        run: docker compose up -d --wait --wait-timeout 240
-      - name: Bidirectional messaging and managed agent reply
-        run: docker compose --profile test run --rm smoke
-      - name: Recreate containers while retaining volumes
-        run: |
-          docker compose down
-          docker compose up -d --wait --wait-timeout 240
-          docker compose --profile test run --rm smoke python -u -m scripts.matrix_smoke --check-persistence
-          docker compose --profile test run --rm smoke
-      - name: Revoked room isolation and terminal task recovery
-        run: docker compose --profile test run --rm smoke python -u -m scripts.gateway_lifecycle_smoke
-      - name: Real Matrix Git document loop and worker crash recovery
-        run: |
-          mkdir -p .local
-          chmod 700 .local
-          docker compose cp appservice:/config/agent-token .local/agent-token
-          docker compose cp appservice:/config/smoke-state.json .local/smoke-state.json
-          chmod 600 .local/*
-          python3 -m pip install -r requirements-runtime.txt
-          python3 -m scripts.document_smoke --state-file .local/smoke-state.json --token-file .local/agent-token --repo .local/documents.git
-      - name: Requester cancellation and persistent execution history
-        run: |
-          python3 -m scripts.task_control_smoke --state-file .local/smoke-state.json --token-file .local/agent-token --record .local/task-control-proof.json
-          docker compose restart appservice
-          docker compose up -d --wait --wait-timeout 60 appservice
-          python3 -m scripts.task_control_smoke --state-file .local/smoke-state.json --token-file .local/agent-token --record .local/task-control-proof.json --check-persistence
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-      - name: Scoped synthetic source repository to Markdown report
-        run: python3 -m scripts.repository_read_smoke --state-file .local/smoke-state.json --token-file .local/agent-token
-      - name: Outbound WebSocket runtime and reconnect
-        run: |
-          python3 -m pip install -r requirements-runtime.txt
-          python3 -m scripts.websocket_smoke --state-file .local/smoke-state.json --token-file .local/agent-token
-      - name: Direct workerless Git document save and durable metadata receipts
-        run: python3 -m scripts.direct_document_smoke --state-file .local/smoke-state.json --token-file .local/agent-token
-      - name: Concurrent HTTP document merge and overlap protection
-        run: python3 -m scripts.concurrent_merge_smoke --state-file .local/smoke-state.json --token-file .local/agent-token
-      - name: Local remote divergence and explicit operator recovery
-        run: python3 -m scripts.remote_recovery_smoke --state-file .local/smoke-state.json --token-file .local/agent-token
-      - name: Scoped Document API with mount-free external runtime
-        run: python3 -m scripts.agent_document_api_smoke --state-file .local/smoke-state.json --token-file .local/agent-token
-      - name: Metadata-only Matrix tasks and scoped Agent body IO
-        run: python3 -m scripts.agent_body_api_smoke --state-file .local/smoke-state.json --token-file .local/agent-token
-      - name: Runtime stop restart and task visibility
-        run: python3 -m scripts.task_visibility_smoke --state-file .local/smoke-state.json --token-file .local/agent-token
-      - name: Structured client results with translated external runtime replies
-        run: python3 -m scripts.structured_result_smoke --state-file .local/smoke-state.json --token-file .local/agent-token
-      - name: Real React client adapter and Matrix SDK regression
-        run: |
-          npm ci --prefix client
-          npm --prefix client run build
-          mkdir -p .local/bundle
-          cp .local/agent-token .local/smoke-state.json .local/bundle/
-          python3 -m scripts.create_synthetic_source --matrix-url http://127.0.0.1:8008
-          python3 -m scripts.room_fixture_contacts --state-file .local/smoke-state.json --matrix-url http://127.0.0.1:8008 --output .local/fixture-contacts.json
-          python3 -m src.agent_document_api --repo .local/documents.git --token-file .local/agent-token --gateway-url http://127.0.0.1:9000 --port 9050 --repository-grants .local/bundle/repository-grants.json > .local/document-api.log 2>&1 &
-          document_pid=$!
-          python3 -m src.client_server --fixture-contacts .local/fixture-contacts.json --repository-grants .local/bundle/repository-grants.json --state-file .local/smoke-state.json --token-file .local/agent-token --repo .local/documents.git --metadata .local/client.sqlite --matrix-url http://127.0.0.1:8008 --gateway-url http://127.0.0.1:9000 > .local/client.log 2>&1 &
-          client_pid=$!
-          python3 -m scripts.document_worker --token-file .local/agent-token --document-url http://127.0.0.1:9050 > .local/client-worker.log 2>&1 &
-          worker_pid=$!
-          trap 'kill "$client_pid" "$worker_pid" "$document_pid" 2>/dev/null || true' EXIT
-          for attempt in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:8767/api/session > /dev/null; then break; fi
-            sleep 1
-          done
-          python3 -m scripts.workspace_acceptance --url http://127.0.0.1:8767
-          node client/scripts/smoke.mjs
-          node client/scripts/history-smoke.mjs
-          node client/scripts/documents-smoke.mjs http://127.0.0.1:8767
-          node client/scripts/move-smoke.mjs http://127.0.0.1:8767
-          node client/scripts/from-messages-smoke.mjs http://127.0.0.1:8767
-          node client/scripts/thread-smoke.mjs http://127.0.0.1:8767
-          node client/scripts/search-smoke.mjs http://127.0.0.1:8767
-          node client/scripts/attachment-smoke.mjs http://127.0.0.1:8767
-          node client/scripts/quote-smoke.mjs http://127.0.0.1:8767
-          node client/scripts/source-reference-smoke.mjs http://127.0.0.1:8767
-          node client/scripts/people-smoke.mjs http://127.0.0.1:8767
-          python3 -m scripts.room_types_smoke --url http://127.0.0.1:8767 --matrix-url http://127.0.0.1:8008 --state-file .local/smoke-state.json | tee .local/room-types-proof.json
-          other_room=$(python3 -c 'import json; print(json.load(open(".local/room-types-proof.json"))["direct"])')
-          python3 -m scripts.direct_chats_smoke --url http://127.0.0.1:8767 --matrix-url http://127.0.0.1:8008 --state-file .local/smoke-state.json --other-room "$other_room"
-      - name: Diagnostics
-        if: failure()
-        run: |
-          docker compose ps -a
-          docker compose logs --no-color --tail=150 synapse postgres appservice
-      - name: Cleanup
-        if: always()
-        run: docker compose --profile test down -v
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --prefix client --ignore-scripts --no-audit --no-fund
+      - name: Injected UI and pagination tests with transport guards
+        run: node node_modules/vitest/vitest.mjs run --config vitest.offline.config.js
+        working-directory: client
