@@ -39,6 +39,7 @@ def main():
             'test_thread_relations_are_room_scoped_and_never_allow_identity_or_limit_overrides',
         ):
             suite.addTests(unittest.defaultTestLoader.loadTestsFromName('test_client_server.ClientServerTests.' + name))
+        suite.addTests(unittest.defaultTestLoader.loadTestsFromName('test_session_contract.SessionContractTests'))
         return 0 if unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful() else 1
 
 

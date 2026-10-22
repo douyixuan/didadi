@@ -47,3 +47,9 @@ Real loopback preview 8834 uses its own Git repository and metadata. documents-s
 
 
 独立审核发现并修复两项上下文问题：408超时保留原文件/线程/operation的不确定重试；文件下载在卸载、切房、换API或换事件后丢弃迟到结果与错误，旧请求不能释放新请求的锁，也不能触发离开界面后的下载。仅作用于既有附件流程，不增加存储、权限或任意URL能力。离线guard涵盖附件服务和纯注入组件测试：主执行Python30/30、前端104/104与构建通过。真实Matrix媒体上传、撤权时序和浏览器文件下载未运行，不视为真实验收。
+
+### 既有PR依赖链合入复核（2026-10-22）
+
+按照新的明确合入授权，先完成ROADMAP PR66，再依序审核PR52–64；使用独立review工作树，未推送或混入未读3080c8f、进度a4cc1a00、产物0847411、集成46d07799或移动UI11d9391候选。PR41与Issue12不在本轮范围。旧分支默认Matrix/HTTP smoke、npm lifecycle与分支名条件均未带回；`.github/workflows`保持安全main定义不变。所有实际合入均使用普通merge及预期head校验，不绕过保护。各PR准确head与合入main的CI链接保留在GitHub Actions，TLS查询失败仅重试只读查询，不重复写入或触发CI。
+
+最终PR64合入前本地guard：Python62/62，前端144/144（16文件），构建通过。Python只运行临时Git、假Matrix/媒体适配、进程内代理、临时SQLite和纯内存SessionContract类；HTTP fixture类明确排除，传输及非临时Git子进程守卫保持启用。独立分组审核发现的附件408冻结重试及迟到下载问题已修并复审通过。纯虚构会话与真实身份认证分离；没有执行真实登录、注册、注销、媒体服务或真实数据迁移。历史PR说明中的真实验收不等于本轮重新验收，ROADMAP不据离线结果提前打钩。
