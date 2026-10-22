@@ -54,6 +54,54 @@ class DocumentService:
             raise DocumentError(400, 'Expected room, operation, content and name.')
         return self.save({key: data[key] for key in ('room', 'operation', 'content')} | {'base_blob': None}, data['name'], create=True)
 
+    def from_messages(self, data):
+        if not isinstance(data, dict) or set(data) != {'room', 'operation', 'name', 'events'}:
+            raise DocumentError(400, 'Expected room, operation, name and selected event IDs.')
+        self.store._name(data['name'])
+        try:
+            valid_operation=isinstance(data['operation'],str) and str(uuid.UUID(data['operation']))==data['operation']
+        except ValueError:
+            valid_operation=False
+        events=data['events']
+        if (not valid_operation or not isinstance(events,list) or not 1<=len(events)<=20 or
+                any(not isinstance(event,str) or not event.startswith('$') or len(event)>512 or
+                    any(ord(character)<33 for character in event) for event in events) or
+                len(set(events))!=len(events)):
+            raise DocumentError(400, 'Select 1 to 20 distinct message IDs and use a UUID operation.')
+        self.authorize(data['room'],write=True)
+        sections=['# Selected messages\n\nExplicitly selected discussion messages. No generated summary.\n']
+        for index,event_id in enumerate(events,1):
+            try:
+                event=self.api('GET','/rooms/'+segment(self.room)+'/event/'+segment(event_id))
+            except MatrixError as error:
+                status=403 if error.status==403 else 400 if error.status==404 else 503
+                raise DocumentError(status,'Source messages are unavailable. No new write was performed; an earlier attempt may already have created the document. Check the document list.') from None
+            content=event.get('content',{}) if isinstance(event,dict) else {}
+            body=content.get('body') if isinstance(content,dict) else None
+            sender=event.get('sender') if isinstance(event,dict) else None
+            if (not isinstance(event,dict) or event.get('event_id')!=event_id or
+                    event.get('room_id',self.room)!=self.room or event.get('type')!='m.room.message' or
+                    not isinstance(content,dict) or content.get('msgtype') not in {'m.text','m.notice','m.emote'} or
+                    not isinstance(body,str) or not isinstance(sender,str) or not 0<len(sender)<=512 or
+                    not sender.startswith('@') or any(ord(character)<33 for character in sender)):
+                raise DocumentError(400,'Select available plain-text messages. Redacted or unsupported events cannot be copied.')
+            fence='`'*max(3,1+max((len(match.group()) for match in re.finditer(r'`+',body)),default=0))
+            escaped_sender=re.sub(r'([\\`*_{}\[\]()#+.!>|-])',r'\\\1',sender)
+            timestamp=event.get('origin_server_ts')
+            stamp=str(timestamp) if type(timestamp) is int and timestamp>=0 else 'Unknown'
+            url='https://matrix.to/#/'+segment(self.room)+'/'+segment(event_id)
+            sections.append('## Message '+str(index)+'\n\n[Open source message]('+url+')\n\nSender: '+escaped_sender+
+                            '\n\nTimestamp (Unix ms): '+stamp+'\n\n'+fence+'text\n'+body+
+                            ('' if body.endswith('\n') else '\n')+fence+'\n')
+        text='\n'.join(sections)
+        try:
+            size=len(text.encode('utf-8'))
+        except UnicodeError:
+            raise DocumentError(400,'Selected text is not valid UTF-8.') from None
+        if size>65536:
+            raise DocumentError(400,'Selected messages and provenance exceed 64 KiB. Select fewer messages.')
+        return self.create({'room':data['room'],'name':data['name'],'operation':data['operation'],'content':text})
+
     def move(self, data):
         if not isinstance(data, dict) or set(data) != {'room', 'operation', 'source', 'name', 'base_blob'}:
             raise DocumentError(400, 'Expected room, operation, source, name and base_blob.')
