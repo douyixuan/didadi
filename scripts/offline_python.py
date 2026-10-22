@@ -30,6 +30,15 @@ def main():
         suite = unittest.TestSuite()
         for name in FILES:
             suite.addTests(unittest.defaultTestLoader.discover(str(ROOT / 'tests'), pattern=name))
+        # Only in-process proxy checks; HTTP server fixtures remain out of this suite.
+        for name in (
+            'test_only_explicit_rooms_routes_and_identity_are_proxied',
+            'test_platform_matrix_proxy_rejects_document_bodies_before_send',
+            'test_quote_and_thread_references_are_validated_before_send',
+            'test_only_requester_in_granted_room_can_cancel',
+            'test_thread_relations_are_room_scoped_and_never_allow_identity_or_limit_overrides',
+        ):
+            suite.addTests(unittest.defaultTestLoader.loadTestsFromName('test_client_server.ClientServerTests.' + name))
         return 0 if unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful() else 1
 
 
