@@ -33,7 +33,7 @@ const historical=await api('/api/document?room='+encodeURIComponent(room)+'&comm
 const stale=await saveDocument('stale SDK request',original.blob,crypto.randomUUID());assert.equal(stale.status,409);assert.equal(stale.value.status,'conflict');
 assert.equal((await api('/api/document?room='+encodeURIComponent(room))).commit,latest.commit);
 const created=await api('/api/rooms',{name:'Client smoke '+nonce.slice(0,6),operation:nonce});
-assert.equal((await api('/api/rooms',{name:'Client smoke',operation:nonce})).room_id,created.room_id);
+assert.equal((await api('/api/rooms',{name:'Client smoke '+nonce.slice(0,6),operation:nonce})).room_id,created.room_id);
 assert.ok((await sdk.getJoinedRooms()).joined_rooms.includes(created.room_id));
 console.log('PASS adapter Git save/history/conflict and idempotent real private room creation');
 sdk.stopClient();
