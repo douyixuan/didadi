@@ -28,35 +28,11 @@ Before the final pagination integration, 143 Python tests and 135 frontend tests
 
 Real loopback preview 8834 uses its own Git repository and metadata. documents-smoke.mjs passed create/retry/list/two-file save isolation/fixed history/duplicate rejection/invalid paths. Isolated headless installed Chrome passed A unsaved draft, B direct Git save, A restoration/save, independent Git contents and reopening after reload. Evidence stays under .local/multi-documents; no physical IME or drag acceptance is claimed. An independent reviewer found and rechecked a delayed-create navigation race; the added latest-state check keeps the current editor mounted when it becomes unsafe to leave.
 
-## 2026-10-20 Atomic move/rename candidate
 
-Separate worktree didadi-document-move, based on draft52/head80c0ff1. Same bound-room authorization, metadata-only Matrix receipt and private operation intent recovery. The source removal and destination insertion share one private index/main CAS; request hashes bind the source path. The source blob must still match and the destination must not exist. A repeated request resolves its original operation before checking the removed source. Existing write hashes and legacy compatibility remain unchanged.
-
-147 full Python tests and 138 frontend tests/build passed before adding the recovery-draft navigation guard. Final targeted backend/HTTP tests23 passed, covering actual route retry, source removal, target bytes, cross-room denial, competing moves and publication failure recovery. Final App recovery guard regression/build results are recorded in the PR. The first targeted move test found bare Git force-remove requires a worktree; switched to index-info deletion, then12service tests passed. No disk checkout is used.
-
-Real preview8836, separate bare Git and metadata: protocol smoke proved CRLF-exact content/blob, historical original-path reads, idempotent move, stale-source rejection. Installed isolated headless Chrome proved actual Move form, same content at destination, source disappearance and reload/reopen. Screenshot/proof under .local/move. Reviewer found no blocking static issue. Prior paths remain readable by fixed commit; current UI history does not follow renames. Pending recovery drafts block moving, avoiding hiding their recovery entry. Case-only name collisions remain explicitly rejected.
-
-## 2026-10-20 Selected messages to document candidate
-
-Independent didadi-messages-to-document worktree, initially based53/b723651. API accepts only room/name/events/operation, checks existing bound-room write access, fetches each canonical Matrix event and validates ID/room/type/text. It generates deterministic literal fenced text and source links, no LLM. One to20 distinct IDs, all sources available, final64KiB; invalid sets leave no partial document. Existing create operation/receipt rules prevent duplicate or overwrite.
-
-150 full Python and141 full frontend/build passed; final HTTP/service assertions added for canonical source, route retry and spoofed-body rejection. Actual loopback8838 protocol passed real two-event Matrix→Git, source URLs, unchanged canonical text, safe long fences, same-UUID retry, client-body/cross-room rejection and no partial file after missing source. Existing isolated headless Chrome selected two actual checkboxes, created the document, showed two links and verified canonical Git bytes, without executing literal HTML. Screenshot/proof under.local/from-messages. UI retries fixed selection/name/UUID and keeps current dirty drafts mounted. Independent static review found no blockers; corrected unavailable-source wording to avoid denying a possible earlier committed attempt. Source redaction after an uncertain save may block re-reading; inspect the file list, do not imply no previous document exists. Plain text/bound-room scope only.
-
-Move candidate headb723651 first pushCI39408902567 failed one frontend fixture (138/139 passed); backend and real Matrix jobs passed. The create/list-failure fixture clicked demo.md while the control was still intentionally disabled by document/draft loading. Added an explicit enabled-state wait before navigation; targeted66 App tests passed. This is a test synchronization fix, not a product navigation bypass. New exact-head CI remains required.
-
-## 完整线程候选（2026-10-20）
-
-SDK relations独立取root+50回复，现有白名单固定v1 GET，无身份覆盖或授权设计扩张。完整145前端/build、最终75定向/10HTTP通过；新增初始空线程后新页游标回归。151完整Python结果另见候选PR。真实Matrix root在recent50之外、66回复两页/同cursor重试/流序去重通过。隔离已安装Chrome验证67条root+replies、注入root/older失败后重试、原cursor、compose保留、scroll top2697/height11371/view398、切房间隐藏旧thread。浏览器首轮选择器错误导致超时，修正ownedDOM选择器后通过；未为此修改产品。Review静态无阻断，已按建议将Complete thread改为Thread history避免把未加载页说成已加载。证据.local/threads，未验物理IME/拖拽。
-
-## 正文搜索候选（2026-10-20）
-
-155完整Python/151完整前端/build通过，4搜索service及25定向后端通过。真实8842/Matrix查到24条已超recent50的正文命中、两页取回；Git21份文件名无查询词、正文第3行命中，20+1分页同snapshot，未授权房间拒绝。隔离已安装Chrome完成24消息分页并打开历史thread；文档第一页后将第21份当前内容改写，注入一次分页503后同query/cursor/commit重试保留20结果，最终21结果并打开旧匹配版本；当前Git仍是新内容。证据.local/search/protocol.log/browser-proof.json/results.png/preview.png。首次protocol请求早于server启动ECONNREFUSED已保留protocol-startup-race.log，确认监听后重跑成功。Reviewer静态无阻断。最后补房间类型400验证；精确提交CI仍需观察。
+### PR52安全合入复核（2026-10-22）
 
 
-## Message attachments candidate (2026-10-20)
 
-The message composer uploads a file of up to 5 MiB as m.file. The server uses the current Matrix identity and checks joined, unencrypted room access and message power levels. Downloads require a canonical file event in an allowed room and a CSRF token. Only local-homeserver media is accepted. Downloads use attachment disposition, application/octet-stream and nosniff. No remote redirects or inline HTML rendering are allowed.
 
-An uncertain send keeps the original bytes, operation UUID and thread root. A retry reuses the cached media URI and Matrix message transaction. Losing an upload response before the URI is recorded can leave an orphan media object; exactly-once media storage is not claimed. Markdown embedding, inline images, encrypted files and remote media remain pending.
 
-161 full Python tests and 155 frontend tests plus build passed. Final targeted76 frontend tests/build passed after the file-message selection guard. Actual Matrix protocol proved byte-exact download, one message on retry, conflicting bytes409 and ungranted room403. Isolated installed Chrome used the real file input, injected a lost response after server commit, retried the same operation/root, downloaded57 exact bytes and did not execute HTML. Evidence: .local/attachments/protocol.log, browser-proof.json and preview.png. CI runs attachment-smoke.mjs; final commit CI must be checked separately.
+本次仅整理已发布PR的依赖与安全CI，未夹带本地未读、Runtime进度、任务产物或移动UI候选。保留main默认离线工作流及单独显式真实验收入口；命名文档增量经独立静态复审未见新阻断。离线guard增加DocumentService纯临时Git/假Matrix测试和文档引用、草稿、结果投影界面测试。WebSocket可选依赖延迟至实际bridge启动时导入，参数及权限规则不变；非普通Git模式测试直接重开合成Git索引，避免把远端传输混入文件模式检查。主执行离线Python14/14、前端82/82及构建通过。真实Matrix、认证、外部runtime、浏览器及远端Git验收未运行，不因此打勾。
