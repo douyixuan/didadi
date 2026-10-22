@@ -127,6 +127,15 @@ class ClientServerTests(unittest.TestCase):
             self.assertEqual(caught.exception.code, 403)
             self.assertEqual(self.workspace.docs.read('Good.md'), '# Good')
             self.assertIsNone(self.workspace.docs.read('Other.md'))
+            move={'room':'!seed:local','source':'Good.md','name':'Archive/Moved.md','base_blob':first['blob'],'operation':str(uuid.uuid4())}
+            moved=fetch('/api/documents/move','POST',move)
+            self.assertEqual(moved['blob'],first['blob'])
+            self.assertEqual(fetch('/api/documents/move','POST',move)['commit'],moved['commit'])
+            self.assertIsNone(self.workspace.docs.read('Good.md'))
+            self.assertEqual(self.workspace.docs.read('Archive/Moved.md'),'# Good')
+            with self.assertRaises(HTTPError) as forbidden_move:
+                fetch('/api/documents/move','POST',{**move,'source':'Archive/Moved.md','name':'Other.md','room':'!other:local','operation':str(uuid.uuid4())})
+            self.assertEqual(forbidden_move.exception.code,403)
         finally:
             server.shutdown()
             server.server_close()

@@ -49,13 +49,14 @@ export function Documents(props){
   return <DocumentWorkspace key={context||'unknown'} {...props} localContext={context}/>;
 }
 
-function DocumentWorkspace({localContext,api,room,onSent,name='demo.md',mode='read',setMode=()=>{},historyOpen=false,onCloseHistory=()=>{},onMeta=()=>{},requestedVersion=null,onDiscussVersion=()=>{},canDiscussVersion=false}) {
+function DocumentWorkspace({localContext,api,room,onSent,name='demo.md',externalBusy=false,mode='read',setMode=()=>{},historyOpen=false,onCloseHistory=()=>{},onMeta=()=>{},requestedVersion=null,onDiscussVersion=()=>{},canDiscussVersion=false}) {
   const localDrafts=useLocalDrafts(localContext);
   useEffect(()=>{localDrafts.refresh();},[localContext]);
   const [draftTransition,setDraftTransition]=useState(false),transitionLock=useRef(false);
   const [draftBase,setDraftBase]=useState(undefined),recoveryBase=useRef(null);
   const [snapshot,setSnapshot]=useState(null),[draft,setDraft]=useState(''),[history,setHistory]=useState([]);
-  const [error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[historical,setHistorical]=useState(false),[readRetry,setReadRetry]=useState(null);
+  const [error,setError]=useState(''),[notice,setNotice]=useState(''),[operationBusy,setBusy]=useState(false),[historical,setHistorical]=useState(false),[readRetry,setReadRetry]=useState(null);
+  const busy=operationBusy||externalBusy;
   const [pending,setPending]=useState(null),[taskProgress,setTaskProgress]=useState(null),[taskPollError,setTaskPollError]=useState(''),[conflict,setConflict]=useState(false),[recoveryDraft,setRecoveryDraft]=useState(null);
   const [sourceChoice,setSourceChoice]=useState(''),[mergeConflict,setMergeConflict]=useState(null),[remoteRecovery,setRemoteRecovery]=useState(null);
   const directRequest=useRef(null);const [directUncertain,setDirectUncertain]=useState(false);
@@ -71,7 +72,7 @@ function DocumentWorkspace({localContext,api,room,onSent,name='demo.md',mode='re
   useEffect(()=>setComposing(false),[mode,editorRevision]);
   const presentation=useMemo(()=>readMarkdown(draft),[draft]);
   const title=snapshot?(presentation.title||name):name;
-  useEffect(()=>onMeta({title,commit:snapshot?.commit,reading,composing,dirty:Boolean(snapshot&&draft!==(snapshot.content||'')),busy:busy||directUncertain||draftTransition,draftWorking:localDrafts.working,draftUnsafe:Boolean(snapshot&&draft!==(snapshot.content||'')&&localDrafts.warning),historical}),[title,draft,snapshot,busy,directUncertain,draftTransition,historical,reading,composing,localDrafts.working,localDrafts.warning]);
+  useEffect(()=>onMeta({title,commit:snapshot?.commit,blob:snapshot?.blob,recoveryPending:Boolean(localDrafts.warning||localDrafts.records.length||recoveryDraft!==null),reading,composing,dirty:Boolean(snapshot&&draft!==(snapshot.content||'')),busy:busy||directUncertain||draftTransition,draftWorking:localDrafts.working,draftUnsafe:Boolean(snapshot&&draft!==(snapshot.content||'')&&localDrafts.warning),historical}),[title,draft,snapshot,busy,directUncertain,draftTransition,historical,reading,composing,localDrafts.working,localDrafts.warning,localDrafts.records,recoveryDraft]);
   const roomRef=useRef(room);roomRef.current=room;
   async function load(commit, preserveDraft=false) {
     if(directRequest.current||transitionLock.current)return;
@@ -107,7 +108,7 @@ function DocumentWorkspace({localContext,api,room,onSent,name='demo.md',mode='re
     check();const timer=setInterval(check,1200);return()=>{cancelled=true;clearInterval(timer)};
   },[pending,api]);
   async function saveDirect(retry=false){
-    if(transitionLock.current||(directUncertain&&!retry))return;
+    if(externalBusy||transitionLock.current||(directUncertain&&!retry))return;
     const latest=directRequest.current?.content??(mode==='edit'?(editor.current?.markdown()??draft):draft);
     if(lock.current||reading||unresolvedResult||!snapshot||snapshot.writable===false||composing)return;
     if(new TextEncoder().encode(latest).length>65536){lastCommand.current={action:'write',repository:null};setReadRetry(null);setConflict(false);setError('Document text must contain at most 64 KiB of UTF-8. Your draft is kept.');return;}
@@ -221,6 +222,8 @@ export function App({connector=connect}) {
   const [tasks,setTasks]=useState([]),[newName,setNewName]=useState(''),[creating,setCreating]=useState(false),[online,setOnline]=useState(false);
   const [panel,setPanel]=useState(null),[mode,setMode]=useState('read'),[historyOpen,setHistoryOpen]=useState(false),[requestedVersion,setRequestedVersion]=useState(null);
   const [documentNames,setDocumentNames]=useState([{name:'demo.md'}]),[activeDocument,setActiveDocument]=useState('demo.md'),[newDocumentName,setNewDocumentName]=useState(''),[documentCreating,setDocumentCreating]=useState(false),[documentsError,setDocumentsError]=useState('');
+  const [moveName,setMoveName]=useState(''),[documentMoving,setDocumentMoving]=useState(false),[moveError,setMoveError]=useState('');
+  const moveAttempt=useRef(null),moveLock=useRef(false);
   const documentCreateAttempt=useRef(null),documentCreateLock=useRef(false),documentsSequence=useRef(0);
   const [docMeta,setDocMeta]=useState({title:'Workspace document'}),[search,setSearch]=useState(''),[navOpen,setNavOpen]=useState(false);
   const latestDocMeta=useRef(docMeta);latestDocMeta.current=docMeta;
@@ -240,13 +243,21 @@ export function App({connector=connect}) {
     catch(error){if(sequence!==documentsSequence.current)return;setDocumentsError(errorText(error)+' Document list could not be refreshed; your current document and drafts are kept.');}
   }
   useEffect(()=>{if(api)refreshDocuments();},[api,docMeta.commit]);
-  function openDocument(name){if(documentCreating||docMeta.busy||docMeta.reading||docMeta.composing||docMeta.draftWorking||docMeta.draftUnsafe)return;setRequestedVersion(null);setActiveDocument(name);setMode('read');setNavOpen(false);}
-  async function createDocument(event){event.preventDefault();if(documentCreateLock.current||!newDocumentName.trim()||docMeta.busy||docMeta.reading||docMeta.composing||docMeta.draftWorking||docMeta.draftUnsafe)return;
+  function openDocument(name){if(documentMoving||documentCreating||docMeta.busy||docMeta.reading||docMeta.composing||docMeta.draftWorking||docMeta.draftUnsafe)return;setRequestedVersion(null);setActiveDocument(name);setMode('read');setNavOpen(false);}
+  async function createDocument(event){event.preventDefault();if(documentMoving||documentCreateLock.current||!newDocumentName.trim()||docMeta.busy||docMeta.reading||docMeta.composing||docMeta.draftWorking||docMeta.draftUnsafe)return;
     documentCreateLock.current=true;setDocumentCreating(true);setDocumentsError('');const name=newDocumentName;
     if(documentCreateAttempt.current?.name!==name)documentCreateAttempt.current={name,operation:crypto.randomUUID()};
     try{const created=await api.createDocument(api.session.documentRoom||api.session.initialRoom,name,documentCreateAttempt.current.operation);if(created.status!=='saved'||created.path!==name||!/^[a-f0-9]{40}$/.test(created.commit))throw new Error('Document creation is unconfirmed. Retry the same request.');await refreshDocuments();setDocumentNames(old=>old.some(item=>item.name===name)?old:[...old,{name,blob:created.blob,commit:created.commit}]);setNewDocumentName('');documentCreateAttempt.current=null;const current=latestDocMeta.current;if(current.busy||current.reading||current.composing||current.draftWorking||current.draftUnsafe||current.dirty){setDocumentsError('Document created. Finish or export your current edits before opening it from the list.');return;}setRequestedVersion(null);setActiveDocument(name);setMode('edit');}
     catch(error){setDocumentsError(errorText(error)+' The requested document name is kept. Retry the same request or open an existing document.');}
     finally{documentCreateLock.current=false;setDocumentCreating(false);}
+  }
+  async function moveDocument(event){event.preventDefault();if(moveLock.current||!moveName.trim())return;
+    if(!moveAttempt.current&&(documentCreating||docMeta.busy||docMeta.reading||docMeta.composing||docMeta.draftWorking||docMeta.dirty||docMeta.recoveryPending||docMeta.historical||!docMeta.blob))return;
+    if(!moveAttempt.current)moveAttempt.current={source:activeDocument,name:moveName,base_blob:docMeta.blob,operation:crypto.randomUUID()};
+    const attempt=moveAttempt.current;moveLock.current=true;setDocumentMoving(true);setMoveError('');
+    try{const moved=await api.moveDocument(documentRoom,attempt);if(moved.status!=='saved'||moved.path!==attempt.name||moved.blob!==attempt.base_blob||!/^[a-f0-9]{40}$/.test(moved.commit))throw new Error('Move result is unconfirmed. Retry the same request.');await refreshDocuments();setDocumentNames(old=>[...old.filter(item=>item.name!==attempt.source&&item.name!==attempt.name),{name:attempt.name,blob:moved.blob,commit:moved.commit}]);setRequestedVersion(null);setActiveDocument(attempt.name);setMode('read');setMoveName('');moveAttempt.current=null;setDocumentMoving(false);}
+    catch(error){if(error.status>=400&&error.status<500){moveAttempt.current=null;setDocumentMoving(false);}setMoveError(errorText(error)+' Keep this page open. Retry the same move to confirm its result.');}
+    finally{moveLock.current=false;}
   }
   async function refreshRooms(){if(roomsRefreshing.current)return;roomsRefreshing.current=true;try{const list=await api.rooms();setRooms(list);roomsFailed.current=false;setRoomsError('');}catch(e){roomsFailed.current=true;setRoomsError(errorText(e));}finally{roomsRefreshing.current=false;}}
   useEffect(()=>{if(!api||!room)return;let stopped=false,inFlight=false,initialized=false,olderBusy=false,revision=0,current=[],cursor=null;
@@ -301,9 +312,12 @@ export function App({connector=connect}) {
     <div className="workspace-search"><Search size={16}/><input ref={searchRef} aria-label="Search workspace" placeholder="Search workspace" value={search} onChange={e=>setSearch(e.target.value)}/></div>
     <div className="nav-section"><div className="section-heading"><span>Documents</span><span className="count">{documentNames.length}</span></div>
       <button className="tree-collection" onClick={()=>{setMode('read');setNavOpen(false)}}><ChevronDown size={14}/><BookOpen size={16}/><span>Workspace</span></button>
-      {documentNames.filter(item=>!search||item.name.toLowerCase().includes(search.toLowerCase())||(item.name===activeDocument&&docMeta.title.toLowerCase().includes(search.toLowerCase()))).map(item=><button key={item.name} className={'document-tree-item '+(item.name===activeDocument?'selected':'')} aria-current={item.name===activeDocument?'page':undefined} aria-label={item.name+(item.name===activeDocument?', current document':'')} title={item.name===activeDocument?docMeta.title:item.name} disabled={documentCreating||docMeta.busy||docMeta.reading||docMeta.composing||docMeta.draftWorking||docMeta.draftUnsafe} onClick={()=>openDocument(item.name)}><FileText size={16}/><span className="document-identity"><strong>{item.name}</strong>{item.name===activeDocument&&<small>{docMeta.dirty?'Draft title: ':'Title: '}{docMeta.title}</small>}</span></button>)}
+      {documentNames.filter(item=>!search||item.name.toLowerCase().includes(search.toLowerCase())||(item.name===activeDocument&&docMeta.title.toLowerCase().includes(search.toLowerCase()))).map(item=><button key={item.name} className={'document-tree-item '+(item.name===activeDocument?'selected':'')} aria-current={item.name===activeDocument?'page':undefined} aria-label={item.name+(item.name===activeDocument?', current document':'')} title={item.name===activeDocument?docMeta.title:item.name} disabled={documentMoving||documentCreating||docMeta.busy||docMeta.reading||docMeta.composing||docMeta.draftWorking||docMeta.draftUnsafe} onClick={()=>openDocument(item.name)}><FileText size={16}/><span className="document-identity"><strong>{item.name}</strong>{item.name===activeDocument&&<small>{docMeta.dirty?'Draft title: ':'Title: '}{docMeta.title}</small>}</span></button>)}
       {search&&!documentNames.some(item=>item.name.toLowerCase().includes(search.toLowerCase())||(item.name===activeDocument&&docMeta.title.toLowerCase().includes(search.toLowerCase())))&&<p className="nav-empty">No matching document</p>}
-      {api.createDocument&&<form className="new-room" onSubmit={createDocument}><input aria-label="New document path" value={newDocumentName} onChange={event=>setNewDocumentName(event.target.value)} placeholder="New document.md" disabled={documentCreating||docMeta.busy||docMeta.reading||docMeta.composing||docMeta.draftWorking||docMeta.draftUnsafe}/><button aria-label="Create document" disabled={documentCreating||!newDocumentName.trim()||docMeta.busy||docMeta.reading||docMeta.composing||docMeta.draftWorking||docMeta.draftUnsafe}><Plus size={16}/></button></form>}
+      {api.createDocument&&<form className="new-room" onSubmit={createDocument}><input aria-label="New document path" value={newDocumentName} onChange={event=>setNewDocumentName(event.target.value)} placeholder="New document.md" disabled={documentMoving||documentCreating||docMeta.busy||docMeta.reading||docMeta.composing||docMeta.draftWorking||docMeta.draftUnsafe}/><button aria-label="Create document" disabled={documentCreating||!newDocumentName.trim()||docMeta.busy||docMeta.reading||docMeta.composing||docMeta.draftWorking||docMeta.draftUnsafe}><Plus size={16}/></button></form>}
+      {api.moveDocument&&<form className="new-room" onSubmit={moveDocument}><input aria-label="Move document to path" value={moveName} onChange={event=>setMoveName(event.target.value)} placeholder="Move or rename to.md" disabled={documentMoving}/><button aria-label="Move document" disabled={!moveName.trim()||documentCreating||(!moveAttempt.current&&(docMeta.busy||docMeta.reading||docMeta.composing||docMeta.draftWorking||docMeta.dirty||docMeta.recoveryPending||docMeta.historical||!docMeta.blob))}>Move</button></form>}
+      {api.moveDocument&&docMeta.recoveryPending&&<p className="quiet-status">Restore or export and discard local recovery drafts before moving this document.</p>}
+      {moveError&&<p role="alert">{moveError}</p>}
       {documentsError&&<p role="alert">{documentsError}<button onClick={()=>refreshDocuments()}>Refresh documents</button></p>}
     </div>
     <div className="nav-section rooms-section"><div className="section-heading"><span>Rooms</span><button aria-label="Refresh rooms" onClick={refreshRooms}><RefreshCw size={13}/></button></div>
@@ -316,7 +330,7 @@ export function App({connector=connect}) {
     {api.session.qa&&<div className="qa-banner">Visual regression capture · {api.session.qa} · isolated adapter</div>}
     {roomsError&&<div className="global-error" role="alert">Room list is reconnecting: {roomsError}</div>}
     {error&&<div className="global-error" role="alert"><AlertCircle size={16}/>{error}<button onClick={()=>setError('')} aria-label="Dismiss error"><X size={15}/></button></div>}
-    <div className="content-layout"><Documents api={api} name={activeDocument} room={documentRoom} onSent={sent} mode={mode} setMode={setMode} historyOpen={historyOpen} onCloseHistory={()=>setHistoryOpen(false)} onMeta={setDocMeta} requestedVersion={requestedVersion} canDiscussVersion={Boolean(docMeta.commit)&&events.some(event=>documentVersion(event,api.session.agentId,api.session.synthetic,api.session.userId,activeDocument)===docMeta.commit)} onDiscussVersion={commit=>{const event=events.find(event=>documentVersion(event,api.session.agentId,api.session.synthetic,api.session.userId,activeDocument)===commit);if(event){setPanel('discussion');setFilter(event.content['m.relates_to']?.event_id||event.id)}}}/>
+    <div className="content-layout"><Documents api={api} externalBusy={documentMoving} name={activeDocument} room={documentRoom} onSent={sent} mode={mode} setMode={setMode} historyOpen={historyOpen} onCloseHistory={()=>setHistoryOpen(false)} onMeta={setDocMeta} requestedVersion={requestedVersion} canDiscussVersion={Boolean(docMeta.commit)&&events.some(event=>documentVersion(event,api.session.agentId,api.session.synthetic,api.session.userId,activeDocument)===docMeta.commit)} onDiscussVersion={commit=>{const event=events.find(event=>documentVersion(event,api.session.agentId,api.session.synthetic,api.session.userId,activeDocument)===commit);if(event){setPanel('discussion');setFilter(event.content['m.relates_to']?.event_id||event.id)}}}/>
       <aside className={'collaboration-panel '+(!panel?'panel-closed':'')} aria-label="Collaboration panel"><header className="panel-heading"><div><h2>{panel==='agent'?'Example Agent':'Discussion'}</h2><span>{selected?.name||'Room'}</span></div><button aria-label="Close collaboration panel" onClick={()=>setPanel(null)}><X size={18}/></button></header>
         <div className="panel-tabs"><button className={panel==='discussion'?'active':''} onClick={()=>setPanel('discussion')}>Messages</button><button className={panel==='agent'?'active':''} onClick={()=>setPanel('agent')}>Example Agent</button></div>
         {panel==='agent'&&<div className="agent-disclosure"><Bot size={18}/><div><strong>Deterministic example</strong><p>Repeats messages and handles explicit Git requests. No LLM or intelligent editing is connected.</p></div></div>}

@@ -675,7 +675,7 @@ it('keeps a confirmed created document accessible when refreshing its list fails
  api.createDocument=vi.fn(async(_room,name)=>{created=true;return {status:'saved',path:name,commit:doc.commit,blob:doc.blob}});
  api.document.mockImplementation(async(_room,_version,name='demo.md')=>({...doc,name,content:name==='demo.md'?doc.content:'# Created despite list failure'}));
  render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Team handbook'});fireEvent.change(screen.getByLabelText('New document path'),{target:{value:'Created.md'}});fireEvent.click(screen.getByRole('button',{name:'Create document'}));
- await screen.findByRole('button',{name:'Created.md, current document'});await screen.findByText(/Document list offline/);fireEvent.click(screen.getByRole('button',{name:'demo.md',exact:true}));await screen.findByRole('heading',{name:'Team handbook'});expect(screen.getByRole('button',{name:'Created.md',exact:true})).toBeInTheDocument();
+ await screen.findByRole('button',{name:'Created.md, current document'});await screen.findByText(/Document list offline/);await waitFor(()=>expect(screen.getByRole('button',{name:'demo.md',exact:true})).toBeEnabled());fireEvent.click(screen.getByRole('button',{name:'demo.md',exact:true}));await screen.findByRole('heading',{name:'Team handbook'});expect(screen.getByRole('button',{name:'Created.md',exact:true})).toBeInTheDocument();
 });
 
 it('blocks document navigation when the dirty draft cannot be stored locally',async()=>{
@@ -692,4 +692,24 @@ it('keeps the current editor when edits become unsafe during a delayed document 
  const storage=vi.spyOn(Storage.prototype,'setItem').mockImplementation(()=>{throw new DOMException('Denied','SecurityError')});
  try{fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# Keep editor mounted'}});await screen.findByText(/Local draft storage is unavailable/);await act(async()=>finish({status:'saved',path:'Delayed.md',commit:doc.commit,blob:doc.blob}));await screen.findByText(/Document created. Finish or export/);expect(screen.getByLabelText('Markdown document')).toHaveValue('# Keep editor mounted');expect(screen.getByRole('button',{name:'Delayed.md',exact:true})).toBeDisabled();}
  finally{storage.mockRestore()}
+});
+
+it('moves a clean document and retries an uncertain move with the same source snapshot',async()=>{
+ const api=fixture();let moved=false;
+ api.documents=vi.fn(async()=>({documents:[{name:moved?'Archive/Renamed.md':'demo.md'}]}));
+ api.document.mockImplementation(async(_room,_commit,name='demo.md')=>({...doc,name}));
+ api.moveDocument=vi.fn().mockRejectedValueOnce(new Error('Response lost')).mockImplementationOnce(async()=>{moved=true;return {status:'saved',path:'Archive/Renamed.md',commit:doc.commit,blob:doc.blob}});
+ render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Team handbook'});fireEvent.change(screen.getByLabelText('Move document to path'),{target:{value:'Archive/Renamed.md'}});
+ await waitFor(()=>expect(screen.getByRole('button',{name:'Move document'})).toBeEnabled());fireEvent.click(screen.getByRole('button',{name:'Move document'}));await screen.findByText(/Response lost/);
+ expect(screen.getByRole('button',{name:'demo.md, current document'})).toBeDisabled();expect(screen.getByLabelText('Move document to path')).toBeDisabled();
+ fireEvent.click(screen.getByRole('button',{name:'Move document'}));await screen.findByRole('button',{name:'Archive/Renamed.md, current document'});expect(api.moveDocument.mock.calls[0]).toEqual(api.moveDocument.mock.calls[1]);expect(api.moveDocument.mock.calls[0][1].source).toBe('demo.md');expect(api.moveDocument.mock.calls[0][1].base_blob).toBe(doc.blob);
+});
+
+it('does not move a document with unsaved text',async()=>{
+ const api=fixture();api.moveDocument=vi.fn();render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Team handbook'});fireEvent.click(screen.getByRole('button',{name:'Edit',exact:true}));fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# Must save first'}});fireEvent.change(screen.getByLabelText('Move document to path'),{target:{value:'Other.md'}});await screen.findByText(/Unsaved draft kept/);expect(screen.getByRole('button',{name:'Move document'})).toBeDisabled();expect(api.moveDocument).not.toHaveBeenCalled();
+});
+
+it('keeps recovery drafts accessible before allowing a document move',async()=>{
+ const {LocalDraftStore,draftContext}=await import('./localDrafts');const api=fixture();api.moveDocument=vi.fn();const store=new LocalDraftStore(draftContext(api.session,'!room'));store.write('# Recovery still matters',doc.blob);
+ render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Team handbook'});await screen.findByText(/Restore or export and discard local recovery/);fireEvent.change(screen.getByLabelText('Move document to path'),{target:{value:'Moved.md'}});expect(screen.getByRole('button',{name:'Move document'})).toBeDisabled();expect(screen.getByRole('button',{name:'Export local draft'})).toBeEnabled();expect(api.moveDocument).not.toHaveBeenCalled();
 });

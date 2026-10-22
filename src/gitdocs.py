@@ -386,8 +386,12 @@ class GitDocs:
         if len(result.stdout)>65536:raise Conflict('merged document exceeds 64 KiB')
         return merged
 
-    def write(self, name, content, base_blob=None, *, operation=None, notification=None, author=None, merge_non_overlapping=False):
+    def write(self, name, content, base_blob=None, *, operation=None, notification=None, author=None, merge_non_overlapping=False, move_from=None):
         self._name(name)
+        if move_from is not None:
+            self._name(move_from)
+            if move_from == name or base_blob is None or content != '' or merge_non_overlapping:
+                raise ValueError('move requires distinct paths, a base blob and no supplied content')
         if not isinstance(content, str) or len(content.encode()) > 65536:
             raise ValueError('content must be text, at most 64 KiB')
         if base_blob is not None and (not isinstance(base_blob, str) or not re.fullmatch(r'[0-9a-f]{40}', base_blob)):
@@ -398,6 +402,7 @@ class GitDocs:
         operation = operation or os.urandom(24).hex()
         opref = self._operation_ref(operation)
         request_fields = [name, content, base_blob, notification] + ([author] if author is not None else [])
+        if move_from is not None:request_fields.append({'move_from': move_from})
         request_hash = hashlib.sha256(json.dumps(request_fields,
                                                sort_keys=True).encode()).hexdigest()
         legacy_hash = hashlib.sha256(json.dumps(request_fields[:4], sort_keys=True).encode()).hexdigest()
@@ -405,7 +410,7 @@ class GitDocs:
             previous = self._operation(opref)
             if previous:
                 if previous['request_hash'] != request_hash and not (
-                        'operation_key' not in previous and previous['request_hash'] == legacy_hash):
+                        move_from is None and 'operation_key' not in previous and previous['request_hash'] == legacy_hash):
                     raise Conflict('operation ID reused with different request')
                 previous = self._recover_imported_intent(previous, operation, notification)
                 self._publish()
@@ -415,7 +420,7 @@ class GitDocs:
             previous = self._operation(opref)
             if previous:
                 if previous['request_hash'] != request_hash and not (
-                        'operation_key' not in previous and previous['request_hash'] == legacy_hash):
+                        move_from is None and 'operation_key' not in previous and previous['request_hash'] == legacy_hash):
                     raise Conflict('operation ID reused with different request')
                 previous = self._recover_imported_intent(previous, operation, notification)
                 self._publish()
@@ -423,7 +428,12 @@ class GitDocs:
             head = self._ref(self.branch)
             current=self._version(name,head)
             merged=False
-            if current != base_blob:
+            if move_from is not None:
+                if current is not None or self._version(move_from,head) != base_blob:
+                    raise Conflict('source changed or destination already exists')
+                if int(self._git('cat-file','-s',base_blob).strip())>65536:raise ValueError('document exceeds move limit')
+                content=self._git('cat-file','blob',base_blob)
+            elif current != base_blob:
                 if not merge_non_overlapping:raise Conflict('document changed; refresh and merge')
                 content=self._merge_content(name,content,base_blob,current,head)
                 merged=True
@@ -433,6 +443,7 @@ class GitDocs:
             with tempfile.TemporaryDirectory(prefix='didadi-index-') as temporary:
                 env = {'GIT_INDEX_FILE': str(Path(temporary) / 'index')}
                 self._git('read-tree', head or '--empty', env=env)
+                if move_from is not None:self._git('update-index','--index-info',input='0 '+'0'*40+'\t'+move_from+'\n',env=env)
                 self._git('update-index', '--add', '--cacheinfo', '100644', blob, name, env=env)
                 tree = self._git('write-tree', env=env).strip()
             metadata = {'operation': operation, 'name': name, 'request_hash': request_hash,
