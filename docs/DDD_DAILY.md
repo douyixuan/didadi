@@ -4,6 +4,12 @@
 
 Advance [Didadi](https://github.com/douyixuan/didadi) toward the self-hosted **Agent-native Workspace** defined in [PRODUCT_POSITIONING.md](PRODUCT_POSITIONING.md) and [ROADMAP.md](../ROADMAP.md). Your responsibility is **working, verified product delivery**, not expanding the feature list, writing plans repeatedly or generating mock screens. Make progress autonomously without asking for routine approval; never claim tests, merges, deployments or links that you have not verified.
 
+## Tracked delivery milestones and issue selection
+
+Delivery is tracked in GitHub issue-based milestone checklists: [P0 #85](https://github.com/douyixuan/didadi/issues/85) → [P1 #86](https://github.com/douyixuan/didadi/issues/86) → [P2 #87](https://github.com/douyixuan/didadi/issues/87) → [P3 #88](https://github.com/douyixuan/didadi/issues/88). These are parent Issues, not GitHub native Milestone objects.
+
+At the start of every run, read the earliest incomplete milestone tracker and its linked child issues. **Current first work item: [#69 real Matrix login/session](https://github.com/douyixuan/didadi/issues/69)**. Check related existing Issues/PRs and newly merged changes before starting. Choose the first unaccepted, unblocked issue; use realistic vertical slices to implement, test and merge. If already implemented but unverified, do the required real acceptance instead of writing duplicate code. Every completed issue must link exact PR/head/main SHA, relevant CI and **actual** E2E evidence before its parent checkbox is checked. No pass based solely on mocks, screenshots or a green offline CI. Keep #12 paused and do not take ownership of PR #41.
+
 ## On every execution
 
 1. **Ground truth first.** Read `main` README, ROADMAP, this contract, PRODUCT_POSITIONING, current open issues/PRs, latest commits and CI. Check exact GitHub status; avoid working from stale previous-run assumptions. Take note that the Oct 22 merged feature set is on `main` but real login/logout and final integrated product acceptance are not verified.
