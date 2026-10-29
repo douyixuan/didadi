@@ -2,6 +2,19 @@
 
 > Planning baseline: 2026-10-29. Source: `main` at `1f371893baa0` (last repository commit 2026-10-22). This is a **delivery plan**, not evidence that unverified features work. See [positioning](docs/PRODUCT_POSITIONING.md), [daily delivery instructions](docs/DDD_DAILY.md), and [acceptance evidence](docs/MVP_ACCEPTANCE.md).
 
+## GitHub phase trackers (2026-10-29)
+
+The available GitHub integration cannot create native milestone objects; the following **issue-based milestone trackers** provide parent checklists and verifiable exit criteria. Each child is an executable issue with implementation scope and E2E acceptance. Target dates are planning goals, not guarantees.
+
+| Phase | Target (Asia/Shanghai) | Tracker | Delivery issues | Acceptance |
+| --- | --- | --- | --- | --- |
+| **P0 NOW** | 2026-11-12 | [#85](https://github.com/douyixuan/didadi/issues/85) | [#69](https://github.com/douyixuan/didadi/issues/69)–[#72](https://github.com/douyixuan/didadi/issues/72) | Two real Matrix users + Git-backed docs, clean E2E |
+| **P1** | 2026-11-26 | [#86](https://github.com/douyixuan/didadi/issues/86) | [#73](https://github.com/douyixuan/didadi/issues/73)–[#76](https://github.com/douyixuan/didadi/issues/76) | External Agent registered, scoped, progressing and resilient |
+| **P2** | 2026-12-10 | [#87](https://github.com/douyixuan/didadi/issues/87) | [#77](https://github.com/douyixuan/didadi/issues/77)–[#80](https://github.com/douyixuan/didadi/issues/80) | Discussion → task → reviewed artifact → Git commit |
+| **P3** | 2026-12-24 | [#88](https://github.com/douyixuan/didadi/issues/88) | [#81](https://github.com/douyixuan/didadi/issues/81)–[#84](https://github.com/douyixuan/didadi/issues/84) | Independently deployable, secure and usable Beta |
+
+**Execution order:** #69 → #70 → #71 → #72, then #73–#76, #77–#80, #81–#84. Within one phase, independent work may proceed in parallel, but the phase cannot close without its exit test. Prior Issues #1/#2/#3/#11/#14/#15/#16/#18/#22 remain referenced; paused #12 and separately owned PR #41 are not silently changed.
+
 ## North star
 
 **Agent-native Workspace for developers and Agent builders.** A human and an external Agent are first-class members of a shared workspace. Discussion (Matrix) creates actionable work; the Agent executes with scoped authority; results become reviewable, versioned Markdown/Git artifacts. Do not attempt to win by duplicating every feature of Feishu, Notion, or Telegram.
