@@ -1,5 +1,5 @@
 import {beforeEach,describe,it,expect,vi} from 'vitest';
-import {LocalDraftStore,draftContext,MAX_DRAFT_RECORDS} from './localDrafts';
+import {LocalDraftStore,draftContext,MAX_DRAFT_RECORDS,clearUserDrafts} from './localDrafts';
 const context=draftContext({userId:'@alice:local'},'!docs:local');
 beforeEach(()=>localStorage.clear());
 describe('bounded local document drafts',()=>{
@@ -52,4 +52,16 @@ it('warns rather than hiding malformed JSON and refuses unsupported coordination
 it('separates two document paths for the same Matrix user and room',()=>{
  const session={userId:'@alice:local'},first=draftContext(session,'!room','first.md'),second=draftContext(session,'!room','second.md');
  expect(first).not.toBe(second);const a=new LocalDraftStore(first),b=new LocalDraftStore(second);a.write('# First draft',null);b.write('# Second draft',null);expect(a.list().map(r=>r.content)).toEqual(['# First draft']);expect(b.list().map(r=>r.content)).toEqual(['# Second draft']);
+});
+
+describe('current-device logout draft isolation',()=>{
+ it('erases current Matrix user recovery data without deleting another user or preview',()=>{
+  new LocalDraftStore(draftContext({userId:'@alice:local'},'!room')).write('alice secret',null);
+  new LocalDraftStore(draftContext({userId:'@bob:local'},'!room')).write('bob secret',null);
+  new LocalDraftStore(draftContext({userId:'@alice:local',synthetic:true},'!room')).write('preview',null);
+  expect(clearUserDrafts({userId:'@alice:local',liveMatrix:true})).toBe(1);
+  expect(new LocalDraftStore(draftContext({userId:'@alice:local'},'!room')).list()).toEqual([]);
+  expect(new LocalDraftStore(draftContext({userId:'@bob:local'},'!room')).list()).toHaveLength(1);
+  expect(new LocalDraftStore(draftContext({userId:'@alice:local',synthetic:true},'!room')).list()).toHaveLength(1);
+ });
 });
