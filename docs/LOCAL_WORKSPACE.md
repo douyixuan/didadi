@@ -32,10 +32,11 @@ mkdir -p .local/bundle
 chmod 700 .local .local/bundle
 docker compose -p didadi-bundle cp appservice:/config/agent-token .local/bundle/agent-token
 docker compose -p didadi-bundle cp appservice:/config/smoke-state.json .local/bundle/smoke-state.json
-chmod 600 .local/bundle/agent-token .local/bundle/smoke-state.json
+docker compose -p didadi-bundle cp appservice:/config/smoke-passwords.json .local/bundle/smoke-passwords.json
+chmod 600 .local/bundle/agent-token .local/bundle/smoke-state.json .local/bundle/smoke-passwords.json
 ```
 
-The smoke creates non-admin synthetic users and a private unencrypted room only on this local test Synapse. Re-running it creates a new fixture; do not run it over an active workspace whose identities you want to retain. Keep the copied state private.
+The smoke creates two genuine, non-admin Matrix test accounts and a private unencrypted room only on this local test Synapse. Their randomly generated passwords are held separately in `.local/bundle/smoke-passwords.json` (mode 0600): never upload this file, enable a public demo with these test identities or copy it into git. Re-running the smoke creates a new fixture; do not run it over an active workspace whose identities you want to retain. Keep the copied state private.
 
 ## Install and build
 
@@ -89,6 +90,32 @@ node client/scripts/smoke.mjs http://127.0.0.1:8790
 These commands modify only this synthetic workspace. The first verifies advertised source choice, source read, service-generated report and denied-path isolation. The SDK test then verifies real discussion/replay, human direct save/history/stale conflict and synthetic private room creation. This is HTTP/SDK automation, not browser or Chinese IME acceptance.
 
 Open http://127.0.0.1:8790/. Below the document, open **Read-only source repository**, select `example.py`, and choose **Read source in discussion** or **Replace document with file report**. The report replaces the current document, so use it on this synthetic fixture. **Edit** and **Save changes** save human changes directly to Git. **History** opens immutable versions; **Discussion** contains version receipts. **Export Markdown** downloads the current editor text, including unsaved edits. Export and physical IME behavior require separate browser verification; passing the commands above does not certify them.
+
+## Opt-in real Matrix sign-in (P0 #69 candidate)
+
+The default port 8790 remains the legacy **fixture-mode** adapter, and its offline acceptance does not test real sign-in. To enable a separate, cookie-authenticated client for the same **isolated loopback fixture**, start a fifth terminal with:
+
+```sh
+.venv-delivery/bin/python -m src.client_server --auth-mode matrix \
+  --state-file .local/bundle/smoke-state.json \
+  --token-file .local/bundle/agent-token \
+  --repo .local/bundle/documents.git --metadata .local/bundle/client.sqlite \
+  --repository-grants .local/bundle/repository-grants.json \
+  --matrix-url http://127.0.0.1:8020 --gateway-url http://127.0.0.1:9040 \
+  --port 8791
+```
+
+Open **http://127.0.0.1:8791/** and enter each full Matrix ID and corresponding private password from the file. A real Matrix login creates a server-held token and an HttpOnly SameSite cookie. Session refresh revalidates the token; **Sign out** revokes the current Matrix device where reachable and clears the browser's current-user recovery drafts. The fixture's raw Matrix tokens are never used for authentication in `--auth-mode matrix`. The current single-document-repository / fixed initial-room binding and shared Agent gateway credential still restrict this to isolated local testing; it is **not a hardened/public multi-tenant service**. Server restart expires these in-memory web sessions; sign in again.
+
+Run a reproducible **real Synapse + actual HTTP client + Git** check in this isolated environment:
+
+```sh
+.venv-delivery/bin/python -m scripts.real_login_smoke \
+  --url http://127.0.0.1:8791 \
+  --credentials-file .local/bundle/smoke-passwords.json
+```
+
+The script creates one fresh test message and a uniquely named Git Markdown document, verifies two logged-in identities and cross-user authorized read, rejects another room, tests CSRF isolation and current-device logout. It **does not** prove browser GUI/IME, server restart, public deployment or Agent end-to-end execution. For those, perform independent real-browser acceptance with two isolated browser profiles and retain screenshots/network traces, exact commit SHA and Synapse/Git evidence. Never run the script on a non-test workspace.
 
 ## Stop and recover
 
