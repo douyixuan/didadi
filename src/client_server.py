@@ -15,6 +15,7 @@ from src.gitdocs import GitDocs, Conflict, InvalidPath, NameCollision
 from src.document_service import DocumentService, DocumentError
 from src.matrix_as import AGENT, PREFIX
 from src.matrix_http import MatrixError, request, segment
+from src.matrix_sessions import MatrixSessions, SessionError
 
 
 class ClientError(Exception):
@@ -30,12 +31,12 @@ from src.attachment_service import AttachmentService,MAX_ATTACHMENT_BYTES
 
 
 class Workspace:
-    def __init__(self, state, token, repo, metadata, matrix_url, gateway_url, repositories=None, fixture_contacts=()):
+    def __init__(self, state, token, repo, metadata, matrix_url, gateway_url, repositories=None, fixture_contacts=(), live=False):
         for base in [matrix_url, gateway_url]:
             url = urlsplit(base)
             if url.scheme != 'http' or url.hostname not in {'127.0.0.1', 'localhost'}:
                 raise ValueError('only existing loopback development backends are supported')
-        self.state, self.token = state, token
+        self.state, self.token, self.live = state, token, live
         self.matrix_url, self.gateway_url = matrix_url, gateway_url
         self.docs, self.metadata = GitDocs(repo), str(metadata)
         self.csrf = secrets.token_urlsafe(32)
@@ -62,11 +63,15 @@ class Workspace:
     def allowed(self, room):
         with sqlite3.connect(self.metadata) as db:
             if db.execute('SELECT 1 FROM rooms WHERE id=?', (room,)).fetchone() is None:
-                raise ClientError(403, 'This room is not part of the local demo.')
+                raise ClientError(403, 'This room is not part of this workspace.')
+        if self.live and room not in self.api('GET', '/joined_rooms')['joined_rooms']:
+            raise ClientError(403, 'You are not joined to this room.')
 
     def repository_choices(self):
         with sqlite3.connect(self.metadata) as db:
             rooms = {row[0] for row in db.execute('SELECT id FROM rooms')}
+        if self.live:
+            rooms &= set(self.api('GET', '/joined_rooms')['joined_rooms'])
         return [source for source in self.repository_reads if source['room'] in rooms]
 
     def task_event(self, room, task_id):
@@ -176,7 +181,7 @@ class Workspace:
         return self.api('PUT', path, content)
 
 
-def handler(workspace, dist, port):
+def handler(workspace, dist, port, sessions=None):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
@@ -197,13 +202,35 @@ def handler(workspace, dist, port):
             try:
                 if self.headers.get('Host') not in {f'127.0.0.1:{port}', f'localhost:{port}'}:
                     raise ClientError(403, 'Loopback Host required.')
-                if method != 'GET':
-                    if not hmac.compare_digest(self.headers.get('X-CSRF-Token', ''), workspace.csrf):
-                        raise ClientError(403, 'Refresh this local session before retrying.')
-                    origin = self.headers.get('Origin')
-                    if origin and origin not in {f'http://127.0.0.1:{port}', f'http://localhost:{port}'}:
-                        raise ClientError(403, 'Same-origin requests required.')
                 parsed = urlsplit(self.path)
+                origins = {f'http://127.0.0.1:{port}', f'http://localhost:{port}'}
+                if sessions is not None and parsed.path == '/api/auth/login':
+                    if (method != 'POST' or self.headers.get('Origin') not in origins or
+                            self.headers.get('X-Didadi-Login') != '1' or
+                            self.headers.get_content_type() != 'application/json'):
+                        raise ClientError(403, 'Same-origin Matrix password sign-in required.')
+                    size = int(self.headers.get('Content-Length', '0'))
+                    if not 1 <= size <= 4096:
+                        raise ClientError(400, 'Invalid login request size.')
+                    data = json.loads(self.rfile.read(size))
+                    if not isinstance(data, dict) or set(data) != {'username', 'password'}:
+                        raise ClientError(400, 'Expected username and password.')
+                    handle, authenticated = sessions.login(data['username'], data['password'])
+                    self.respond(200, {'userId': authenticated.user_id}, headers={
+                        'Set-Cookie': sessions.cookie(handle)})
+                    return
+                current_workspace = workspace
+                if sessions is not None and parsed.path.startswith(('/api/', '/matrix/')):
+                    current_workspace = sessions.require(self.headers.get('Cookie')).workspace
+                if method != 'GET':
+                    if current_workspace is None or not hmac.compare_digest(
+                            self.headers.get('X-CSRF-Token', ''), current_workspace.csrf):
+                        raise ClientError(403, 'Refresh this session before retrying.')
+                    origin = self.headers.get('Origin')
+                    if origin and origin not in origins:
+                        raise ClientError(403, 'Same-origin requests required.')
+                    if sessions is not None and origin not in origins:
+                        raise ClientError(403, 'Same-origin requests required.')
                 query = parse_qs(parsed.query)
                 body = None
                 if method != 'GET':
@@ -215,71 +242,77 @@ def handler(workspace, dist, port):
                         if not 0 < size < 500000:
                             raise ClientError(400, 'Invalid request size.')
                         body = json.loads(self.rfile.read(size))
+                if sessions is not None and parsed.path == '/api/auth/logout' and method == 'POST':
+                    if body != {}:
+                        raise ClientError(400, 'Logout accepts no request parameters.')
+                    result = sessions.logout(self.headers.get('Cookie'))
+                    self.respond(200, result, headers={'Set-Cookie': sessions.clear_cookie()})
+                    return
                 if parsed.path == '/api/session' and method == 'GET':
-                    result = {'csrf': workspace.csrf, 'userId': workspace.user_id, 'agentId': AGENT,
-                              'initialRoom': workspace.state['room'], 'documentRoom': workspace.state['room'], 'documentSave': 'direct-v1', 'qa': getattr(workspace, 'qa', None), 'agentLabel': 'Example echo agent · no LLM',
-                              'directChats':True, 'repositoryReads': workspace.repository_choices(), 'roomCreation':{'version':1,'visibility':'private','kinds':['direct','group','channel'],'contacts':list(workspace.room_service.contacts)}}
+                    result = {'csrf': current_workspace.csrf, 'userId': current_workspace.user_id, 'agentId': AGENT,
+                              'initialRoom': current_workspace.state['room'], 'documentRoom': current_workspace.state['room'], 'documentSave': 'direct-v1', 'qa': getattr(workspace, 'qa', None), 'agentLabel': 'Example echo agent · no LLM',
+                              'directChats':True, 'liveMatrix': sessions is not None, 'repositoryReads': current_workspace.repository_choices(), 'roomCreation':{'version':1,'visibility':'private','kinds':['direct','group','channel'],'contacts':list(current_workspace.room_service.contacts)}}
                 elif parsed.path=='/api/attachments' and method=='POST':
                     if set(query)-{'room','name','operation','type','root'} or any(len(values)!=1 for values in query.values()):raise ClientError(400,'Unknown attachment parameter.')
-                    result=workspace.attachments.upload(query.get('room',[''])[0],query.get('name',[''])[0],query.get('operation',[''])[0],query.get('type',['application/octet-stream'])[0],body,query.get('root',[None])[0])
+                    result=current_workspace.attachments.upload(query.get('room',[''])[0],query.get('name',[''])[0],query.get('operation',[''])[0],query.get('type',['application/octet-stream'])[0],body,query.get('root',[None])[0])
                 elif parsed.path=='/api/attachments/download' and method=='GET':
                     if set(query)!={'room','event'} or any(len(values)!=1 for values in query.values()):raise ClientError(400,'Use one room and one attachment event.')
-                    if not hmac.compare_digest(self.headers.get('X-CSRF-Token',''),workspace.csrf):raise ClientError(403,'Use the current local session to download attachments.')
-                    name,payload=workspace.attachments.download(query.get('room',[''])[0],query.get('event',[''])[0])
+                    if not hmac.compare_digest(self.headers.get('X-CSRF-Token',''),current_workspace.csrf):raise ClientError(403,'Use the current local session to download attachments.')
+                    name,payload=current_workspace.attachments.download(query.get('room',[''])[0],query.get('event',[''])[0])
                     from urllib.parse import quote
                     self.respond(200,payload,'application/octet-stream',{'Content-Disposition':"attachment; filename*=UTF-8''"+quote(name,safe='')})
                     return
                 elif parsed.path == '/api/repositories/read' and method == 'POST':
-                    try:result=workspace.sources.read(body)
+                    try:result=current_workspace.sources.read(body)
                     except ValueError:raise ClientError(403,'Source is not available through the current grants.') from None
                 elif parsed.path == '/api/search/messages' and method == 'POST':
-                    result = workspace.search.messages(body)
+                    result = current_workspace.search.messages(body)
                 elif parsed.path == '/api/search/documents' and method == 'POST':
-                    result = workspace.search.files(body)
+                    result = current_workspace.search.files(body)
                 elif parsed.path == '/api/documents' and method == 'GET':
-                    result = workspace.documents.documents(query.get('room', [''])[0])
+                    result = current_workspace.documents.documents(query.get('room', [''])[0])
                 elif parsed.path == '/api/documents' and method == 'POST':
-                    result = workspace.documents.create(body)
+                    result = current_workspace.documents.create(body)
                 elif parsed.path == '/api/documents/from-messages' and method == 'POST':
-                    result = workspace.documents.from_messages(body)
+                    result = current_workspace.documents.from_messages(body)
                 elif parsed.path == '/api/documents/move' and method == 'POST':
-                    result = workspace.documents.move(body)
+                    result = current_workspace.documents.move(body)
                 elif parsed.path.startswith('/api/documents/') and method == 'PUT':
                     name = unquote(parsed.path[len('/api/documents/'):], errors='strict')
-                    result = workspace.documents.save(body, name)
+                    result = current_workspace.documents.save(body, name)
                 elif parsed.path == '/api/task/cancel' and method == 'POST':
-                    result = workspace.cancel_task(body['room'],body['id'])
+                    result = current_workspace.cancel_task(body['room'],body['id'])
                 elif parsed.path == '/api/task/audit' and method == 'GET':
                     room=query.get('room',[''])[0];task_id=query.get('id',[''])[0]
-                    workspace.task_event(room,task_id)
-                    result=request(workspace.gateway_url,'GET','/agent/audit',workspace.token,query={'id':task_id})
+                    current_workspace.task_event(room,task_id)
+                    result=request(current_workspace.gateway_url,'GET','/agent/audit',current_workspace.token,query={'id':task_id})
                 elif parsed.path=='/api/direct-chats' and method=='GET':
                     if query:raise ClientError(400,'Direct-chat preferences use the current identity only.')
-                    result=workspace.direct_chats.snapshot()
+                    result=current_workspace.direct_chats.snapshot()
                 elif parsed.path=='/api/direct-chats/retry' and method=='POST':
                     if query or not isinstance(body,dict) or set(body)!={'room'} or not isinstance(body['room'],str):raise ClientError(400,'Use only the existing room for synchronization retry.')
-                    result=workspace.direct_chats.retry(body['room'])
+                    result=current_workspace.direct_chats.retry(body['room'])
                 elif parsed.path == '/api/rooms' and method == 'POST':
-                    try:result=workspace.direct_chats.after_create(workspace.room_service.create(body))
+                    try:result=current_workspace.direct_chats.after_create(current_workspace.room_service.create(body))
                     except RoomError as error:raise ClientError(error.status,error.message) from None
                 elif parsed.path == '/matrix/_matrix/client/versions' and method == 'GET':
-                    result = request(workspace.matrix_url, 'GET', '/_matrix/client/versions')
+                    result = request(current_workspace.matrix_url, 'GET', '/_matrix/client/versions')
                 elif parsed.path.startswith('/matrix/_matrix/client/v1/'):
-                    result = workspace.thread_relations(method, parsed.path[len('/matrix/_matrix/client/v1'):], query)
+                    result = current_workspace.thread_relations(method, parsed.path[len('/matrix/_matrix/client/v1'):], query)
                 elif parsed.path.startswith('/matrix' + PREFIX):
-                    result = workspace.proxy(method, parsed.path[len('/matrix' + PREFIX):], query, body)
+                    result = current_workspace.proxy(method, parsed.path[len('/matrix' + PREFIX):], query, body)
                 elif parsed.path in {'/api/document', '/api/history', '/api/task'} and method == 'GET':
                     room = query.get('room', [''])[0]
-                    workspace.allowed(room)
+                    current_workspace.allowed(room)
                     if parsed.path == '/api/document':
-                        result = workspace.documents.read(room, query.get('commit', [None])[0], query.get('path', ['demo.md'])[0])
+                        result = current_workspace.documents.read(room, query.get('commit', [None])[0], query.get('path', ['demo.md'])[0])
                     elif parsed.path == '/api/history':
-                        workspace.documents.authorize(room)
-                        result = {'commits': workspace.docs.history(query.get('path', ['demo.md'])[0])}
+                        current_workspace.documents.authorize(room)
+                        result = {'commits': current_workspace.docs.history(query.get('path', ['demo.md'])[0])}
                     else:
                         event_id = query.get('id', [''])[0]
-                        workspace.api('GET', '/rooms/' + segment(room) + '/event/' + segment(event_id))
-                        result = request(workspace.gateway_url, 'GET', '/agent/status', workspace.token, query={'id': event_id})
+                        current_workspace.api('GET', '/rooms/' + segment(room) + '/event/' + segment(event_id))
+                        result = request(current_workspace.gateway_url, 'GET', '/agent/status', current_workspace.token, query={'id': event_id})
                         task = result['task']
                 elif method == 'GET' and not parsed.path.startswith(('/api/', '/matrix/')):
                     path = (dist / unquote(parsed.path).lstrip('/')).resolve()
@@ -292,6 +325,10 @@ def handler(workspace, dist, port):
                 else:
                     raise ClientError(404, 'Unknown client route.')
                 self.respond(200, result)
+            except SessionError as error:
+                self.respond(error.status, {'error': error.message}, headers={
+                    'Set-Cookie': sessions.clear_cookie()} if sessions is not None and
+                    error.status == 401 and parsed.path != '/api/auth/login' else None)
             except DirectChatError as error:
                 self.respond(error.status, {'error':error.message})
             except DocumentError as error:
@@ -339,12 +376,38 @@ if __name__ == '__main__':
     parser.add_argument('--matrix-url', default='http://127.0.0.1:8009')
     parser.add_argument('--gateway-url', default='http://127.0.0.1:9001')
     parser.add_argument('--port', type=int, default=8767)
+    parser.add_argument('--auth-mode', choices=('fixture', 'matrix'), default='fixture',
+                        help='matrix requires actual Matrix password login; no implicit fixture login')
     args = parser.parse_args()
     from src.repository_read import RepositoryReader
     repositories = RepositoryReader.from_file(args.repository_grants) if args.repository_grants else None
     fixture_contacts=json.loads(Path(args.fixture_contacts).read_text()) if args.fixture_contacts else []
     if not isinstance(fixture_contacts,list):parser.error('--fixture-contacts must contain a JSON list of identity IDs')
-    workspace = Workspace(json.loads(Path(args.state_file).read_text()), Path(args.token_file).read_text().strip(),
-                          args.repo, args.metadata, args.matrix_url, args.gateway_url, repositories, args.fixture_contact + fixture_contacts)
-    print(f'React workspace http://127.0.0.1:{args.port}', flush=True)
-    ThreadingHTTPServer(('127.0.0.1', args.port), handler(workspace, Path(args.dist), args.port)).serve_forever()
+    state = json.loads(Path(args.state_file).read_text())
+    agent_token = Path(args.token_file).read_text().strip()
+    if args.auth_mode == 'matrix':
+        # Do not send submitted passwords to an operator-controlled non-loopback URL.
+        for base in (args.matrix_url, args.gateway_url):
+            url = urlsplit(base)
+            if url.scheme != 'http' or url.hostname not in {'127.0.0.1', 'localhost'}:
+                parser.error('real Matrix login is restricted to loopback backends')
+        if not isinstance(state, dict) or not isinstance(state.get('room'), str):
+            parser.error('a trusted document room ID is required in --state-file')
+        def create_workspace(matrix_token, user_id):
+            # Fixture tokens, if present, are deliberately not used for real-user sessions.
+            workspace = Workspace({'room': state['room'], 'tokens': [matrix_token]}, agent_token,
+                                  args.repo, args.metadata, args.matrix_url, args.gateway_url,
+                                  repositories, args.fixture_contact + fixture_contacts, live=True)
+            if workspace.user_id != user_id:
+                raise ClientError(401, 'Matrix account identity mismatch.')
+            return workspace
+        sessions = MatrixSessions(args.matrix_url, create_workspace)
+        workspace = None
+    else:
+        sessions = None
+        workspace = Workspace(state, agent_token, args.repo, args.metadata,
+                              args.matrix_url, args.gateway_url, repositories,
+                              args.fixture_contact + fixture_contacts)
+    print(f'React workspace http://127.0.0.1:{args.port} ({args.auth_mode})', flush=True)
+    ThreadingHTTPServer(('127.0.0.1', args.port), handler(
+        workspace, Path(args.dist), args.port, sessions)).serve_forever()
