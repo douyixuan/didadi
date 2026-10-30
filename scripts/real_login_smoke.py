@@ -7,6 +7,7 @@ import argparse
 from pathlib import Path
 import json
 import secrets
+import uuid
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -83,9 +84,8 @@ def run(base, credentials):
     name = 'auth-validation/' + secrets.token_hex(12) + '.md'
     body = '# Real login integration\n\nCreated by ' + alice[0] + '\n'
     created, _ = call('/api/documents', 'POST', {'room': room, 'name': name,
-                       'content': body, 'operation': secrets.token_hex(16)},
+                       'content': body, 'operation': str(uuid.uuid4())},
                       cookie=alice[1], csrf=alice[2]['csrf'])
-    # The document API requires UUID operations; convert to canonical before request.
     assert created['status'] == 'saved'
     assert len(created['commit']) == 40
     document, _ = call('/api/document?' + urlencode({'room': room, 'path': name}),
