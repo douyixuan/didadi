@@ -397,7 +397,8 @@ if __name__ == '__main__':
             # Fixture tokens, if present, are deliberately not used for real-user sessions.
             workspace = Workspace({'room': state['room'], 'tokens': [matrix_token]}, agent_token,
                                   args.repo, args.metadata, args.matrix_url, args.gateway_url,
-                                  repositories, args.fixture_contact + fixture_contacts, live=True)
+                                  repositories, [peer for peer in args.fixture_contact + fixture_contacts
+                                                 if peer != user_id], live=True)
             if workspace.user_id != user_id:
                 raise ClientError(401, 'Matrix account identity mismatch.')
             return workspace
