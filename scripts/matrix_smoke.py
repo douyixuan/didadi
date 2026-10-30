@@ -23,8 +23,9 @@ def register_user(name, shared):
     password = secrets.token_urlsafe(24)
     mac = hmac.new(shared.encode(),
                    '\0'.join([nonce, name, password, 'notadmin']).encode(), hashlib.sha1).hexdigest()
-    return request(BASE, 'POST', '/_synapse/admin/v1/register', data={
+    registered = request(BASE, 'POST', '/_synapse/admin/v1/register', data={
         'nonce': nonce, 'username': name, 'password': password, 'admin': False, 'mac': mac})
+    return registered, password
 
 
 def wait_event(token, room, predicate, since=None):
@@ -65,8 +66,8 @@ def main():
         assert error.status == 403
     print('PASS AS rejects unauthenticated transactions')
     run = secrets.token_hex(5)
-    alice = register_user('alice_' + run, config['registration'])
-    bob = register_user('bob_' + run, config['registration'])
+    alice, alice_password = register_user('alice_' + run, config['registration'])
+    bob, bob_password = register_user('bob_' + run, config['registration'])
     a, b = alice['access_token'], bob['access_token']
     try:
         api('POST', '/register', config['as_token'], {
@@ -161,7 +162,13 @@ def main():
     (CONFIG / 'gateway-state.json').write_text(json.dumps({'task': recovery_event['event_id']}))
     (CONFIG / 'smoke-state.json').write_text(json.dumps({
         'tokens': [a, b], 'room': room, 'event': event_id, 'body': body}))
-    print('PASS Matrix smoke completed')
+    # Real Matrix credentials, not fictional identities. Test-only; never display or
+    # publish. Preserve separate from the state file used by fixture-mode adapters.
+    passwords = CONFIG / 'smoke-passwords.json'
+    passwords.write_text(json.dumps({alice['user_id']: alice_password,
+                                     bob['user_id']: bob_password}))
+    passwords.chmod(0o600)
+    print('PASS Matrix smoke completed; private password fixture stored with mode 0600')
 
 
 if __name__ == '__main__':
