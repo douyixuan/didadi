@@ -27,13 +27,23 @@ export async function roomMembers(client,room){
 
 export async function connect() {
   if(import.meta.env.VITE_PREVIEW_MODE==='synthetic')return (await import('./demo-api')).createDemo();
-  const sessionResponse = await fetch('/api/session');
-  if (!sessionResponse.ok) throw new Error('Cannot reach the local workspace. Check that the backend is running.');
+  const sessionResponse = await fetch('/api/session', {credentials:'same-origin'});
+  if (!sessionResponse.ok) {
+    const data = await sessionResponse.json().catch(()=>({}));
+    const error = new Error(data.error || (sessionResponse.status===401
+      ? 'Sign in with your Matrix account.' : 'Cannot reach the local workspace. Check that the backend is running.'));
+    error.status = sessionResponse.status;
+    throw error;
+  }
   const session = await sessionResponse.json();
-  const fetchLocal = (url, options = {}) => {
+  const fetchLocal = async (url, options = {}) => {
     const headers = new Headers(options.headers);
     headers.set('X-CSRF-Token', session.csrf);
-    return fetch(url, {...options, headers});
+    const response = await fetch(url, {...options, credentials:'same-origin', headers});
+    if (session.liveMatrix && response.status===401) {
+      window.dispatchEvent(new Event('didadi-matrix-session-expired'));
+    }
+    return response;
   };
   // This placeholder is not a credential. The loopback adapter owns the existing test session.
   const client = createClient({baseUrl: location.origin + '/matrix', userId: session.userId,
@@ -48,6 +58,7 @@ export async function connect() {
   const timelinePage=(room,from=null)=>messagePage(client,room,from);
   return {
     session,
+    ...(session.liveMatrix?{logout:()=>api('/api/auth/logout',{})}:{}),
     members:room=>roomMembers(client,room),
     ...(session.directChats?{directChats:()=>api('/api/direct-chats'),retryDirect:room=>api('/api/direct-chats/retry',{room})}:{}),
     readSource:(room,repository,path)=>api('/api/repositories/read',{room,repository,path}),
