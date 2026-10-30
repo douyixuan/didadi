@@ -101,7 +101,8 @@ class MatrixSessions:
 
     @classmethod
     def handle_from_cookie(cls, header):
-        if not isinstance(header, str) or len(header) > 4096:
+        if (not isinstance(header, str) or len(header) > 4096 or
+                '\\r' in header or '\\n' in header):
             return None
         candidates = []
         for part in header.split(';'):
