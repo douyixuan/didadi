@@ -93,7 +93,56 @@ def run(base, credentials):
     assert document['content'] == body and document['commit'] == created['commit']
     denied(403, '/api/document?' + urlencode({'room': '!outside:localhost', 'path': name}),
            cookie=bob[1], csrf=bob[2]['csrf'])
-    print('PASS REAL GIT document save/read across two Matrix users and denied room')
+    # A second file must retain an independent Git body/version. It is saved
+    # through Document Service; neither document body belongs in Matrix events.
+    second_name = 'auth-validation/' + secrets.token_hex(12) + '.md'
+    second_body = '# Second independent file\n\n' + secrets.token_hex(16) + '\n'
+    second, _ = call('/api/documents', 'POST', {'room': room, 'name': second_name,
+                      'content': second_body, 'operation': str(uuid.uuid4())},
+                     cookie=alice[1], csrf=alice[2]['csrf'])
+    assert second['status'] == 'saved' and second['path'] == second_name
+    first_again, _ = call('/api/document?' + urlencode({'room': room, 'path': name}),
+                          cookie=bob[1])
+    second_again, _ = call('/api/document?' + urlencode({'room': room, 'path': second_name}),
+                           cookie=bob[1])
+    assert first_again['content'] == body and first_again['commit'] == created['commit']
+    assert second_again['content'] == second_body and second_again['commit'] == second['commit']
+    assert second['commit'] != created['commit']
+
+    # Room members without power-level 50 may read but cannot publish Git content.
+    denied(403, '/api/documents/' + name, 'PUT',
+           {'room': room, 'content': 'unauthorized overwrite',
+            'base_blob': created['blob'], 'operation': str(uuid.uuid4())},
+           cookie=bob[1], csrf=bob[2]['csrf'])
+    assert call('/api/document?' + urlencode({'room': room, 'path': name}),
+                cookie=alice[1])[0]['content'] == body
+
+    for saved, secret_body in ((created, body), (second, second_body)):
+        assert not saved['receipt_pending'] and saved['receipt']['event_id']
+        receipt, _ = call(path + '/event/' + segment(saved['receipt']['event_id']),
+                          cookie=bob[1])
+        metadata = receipt['content']['org.didadi.document.commit']
+        assert metadata['path'] == saved['path'] and metadata['commit'] == saved['commit']
+        assert metadata['author'] == alice[0]
+        assert secret_body not in json.dumps(receipt)
+        assert receipt['content']['body'].startswith('Saved ')
+    print('PASS REAL GIT two documents, stable versions, denied write and metadata-only receipts')
+
+    # A genuine room created by Bob becomes available only to Bob. The global
+    # local room index must never override live Matrix membership checks.
+    private, _ = call('/api/rooms', 'POST',
+                      {'name': 'Private verification ' + secrets.token_hex(4),
+                       'kind': 'group', 'participants': [], 'operation': str(uuid.uuid4())},
+                      cookie=bob[1], csrf=bob[2]['csrf'])
+    private_room = private['room_id']
+    assert private_room != room
+    alice_rooms, _ = call('/matrix' + PREFIX + '/joined_rooms', cookie=alice[1])
+    bob_rooms, _ = call('/matrix' + PREFIX + '/joined_rooms', cookie=bob[1])
+    assert private_room in bob_rooms['joined_rooms']
+    assert private_room not in alice_rooms['joined_rooms']
+    denied(403, '/matrix' + PREFIX + '/rooms/' + segment(private_room) + '/messages?dir=b',
+           cookie=alice[1])
+    print('PASS REAL MATRIX two-user private-room membership isolation')
 
     denied(401, '/api/auth/login', 'POST',
            {'username': alice[0], 'password': 'invalid-login-password'}, login=True)
