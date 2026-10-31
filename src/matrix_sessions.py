@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import hashlib
 import os
+import queue
 import re
 import secrets
 import sqlite3
@@ -50,6 +51,11 @@ class MatrixSessions:
         self.lifetime = lifetime
         self._lock = threading.RLock()
         self._sessions = {}
+        # Expired devices are revoked outside HTTP requests. A single daemon
+        # worker bounds concurrent upstream /logout calls; revocation is best
+        # effort and local handles are already invalid before being enqueued.
+        self._revoke_queue = queue.Queue()
+        self._revoke_thread = None
         self.store_path = Path(store_path) if store_path is not None else None
         if self.store_path is not None:
             self.store_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -128,6 +134,28 @@ class MatrixSessions:
         except Exception:
             pass
 
+    def _revoke_worker(self):
+        while True:
+            token = self._revoke_queue.get()
+            try:
+                self._revoke_token(token)
+            finally:
+                self._revoke_queue.task_done()
+
+    def _schedule_revocation(self, tokens):
+        tokens = tuple(tokens)
+        if not tokens:
+            return
+        # put_nowait keeps login independent of a slow/unavailable homeserver.
+        with self._lock:
+            for token in tokens:
+                self._revoke_queue.put_nowait(token)
+            if self._revoke_thread is None or not self._revoke_thread.is_alive():
+                self._revoke_thread = threading.Thread(
+                    target=self._revoke_worker, name='matrix-session-revocation',
+                    daemon=True)
+                self._revoke_thread.start()
+
     def login(self, username, password):
         if (not isinstance(username, str) or not 1 <= len(username) <= 255 or
                 username.strip() != username or any(ch.isspace() for ch in username) or
@@ -186,9 +214,9 @@ class MatrixSessions:
         except (sqlite3.Error, OSError) as exc:
             self._revoke_token(token)
             raise SessionError(503, 'Private session storage is unavailable.') from exc
-        # Remote HTTP is deliberately outside the registry lock.
-        for expired_token in expired_tokens:
-            self._revoke_token(expired_token)
+        # Never block the login response on a slow Matrix logout endpoint.
+        # These handles are already deleted; remote revocation is best effort.
+        self._schedule_revocation(expired_tokens)
         if full:
             self._revoke_token(token)
             raise SessionError(429, 'Too many local sessions. Try again later.')

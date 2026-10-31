@@ -4,6 +4,8 @@ from types import SimpleNamespace
 from pathlib import Path
 import os
 import tempfile
+import threading
+import time
 from src.matrix_as import PREFIX
 from src.matrix_http import MatrixError
 from src.matrix_sessions import MatrixSessions, SessionError
@@ -93,16 +95,46 @@ class MatrixSessionsTests(unittest.TestCase):
         self.clock[0] += 61
         with self.assertRaises(SessionError):
             self.sessions.require('didadi_session=' + key)
+        self.sessions._revoke_queue.join()
         self.assertIn('token-bob-0123456789', self.invalid)
 
     def test_expired_sessions_are_revoked_on_next_login(self):
         alice, session = self.sessions.login('alice', 'secret-a')
         self.clock[0] += 61
         bob, active = self.sessions.login('bob', 'secret-b')
+        self.sessions._revoke_queue.join()
         self.assertIn(session.access_token, self.invalid)
         self.assertEqual(self.sessions.require('didadi_session=' + bob), active)
         with self.assertRaises(SessionError):
             self.sessions.require('didadi_session=' + alice)
+
+    def test_slow_upstream_expiry_cleanup_does_not_block_new_login(self):
+        first, _ = self.sessions.login('alice', 'secret-a')
+        upstream_entered = threading.Event()
+        allow_finish = threading.Event()
+        original = self.sessions.matrix_request
+
+        def slow_matrix(url, method, path, token=None, data=None):
+            if path.endswith('/logout'):
+                upstream_entered.set()
+                allow_finish.wait(3)
+            return original(url, method, path, token, data)
+
+        self.sessions.matrix_request = slow_matrix
+        self.clock[0] += 61
+        try:
+            started = time.monotonic()
+            bob, _ = self.sessions.login('bob', 'secret-b')
+            elapsed = time.monotonic() - started
+            self.assertLess(elapsed, 1, 'Login must not wait for upstream token revocation')
+            self.assertTrue(upstream_entered.wait(1))
+            self.assertEqual(self.sessions.local('didadi_session=' + bob).user_id,
+                             '@bob:localhost')
+        finally:
+            allow_finish.set()
+        self.sessions._revoke_queue.join()
+        with self.assertRaises(SessionError):
+            self.sessions.local('didadi_session=' + first)
 
     def test_local_logout_validation_does_not_require_matrix_whoami(self):
         handle, active = self.sessions.login('alice', 'secret-a')
@@ -168,6 +200,7 @@ class MatrixSessionsTests(unittest.TestCase):
             self.clock[0] += 61
             another = make()
             another.login('bob', 'secret-b')
+            another._revoke_queue.join()
             self.assertIn(active.access_token, self.invalid)
             with self.assertRaises(SessionError):
                 another.require('didadi_session=' + alice)
