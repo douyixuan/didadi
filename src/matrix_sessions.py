@@ -5,9 +5,15 @@ contain only an unpredictable opaque handle. Unlike the fictional contract this
 actually verifies tokens with Synapse; unlike production SSO this is deliberately
 restricted to a locally bound development workspace.
 """
+from contextlib import closing
 from dataclasses import dataclass
+from pathlib import Path
+import hashlib
+import os
 import re
 import secrets
+import sqlite3
+import stat
 import threading
 import time
 
@@ -28,6 +34,7 @@ class ActiveSession:
     device_id: str
     workspace: object
     expires_at: float
+    csrf: str = ''
 
 
 class MatrixSessions:
@@ -35,7 +42,7 @@ class MatrixSessions:
     MAX_SESSIONS = 128
 
     def __init__(self, matrix_url, workspace_factory, matrix_request=request, now=time.time,
-                 lifetime=12 * 60 * 60):
+                 lifetime=12 * 60 * 60, store_path=None):
         self.matrix_url = matrix_url
         self.workspace_factory = workspace_factory
         self.matrix_request = matrix_request
@@ -43,6 +50,72 @@ class MatrixSessions:
         self.lifetime = lifetime
         self._lock = threading.RLock()
         self._sessions = {}
+        self.store_path = Path(store_path) if store_path is not None else None
+        if self.store_path is not None:
+            self.store_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            flags = os.O_RDWR | os.O_CREAT | getattr(os, 'O_NOFOLLOW', 0)
+            fd = os.open(self.store_path, flags, 0o600)
+            try:
+                info = os.fstat(fd)
+                if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077:
+                    raise ValueError('Matrix session store must be a private regular file (mode 0600).')
+            finally:
+                os.close(fd)
+            with closing(sqlite3.connect(self.store_path)) as db:
+                with db:
+                    db.execute('''CREATE TABLE IF NOT EXISTS matrix_sessions (
+                        handle_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL,
+                        token TEXT NOT NULL, device_id TEXT NOT NULL,
+                        csrf TEXT NOT NULL, expires_at REAL NOT NULL)''')
+
+    @staticmethod
+    def _digest(handle):
+        # A stolen DB row must not by itself be a valid browser cookie.
+        return hashlib.sha256(handle.encode('ascii')).hexdigest()
+
+    def _store_add(self, handle, session):
+        if self.store_path is None:
+            return
+        with closing(sqlite3.connect(self.store_path)) as db:
+            with db:
+                db.execute('''INSERT INTO matrix_sessions
+                    (handle_hash, user_id, token, device_id, csrf, expires_at)
+                    VALUES (?, ?, ?, ?, ?, ?)''',
+                    (self._digest(handle), session.user_id, session.access_token,
+                     session.device_id, session.csrf, session.expires_at))
+
+    def _store_find(self, handle):
+        if self.store_path is None or handle is None:
+            return None
+        with closing(sqlite3.connect(self.store_path)) as db:
+            row = db.execute('''SELECT user_id, token, device_id, csrf, expires_at
+                FROM matrix_sessions WHERE handle_hash=?''', (self._digest(handle),)).fetchone()
+        return ActiveSession(row[0], row[1], row[2], None, row[4], row[3]) if row else None
+
+    def _store_delete(self, handle):
+        if self.store_path is None or handle is None:
+            return
+        with closing(sqlite3.connect(self.store_path)) as db:
+            with db:
+                db.execute('DELETE FROM matrix_sessions WHERE handle_hash=?',
+                           (self._digest(handle),))
+
+    def _store_prune(self, now):
+        if self.store_path is None:
+            return [], len(self._sessions)
+        with closing(sqlite3.connect(self.store_path)) as db:
+            with db:
+                expired = [row[0] for row in db.execute(
+                    'SELECT token FROM matrix_sessions WHERE expires_at<=?', (now,))]
+                db.execute('DELETE FROM matrix_sessions WHERE expires_at<=?', (now,))
+                count = db.execute('SELECT COUNT(*) FROM matrix_sessions').fetchone()[0]
+        return expired, count
+
+    def _forget(self, handle):
+        # Caller holds the registry lock. Commit the deletion before allowing
+        # logout to report success; stale cookies must not revive after restart.
+        self._store_delete(handle)
+        return self._sessions.pop(handle, None)
 
     def _matrix(self, method, path, token=None, data=None):
         return self.matrix_request(self.matrix_url, method, PREFIX + path, token, data)
@@ -92,21 +165,30 @@ class MatrixSessions:
             except Exception:
                 pass
             raise
-        with self._lock:
-            now = self.now()
-            expired = [entry for entry in self._sessions.values()
-                       if entry.expires_at <= now]
-            self._sessions = {key: entry for key, entry in self._sessions.items()
-                              if entry.expires_at > now}
-            full = len(self._sessions) >= self.MAX_SESSIONS
-            if not full:
-                handle = secrets.token_urlsafe(32)
-                active = ActiveSession(user, token, device, workspace,
-                                       now + self.lifetime)
-                self._sessions[handle] = active
+        expired_tokens = set()
+        try:
+            with self._lock:
+                now = self.now()
+                expired_tokens.update(entry.access_token for entry in self._sessions.values()
+                                      if entry.expires_at <= now)
+                self._sessions = {key: entry for key, entry in self._sessions.items()
+                                  if entry.expires_at > now}
+                persisted_expired, count = self._store_prune(now)
+                expired_tokens.update(persisted_expired)
+                full = count >= self.MAX_SESSIONS
+                if not full:
+                    handle = secrets.token_urlsafe(32)
+                    active = ActiveSession(user, token, device, workspace,
+                                           now + self.lifetime, workspace.csrf)
+                    # Publish the local handle only after durable storage commits.
+                    self._store_add(handle, active)
+                    self._sessions[handle] = active
+        except (sqlite3.Error, OSError) as exc:
+            self._revoke_token(token)
+            raise SessionError(503, 'Private session storage is unavailable.') from exc
         # Remote HTTP is deliberately outside the registry lock.
-        for entry in expired:
-            self._revoke_token(entry.access_token)
+        for expired_token in expired_tokens:
+            self._revoke_token(expired_token)
         if full:
             self._revoke_token(token)
             raise SessionError(429, 'Too many local sessions. Try again later.')
@@ -135,9 +217,13 @@ class MatrixSessions:
         handle = self.handle_from_cookie(cookie)
         with self._lock:
             current = self._sessions.get(handle)
+            if current is None:
+                current = self._store_find(handle)
+                if current is not None:
+                    self._sessions[handle] = current
             expired = current is not None and current.expires_at <= self.now()
             if expired:
-                self._sessions.pop(handle, None)
+                self._forget(handle)
         if expired:
             self._revoke_token(current.access_token)
             current = None
@@ -153,20 +239,41 @@ class MatrixSessions:
         except MatrixError as exc:
             if exc.status in (401, 403):
                 with self._lock:
-                    self._sessions.pop(handle, None)
+                    self._forget(handle)
                 raise SessionError(401, 'Matrix session expired. Sign in again.') from None
             raise
         if not isinstance(whoami, dict) or whoami.get('user_id') != current.user_id:
             with self._lock:
-                self._sessions.pop(handle, None)
+                self._forget(handle)
+            self._revoke_token(current.access_token)
             raise SessionError(401, 'Matrix identity changed. Sign in again.')
+        if current.workspace is None:
+            # After a server restart, rebuild the workspace only after whoami.
+            # Reuse the original CSRF so already-open browser tabs can recover.
+            try:
+                workspace = self.workspace_factory(current.access_token, current.user_id)
+                if workspace.user_id != current.user_id:
+                    raise SessionError(401, 'Matrix workspace identity changed.')
+            except MatrixError as exc:
+                if exc.status in (401, 403):
+                    with self._lock:
+                        self._forget(handle)
+                    raise SessionError(401, 'Matrix session expired. Sign in again.') from None
+                raise
+            with self._lock:
+                if self._sessions.get(handle) is not current:
+                    raise SessionError(401, 'Matrix session expired. Sign in again.')
+                workspace.csrf = current.csrf
+                current.workspace = workspace
         return current
 
     def logout(self, cookie):
+        # Do not contact whoami: a user must be able to sign out while offline.
+        session = self.local(cookie)
         handle = self.handle_from_cookie(cookie)
         with self._lock:
-            session = self._sessions.pop(handle, None)
-        if session is None:
+            removed = self._forget(handle)
+        if removed is None:
             raise SessionError(401, 'This session is already signed out.')
         try:
             self._matrix('POST', '/logout', session.access_token, {})

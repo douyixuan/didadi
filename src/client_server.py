@@ -228,8 +228,10 @@ def handler(workspace, dist, port, sessions=None):
                                        else sessions.require(self.headers.get('Cookie')))
                     current_workspace = current_session.workspace
                 if method != 'GET':
-                    if current_workspace is None or not hmac.compare_digest(
-                            self.headers.get('X-CSRF-Token', ''), current_workspace.csrf):
+                    expected_csrf = (current_session.csrf if sessions is not None and signed_out
+                                     else (current_workspace.csrf if current_workspace is not None else None))
+                    if not expected_csrf or not hmac.compare_digest(
+                            self.headers.get('X-CSRF-Token', ''), expected_csrf):
                         raise ClientError(403, 'Refresh this session before retrying.')
                     origin = self.headers.get('Origin')
                     if origin and origin not in origins:
@@ -383,6 +385,7 @@ if __name__ == '__main__':
     parser.add_argument('--port', type=int, default=8767)
     parser.add_argument('--auth-mode', choices=('fixture', 'matrix'), default='fixture',
                         help='matrix requires actual Matrix password login; no implicit fixture login')
+    parser.add_argument('--session-store', help='private SQLite Matrix sessions (default: <metadata>.matrix-sessions.sqlite)')
     args = parser.parse_args()
     from src.repository_read import RepositoryReader
     repositories = RepositoryReader.from_file(args.repository_grants) if args.repository_grants else None
@@ -407,7 +410,8 @@ if __name__ == '__main__':
             if workspace.user_id != user_id:
                 raise ClientError(401, 'Matrix account identity mismatch.')
             return workspace
-        sessions = MatrixSessions(args.matrix_url, create_workspace)
+        sessions = MatrixSessions(args.matrix_url, create_workspace,
+                                  store_path=args.session_store or args.metadata + '.matrix-sessions.sqlite')
         workspace = None
     else:
         sessions = None

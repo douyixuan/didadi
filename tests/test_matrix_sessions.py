@@ -1,6 +1,9 @@
 """Offline unit checks for actual Matrix token-backed session policy (no network)."""
 import unittest
 from types import SimpleNamespace
+from pathlib import Path
+import os
+import tempfile
 from src.matrix_as import PREFIX
 from src.matrix_http import MatrixError
 from src.matrix_sessions import MatrixSessions, SessionError
@@ -125,6 +128,59 @@ class MatrixSessionsTests(unittest.TestCase):
                          other.user_id)
         with self.assertRaises(SessionError):
             self.sessions.logout('didadi_session=' + a)
+
+    def test_private_disk_sessions_survive_server_restart_without_new_login(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'matrix-sessions.sqlite'
+            factory = self.sessions.workspace_factory
+            transport = self.sessions.matrix_request
+            clock = self.sessions.now
+            def registry():
+                return MatrixSessions('http://127.0.0.1:8009', factory, transport, clock,
+                                      lifetime=60, store_path=path)
+            first = registry()
+            cookie, issued = first.login('alice', 'secret-a')
+            browser_cookie = 'didadi_session=' + cookie
+            self.assertEqual(os.stat(path).st_mode & 0o077, 0)
+            self.assertNotIn(cookie, path.read_bytes().decode(errors='ignore'))
+            restarted = registry()
+            local = restarted.local(browser_cookie)
+            self.assertIsNone(local.workspace)
+            self.assertEqual(local.csrf, issued.workspace.csrf)
+            recovered = restarted.require(browser_cookie)
+            self.assertEqual(recovered.user_id, issued.user_id)
+            self.assertEqual(recovered.workspace.csrf, issued.workspace.csrf)
+            self.assertEqual(len([x for x in self.calls if x[1].endswith('/login')]), 1)
+            self.revocation_unavailable = True
+            self.assertEqual(restarted.logout(browser_cookie)['matrix_revocation'], 'unconfirmed')
+            third = registry()
+            with self.assertRaises(SessionError):
+                third.local(browser_cookie)
+
+    def test_expired_persisted_sessions_revoke_orphaned_matrix_devices(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'sessions.sqlite'
+            make = lambda: MatrixSessions('http://127.0.0.1:8009',
+                self.sessions.workspace_factory, self.sessions.matrix_request,
+                self.sessions.now, lifetime=60, store_path=path)
+            first = make()
+            alice, active = first.login('alice', 'secret-a')
+            self.clock[0] += 61
+            another = make()
+            another.login('bob', 'secret-b')
+            self.assertIn(active.access_token, self.invalid)
+            with self.assertRaises(SessionError):
+                another.require('didadi_session=' + alice)
+
+    def test_store_rejects_unsafe_file_permissions(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'sessions.sqlite'
+            path.touch(mode=0o600)
+            path.chmod(0o644)
+            with self.assertRaises(ValueError):
+                MatrixSessions('http://127.0.0.1:8009',
+                    self.sessions.workspace_factory, self.sessions.matrix_request,
+                    self.sessions.now, store_path=path)
 
     def test_workspace_identity_mismatch_revokes_access_token(self):
         self.sessions.workspace_factory = lambda *_: SimpleNamespace(user_id='@spoof:local')

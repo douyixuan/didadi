@@ -63,8 +63,9 @@ class TestLiveMatrixClientServer(unittest.TestCase):
             self.workspaces.append((user, token, result))
             return result
 
-        self.registry = MatrixSessions('http://127.0.0.1:8009', factory, matrix)
         self.dist = Path(self.folder.name)
+        self.registry = MatrixSessions('http://127.0.0.1:8009', factory, matrix,
+                                       store_path=self.dist / 'sessions.sqlite')
         (self.dist / 'index.html').write_text('HTML app shell')
         self.server = ThreadingHTTPServer(('127.0.0.1', 0), BaseHTTPRequestHandler)
         self.server.RequestHandlerClass = handler(
@@ -141,6 +142,32 @@ class TestLiveMatrixClientServer(unittest.TestCase):
         with self.assertRaises(HTTPError) as revoked:
             self.fetch('/api/session', cookie=alice)
         self.assertEqual(revoked.exception.code, 401)
+
+    def test_cookie_and_csrf_survive_http_server_session_registry_restart(self):
+        alice = self.login('alice')
+        bob = self.login('bob')
+        a, _ = self.fetch('/api/session', cookie=alice)
+        b, _ = self.fetch('/api/session', cookie=bob)
+        # Simulate replacing the backend process with a new registry and no memory.
+        old = self.registry
+        fresh = MatrixSessions('http://127.0.0.1:8009',
+            old.workspace_factory, old.matrix_request,
+            store_path=self.dist / 'sessions.sqlite')
+        self.server.RequestHandlerClass = handler(None, self.dist, self.server.server_port, fresh)
+        again, _ = self.fetch('/api/session', cookie=alice)
+        self.assertEqual(again['userId'], a['userId'])
+        self.assertEqual(again['csrf'], a['csrf'])
+        # Bob has never been hydrated by the new process. Offline logout must
+        # still invalidate its persisted cookie with the original CSRF.
+        self.matrix_down = True
+        result, cleared = self.fetch('/api/auth/logout', 'POST', {}, cookie=bob, csrf=b['csrf'])
+        self.assertEqual(result['matrix_revocation'], 'unconfirmed')
+        self.assertIn('Max-Age=0', cleared)
+        self.matrix_down = False
+        with self.assertRaises(HTTPError) as denied:
+            self.fetch('/api/session', cookie=bob)
+        self.assertEqual(denied.exception.code, 401)
+        self.assertEqual(self.fetch('/api/session', cookie=alice)[0]['userId'], a['userId'])
 
     def test_login_requires_origin_and_custom_header_and_rejects_wrong_password(self):
         for options in [{'origin': False, 'flag': True}, {'flag': False}]:
