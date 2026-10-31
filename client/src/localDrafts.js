@@ -10,6 +10,20 @@ export function draftContext(session,room,name='demo.md'){
   if(!session?.userId||!room)return null;
   return JSON.stringify([session.synthetic?'synthetic':'matrix',session.userId,room,name]);
 }
+// Called only after the server confirms current-device logout. Keep other users' drafts.
+export function clearUserDrafts(session,storage=window.localStorage) {
+  if(!session?.userId||session.synthetic)return 0;
+  const keys=[];
+  for(let i=0;i<storage.length;i++){
+    const key=storage.key(i);if(!key?.startsWith(PREFIX))continue;
+    let record,scope;
+    try{record=JSON.parse(storage.getItem(key));scope=JSON.parse(record.context);}
+    catch{continue;}
+    if(Array.isArray(scope)&&scope[0]==='matrix'&&scope[1]===session.userId)keys.push(key);
+  }
+  for(const key of keys)storage.removeItem(key);
+  return keys.length;
+}
 export class LocalDraftStore {
   constructor(context,storage=()=>window.localStorage){this.context=context;this.storage=storage;this.id=crypto.randomUUID();}
   transaction(action){

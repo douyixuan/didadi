@@ -15,6 +15,10 @@ jobs:
           python-version: '3.13'
       - name: Temporary Git tests with network and process guards
         run: python3 -m scripts.offline_python
+      - name: Injected local Matrix login HTTP routing (not real Synapse)
+        run: python3 -m unittest discover -s tests -p test_real_matrix_client_server.py -v
+      - name: Compile real Matrix integration runner (syntax only)
+        run: python3 -m py_compile scripts/real_login_smoke.py
   react-client:
     runs-on: ubuntu-latest
     steps:
