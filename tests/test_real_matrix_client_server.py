@@ -22,10 +22,13 @@ class TestLiveMatrixClientServer(unittest.TestCase):
         self.tokens = {'alice': ('@alice:localhost', 'session-token-alice-012345'),
                        'bob': ('@bob:localhost', 'session-token-bob-012345')}
         self.revoked = set()
+        self.matrix_down = False
         self.workspaces = []
 
         def matrix(base, method, path, token=None, data=None):
             self.assertEqual(base, 'http://127.0.0.1:8009')
+            if self.matrix_down and path in (PREFIX + '/account/whoami', PREFIX + '/logout'):
+                raise MatrixError(503, {'errcode': 'M_UNAVAILABLE'})
             if path == PREFIX + '/login':
                 name = data['identifier']['user']
                 if name not in self.tokens or data['password'] != 'pass-' + name:
@@ -121,6 +124,23 @@ class TestLiveMatrixClientServer(unittest.TestCase):
             self.fetch('/api/session', cookie=alice)
         self.assertEqual(signed_out.exception.code, 401)
         self.assertEqual(self.fetch('/api/session', cookie=bob)[0]['userId'], '@bob:localhost')
+
+    def test_signout_revokes_local_handle_even_when_synapse_is_down(self):
+        alice = self.login('alice')
+        session, _ = self.fetch('/api/session', cookie=alice)
+        self.matrix_down = True
+        # CSRF still protects offline logout. No unauthenticated invalidation.
+        with self.assertRaises(HTTPError) as cross:
+            self.fetch('/api/auth/logout', 'POST', {}, cookie=alice, csrf='wrong')
+        self.assertEqual(cross.exception.code, 403)
+        result, cleared = self.fetch('/api/auth/logout', 'POST', {}, cookie=alice,
+                                     csrf=session['csrf'])
+        self.assertEqual(result['matrix_revocation'], 'unconfirmed')
+        self.assertIn('Max-Age=0', cleared)
+        self.matrix_down = False
+        with self.assertRaises(HTTPError) as revoked:
+            self.fetch('/api/session', cookie=alice)
+        self.assertEqual(revoked.exception.code, 401)
 
     def test_login_requires_origin_and_custom_header_and_rejects_wrong_password(self):
         for options in [{'origin': False, 'flag': True}, {'flag': False}]:

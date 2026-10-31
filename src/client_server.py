@@ -221,7 +221,12 @@ def handler(workspace, dist, port, sessions=None):
                     return
                 current_workspace = workspace
                 if sessions is not None and parsed.path.startswith(('/api/', '/matrix/')):
-                    current_workspace = sessions.require(self.headers.get('Cookie')).workspace
+                    # Sign-out must work offline: validate the local cookie+CSRF+origin,
+                    # then invalidate it even when Matrix /whoami is unreachable.
+                    signed_out = parsed.path == '/api/auth/logout' and method == 'POST'
+                    current_session = (sessions.local(self.headers.get('Cookie')) if signed_out
+                                       else sessions.require(self.headers.get('Cookie')))
+                    current_workspace = current_session.workspace
                 if method != 'GET':
                     if current_workspace is None or not hmac.compare_digest(
                             self.headers.get('X-CSRF-Token', ''), current_workspace.csrf):

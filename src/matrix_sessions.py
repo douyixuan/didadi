@@ -47,6 +47,14 @@ class MatrixSessions:
     def _matrix(self, method, path, token=None, data=None):
         return self.matrix_request(self.matrix_url, method, PREFIX + path, token, data)
 
+    def _revoke_token(self, token):
+        # Never retain an expired Matrix device after dropping its local handle.
+        # A network outage must not prevent local invalidation.
+        try:
+            self._matrix('POST', '/logout', token, {})
+        except Exception:
+            pass
+
     def login(self, username, password):
         if (not isinstance(username, str) or not 1 <= len(username) <= 255 or
                 username.strip() != username or any(ch.isspace() for ch in username) or
@@ -86,18 +94,23 @@ class MatrixSessions:
             raise
         with self._lock:
             now = self.now()
-            self._sessions = {key: session for key, session in self._sessions.items()
-                              if session.expires_at > now}
-            if len(self._sessions) >= self.MAX_SESSIONS:
-                try:
-                    self._matrix('POST', '/logout', token, {})
-                except Exception:
-                    pass
-                raise SessionError(429, 'Too many local sessions. Try again later.')
-            handle = secrets.token_urlsafe(32)
-            self._sessions[handle] = ActiveSession(user, token, device, workspace,
-                                                   now + self.lifetime)
-        return handle, self._sessions[handle]
+            expired = [entry for entry in self._sessions.values()
+                       if entry.expires_at <= now]
+            self._sessions = {key: entry for key, entry in self._sessions.items()
+                              if entry.expires_at > now}
+            full = len(self._sessions) >= self.MAX_SESSIONS
+            if not full:
+                handle = secrets.token_urlsafe(32)
+                active = ActiveSession(user, token, device, workspace,
+                                       now + self.lifetime)
+                self._sessions[handle] = active
+        # Remote HTTP is deliberately outside the registry lock.
+        for entry in expired:
+            self._revoke_token(entry.access_token)
+        if full:
+            self._revoke_token(token)
+            raise SessionError(429, 'Too many local sessions. Try again later.')
+        return handle, active
 
     @classmethod
     def handle_from_cookie(cls, header):
@@ -113,15 +126,28 @@ class MatrixSessions:
             return None
         return candidates[0]
 
-    def require(self, cookie):
+    def local(self, cookie):
+        """Validate the local handle without network IO (only for CSRF-guarded logout).
+
+        A Matrix outage must not trap a user in a locally authenticated session.
+        All other workspace routes still use require() for live whoami checks.
+        """
         handle = self.handle_from_cookie(cookie)
         with self._lock:
             current = self._sessions.get(handle)
-            if current and current.expires_at <= self.now():
+            expired = current is not None and current.expires_at <= self.now()
+            if expired:
                 self._sessions.pop(handle, None)
-                current = None
+        if expired:
+            self._revoke_token(current.access_token)
+            current = None
         if current is None:
             raise SessionError(401, 'Sign in to your Matrix account.')
+        return current
+
+    def require(self, cookie):
+        handle = self.handle_from_cookie(cookie)
+        current = self.local(cookie)
         try:
             whoami = self._matrix('GET', '/account/whoami', current.access_token)
         except MatrixError as exc:

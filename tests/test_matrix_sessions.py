@@ -90,6 +90,27 @@ class MatrixSessionsTests(unittest.TestCase):
         self.clock[0] += 61
         with self.assertRaises(SessionError):
             self.sessions.require('didadi_session=' + key)
+        self.assertIn('token-bob-0123456789', self.invalid)
+
+    def test_expired_sessions_are_revoked_on_next_login(self):
+        alice, session = self.sessions.login('alice', 'secret-a')
+        self.clock[0] += 61
+        bob, active = self.sessions.login('bob', 'secret-b')
+        self.assertIn(session.access_token, self.invalid)
+        self.assertEqual(self.sessions.require('didadi_session=' + bob), active)
+        with self.assertRaises(SessionError):
+            self.sessions.require('didadi_session=' + alice)
+
+    def test_local_logout_validation_does_not_require_matrix_whoami(self):
+        handle, active = self.sessions.login('alice', 'secret-a')
+        cookie = 'didadi_session=' + handle
+        before = len([call for call in self.calls if call[1].endswith('/account/whoami')])
+        self.assertEqual(self.sessions.local(cookie), active)
+        self.assertEqual(before, len([call for call in self.calls if call[1].endswith('/account/whoami')]))
+        self.revocation_unavailable = True
+        self.assertEqual(self.sessions.logout(cookie)['matrix_revocation'], 'unconfirmed')
+        with self.assertRaises(SessionError):
+            self.sessions.local(cookie)
 
     def test_logout_only_invalidates_one_device_and_cannot_be_replayed(self):
         a, _ = self.sessions.login('alice', 'secret-a')

@@ -260,7 +260,7 @@ export function App({connector=connect}) {
   const roomCurrent=useRef(room);roomCurrent.current=room;
   useEffect(()=>{if(room&&location.protocol.startsWith('http')){const url=new URL(location.href);url.searchParams.set('room',room);window.history.replaceState({},'',url);}},[room]);
 
-  async function start(){setError('');try{const next=await connector();const list=await next.rooms();setApi(next);setAuthRequired(false);setRooms(list);const requested=new URLSearchParams(location.search).get('room');setRoom(list.some(r=>r.id===requested)?requested:(list.some(r=>r.id===next.session.initialRoom)?next.session.initialRoom:(list[0]?.id||'')));setOnline(true);refreshDocuments(next);}catch(e){if(e.status===401){setAuthRequired(true);setApi(null);}else setError(errorText(e));}}
+  async function start(){setError('');try{const next=await connector();const list=await next.rooms();setApi(next);setAuthRequired(false);setRooms(list);const requested=new URLSearchParams(location.search).get('room');setRoom(list.some(r=>r.id===requested)?requested:(list.some(r=>r.id===next.session.initialRoom)?next.session.initialRoom:(list[0]?.id||'')));setOnline(true);refreshDocuments(next);}catch(e){setApi(null);setOnline(false);if(e.status===401)setAuthRequired(true);else{setAuthRequired(false);setError(errorText(e));}}}
   useEffect(()=>{start();},[connector]);
   useEffect(()=>{const expired=()=>{setApi(null);setAuthRequired(true);window.location.replace('/');};window.addEventListener('didadi-matrix-session-expired',expired);return()=>window.removeEventListener('didadi-matrix-session-expired',expired);},[]);
   async function signOut(){
