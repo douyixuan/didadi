@@ -6,6 +6,7 @@ passwords. This is not a browser/IME acceptance and is never run offline.
 import argparse
 from pathlib import Path
 import json
+import os
 import secrets
 import uuid
 from urllib.error import HTTPError
@@ -17,7 +18,7 @@ from src.matrix_http import segment
 from src.runtime_socket import loopback_url
 
 
-def run(base, credentials):
+def run(base, credentials, restart_proof=None):
     loopback_url(base, 'http')
     if not isinstance(credentials, dict) or len(credentials) != 2:
         raise ValueError('Expected exactly two locally generated Matrix login accounts.')
@@ -152,20 +153,77 @@ def run(base, credentials):
     denied(401, '/api/session', cookie=alice[1])
     assert call('/api/session', cookie=bob[1])[0]['userId'] == bob[0]
     print('PASS REAL MATRIX wrong password, CSRF isolation and current-device logout')
-    # Leave Bob's device active for manual browser refresh/logout verification.
+    # Keep one genuine device cookie private for the independently restarted
+    # backend to verify rehydration without a new Matrix password login.
+    # This file is sensitive local test state. Never upload it as a CI artifact.
+    if restart_proof is not None:
+        path = Path(restart_proof)
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0)
+        descriptor = os.open(path, flags, 0o600)
+        with os.fdopen(descriptor, 'w') as out:
+            json.dump({'user': bob[0], 'cookie': bob[1], 'csrf': bob[2]['csrf'],
+                       'room': room, 'path': name, 'commit': created['commit'],
+                       'body': body}, out)
+    # Leave Bob's real device active until --check-restart-proof revokes it.
     return created['commit']
+
+
+def verify_restart(base, restart_proof):
+    """Prove a new HTTP server process restored the same live Matrix device."""
+    loopback_url(base, 'http')
+    record_path = Path(restart_proof)
+    record = json.loads(record_path.read_text())
+    headers = {'Cookie': record['cookie'], 'Origin': base}
+    def retrieve(route):
+        with urlopen(Request(base + route, headers=headers), timeout=20) as response:
+            return json.load(response)
+    session = retrieve('/api/session')
+    assert session['liveMatrix'] is True
+    assert session['userId'] == record['user']
+    assert session['csrf'] == record['csrf']
+    doc = retrieve('/api/document?' + urlencode({
+        'room': record['room'], 'path': record['path']}))
+    assert doc['content'] == record['body']
+    assert doc['commit'] == record['commit']
+    # The verified original handle is locally revoked and upstream logout
+    # is attempted. A stale cookie cannot rehydrate again on any new process.
+    request = Request(base + '/api/auth/logout', method='POST',
+        headers={**headers, 'Content-Type': 'application/json',
+                 'X-CSRF-Token': record['csrf']}, data=b'{}')
+    with urlopen(request, timeout=20) as response:
+        assert json.load(response)['status'] == 'signed_out'
+    try:
+        retrieve('/api/session')
+        raise AssertionError('Logged out cookie rehydrated after backend restart')
+    except HTTPError as error:
+        assert error.code == 401
+    # Do not retain a plaintext cookie even in ephemeral CI state.
+    record_path.unlink()
+    print('PASS REAL SYNAPSE device survives actual backend process restart and Git read, then logs out')
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--url', default='http://127.0.0.1:8791')
-    parser.add_argument('--credentials-file', required=True,
+    parser.add_argument('--credentials-file',
                         help='private local smoke-passwords.json; do not commit it')
+    parser.add_argument('--restart-proof',
+                        help='write one private one-time session record for a subsequent backend restart')
+    parser.add_argument('--check-restart-proof',
+                        help='after restarting the backend, validate and revoke the retained device')
     args = parser.parse_args()
+    if args.check_restart_proof:
+        if args.credentials_file or args.restart_proof:
+            parser.error('Restart verification must not accept new credentials')
+        verify_restart(args.url, args.check_restart_proof)
+        return
+    if not args.credentials_file:
+        parser.error('--credentials-file is required')
     creds = json.loads(Path(args.credentials_file).read_text())
-    commit = run(args.url, creds)
+    commit = run(args.url, creds, args.restart_proof)
     print('REAL SYNAPSE HTTP acceptance complete. Git commit:', commit)
-    print('NOT verified: physical browser/IME, server restart, public deployment.')
+    print('NOT verified: physical browser/IME or public deployment. Restart checked separately.')
 
 
 if __name__ == '__main__':
