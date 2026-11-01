@@ -140,25 +140,35 @@ jobs:
           chmod 700 .local/real-login-browser
           docker compose cp appservice:/config/smoke-passwords.json .local/smoke-passwords.json
           chmod 600 .local/smoke-passwords.json
-          python3 -m src.client_server --auth-mode matrix \
-            --state-file .local/smoke-state.json \
-            --token-file .local/agent-token \
-            --repo .local/documents.git \
-            --metadata .local/real-login-client.sqlite \
-            --matrix-url http://127.0.0.1:8008 \
-            --gateway-url http://127.0.0.1:9000 \
-            --port 8791 > .local/real-login-client.log 2>&1 &
-          client_pid=$!
+          start_client() {
+            python3 -m src.client_server --auth-mode matrix \
+              --state-file .local/smoke-state.json \
+              --token-file .local/agent-token \
+              --repo .local/documents.git \
+              --metadata .local/real-login-client.sqlite \
+              --matrix-url http://127.0.0.1:8008 \
+              --gateway-url http://127.0.0.1:9000 \
+              --port 8791 > .local/real-login-client.log 2>&1 &
+            client_pid=$!
+            ready=0
+            for attempt in $(seq 1 45); do
+              if curl --fail --silent http://127.0.0.1:8791/ > /dev/null; then ready=1; break; fi
+              sleep 1
+            done
+            if [ "$ready" != 1 ]; then cat .local/real-login-client.log; exit 1; fi
+          }
           trap 'kill "$client_pid" 2>/dev/null || true' EXIT
-          ready=0
-          for attempt in $(seq 1 45); do
-            if curl --fail --silent http://127.0.0.1:8791/ > /dev/null; then ready=1; break; fi
-            sleep 1
-          done
-          if [ "$ready" != 1 ]; then cat .local/real-login-client.log; exit 1; fi
+          start_client
           python3 -m scripts.real_login_smoke \
             --url http://127.0.0.1:8791 \
-            --credentials-file .local/smoke-passwords.json
+            --credentials-file .local/smoke-passwords.json \
+            --restart-proof .local/real-login-restart.json
+          kill "$client_pid"
+          wait "$client_pid" 2>/dev/null || true
+          start_client
+          python3 -m scripts.real_login_smoke \
+            --url http://127.0.0.1:8791 \
+            --check-restart-proof .local/real-login-restart.json
           npm --prefix client install --no-save --package-lock=false --ignore-scripts \
             --no-audit --no-fund @playwright/test@1.56.1
           ./client/node_modules/.bin/playwright install chromium --with-deps
