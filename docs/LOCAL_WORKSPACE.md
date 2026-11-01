@@ -115,7 +115,33 @@ Run a reproducible **real Synapse + actual HTTP client + Git** check in this iso
   --credentials-file .local/bundle/smoke-passwords.json
 ```
 
-The script creates one fresh test message and a uniquely named Git Markdown document, verifies two logged-in identities and cross-user authorized read, rejects another room, tests CSRF isolation and current-device logout. It **does not** prove browser GUI/IME, server restart, public deployment or Agent end-to-end execution. For those, perform independent real-browser acceptance with two isolated browser profiles and retain screenshots/network traces, exact commit SHA and Synapse/Git evidence. Never run the script on a non-test workspace.
+The HTTP script saves **two** separate Git Markdown files through authenticated sessions, checks metadata-only receipts and forbidden edits, and verifies invalid credentials, private-room isolation and current-device logout. By itself, it does **not** prove browser UI or backend restart.
+
+**Actual backend process restart:** Run the HTTP smoke above with the additional flag `--restart-proof .local/bundle/real-login-restart.json`. Stop only your own client_server process, without deleting the .local directory or Compose volumes. Restart exactly the same matrix-authenticated server with the same metadata/session-store/repo/port, then execute:
+
+```sh
+.venv-delivery/bin/python -m scripts.real_login_smoke \
+  --url http://127.0.0.1:8791 \
+  --check-restart-proof .local/bundle/real-login-restart.json
+```
+
+This check restores the same real Matrix cookie and CSRF, reads the same immutable Git document, revokes the device and deletes its private one-time cookie proof. Never upload the cookie proof or the session database as artifacts.
+
+**Genuine browser E2E (not fixture mode):** With the isolated Synapse and matrix-authenticated client running, execute:
+
+```sh
+npm --prefix client install --no-save --package-lock=false --ignore-scripts \
+  --no-audit --no-fund @playwright/test@1.56.1
+./client/node_modules/.bin/playwright install chromium
+node client/scripts/real_login_browser.mjs \
+  --url http://127.0.0.1:8791 \
+  --credentials-file .local/bundle/smoke-passwords.json \
+  --evidence-dir .local/bundle/real-login-browser
+```
+
+The browser runner uses two independent real Matrix accounts and isolated Chromium profiles: UI login, document create/edit/save to Git, read-only cross-user access, message delivery, private-room denial, refresh, incorrect-password rejection and UI logout. It writes a credential-free test-only `git-proof.json`: verify the marker with `git --git-dir=<documents.git> show <commit>:<path>`. Never run this on non-test users or public previews.
+
+The [Real Matrix integration workflow](../.github/workflows/real-matrix.yml) combines HTTP, actual backend restart, Playwright and immutable Git assertions **only after its existing explicit workflow_dispatch approval**. The ordinary offline Test workflow only parses the browser runner; its green status cannot establish a real browser result. Physical IME testing and a public deployment remain separate acceptance requirements.
 
 ## Stop and recover
 
