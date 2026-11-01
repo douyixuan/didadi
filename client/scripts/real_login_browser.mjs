@@ -117,7 +117,7 @@ try {
   const message = 'Browser message ' + randomUUID().replaceAll('-', '');
   await alice.page.getByRole('button', {name: 'Discussion', exact: true}).click();
   await alice.page.locator('.composer textarea').fill(message);
-  await alice.page.locator('.composer button[type="submit"]').click();
+  await alice.page.locator('.composer').getByRole('button', {name: /^Send/}).click();
   await expect(alice.page.locator('.timeline')).toContainText(message, {timeout: 45000});
   await bob.page.getByRole('button', {name: 'Discussion', exact: true}).click();
   await bob.page.reload();
