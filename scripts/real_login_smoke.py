@@ -149,7 +149,7 @@ def run(base, credentials, restart_proof=None):
            {'username': alice[0], 'password': 'invalid-login-password'}, login=True)
     denied(403, '/api/auth/logout', 'POST', {}, cookie=bob[1], csrf=alice[2]['csrf'])
     done, _ = call('/api/auth/logout', 'POST', {}, cookie=alice[1], csrf=alice[2]['csrf'])
-    assert done['status'] == 'signed_out'
+    assert done['status'] == 'signed_out' and done['matrix_revocation'] == 'confirmed'
     denied(401, '/api/session', cookie=alice[1])
     assert call('/api/session', cookie=bob[1])[0]['userId'] == bob[0]
     print('PASS REAL MATRIX wrong password, CSRF isolation and current-device logout')
@@ -192,7 +192,9 @@ def verify_restart(base, restart_proof):
         headers={**headers, 'Content-Type': 'application/json',
                  'X-CSRF-Token': record['csrf']}, data=b'{}')
     with urlopen(request, timeout=20) as response:
-        assert json.load(response)['status'] == 'signed_out'
+        result = json.load(response)
+        assert result['status'] == 'signed_out'
+        assert result['matrix_revocation'] == 'confirmed', 'Real Synapse must revoke this device'
     try:
         retrieve('/api/session')
         raise AssertionError('Logged out cookie rehydrated after backend restart')
