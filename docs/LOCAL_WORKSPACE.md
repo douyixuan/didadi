@@ -145,7 +145,7 @@ The [Real Matrix integration workflow](../.github/workflows/real-matrix.yml) com
 
 ## Stop and recover
 
-Press Control-C in the four process terminals. Stop only this Compose project, retaining its data:
+Press Control-C in the optional fifth Matrix-authenticated client terminal (port 8791) if started, then stop the four fixture-mode process terminals. Stop only this Compose project, retaining its data:
 
 ```sh
 docker compose -p didadi-bundle down
