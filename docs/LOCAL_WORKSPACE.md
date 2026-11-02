@@ -132,7 +132,7 @@ This check restores the same real Matrix cookie and CSRF, reads the same immutab
 ```sh
 npm --prefix client install --no-save --package-lock=false --ignore-scripts \
   --no-audit --no-fund @playwright/test@1.56.1
-./client/node_modules/.bin/playwright install chromium
+./client/node_modules/.bin/playwright install chromium --with-deps
 node client/scripts/real_login_browser.mjs \
   --url http://127.0.0.1:8791 \
   --credentials-file .local/bundle/smoke-passwords.json \
