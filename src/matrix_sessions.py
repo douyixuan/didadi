@@ -253,7 +253,9 @@ class MatrixSessions:
             if expired:
                 self._forget(handle)
         if expired:
-            self._revoke_token(current.access_token)
+            # The handle is already invalid in memory and durable storage.
+            # A stalled Synapse /logout must never delay an expired-cookie 401.
+            self._schedule_revocation((current.access_token,))
             current = None
         if current is None:
             raise SessionError(401, 'Sign in to your Matrix account.')
