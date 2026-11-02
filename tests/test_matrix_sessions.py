@@ -136,6 +136,35 @@ class MatrixSessionsTests(unittest.TestCase):
         with self.assertRaises(SessionError):
             self.sessions.local('didadi_session=' + first)
 
+    def test_expired_cookie_denial_does_not_wait_for_synapse_logout(self):
+        handle, active = self.sessions.login('alice', 'secret-a')
+        upstream_entered = threading.Event()
+        release_upstream = threading.Event()
+        original = self.sessions.matrix_request
+
+        def stalled_logout(url, method, path, token=None, data=None):
+            if path.endswith('/logout'):
+                upstream_entered.set()
+                release_upstream.wait(3)
+            return original(url, method, path, token, data)
+
+        self.sessions.matrix_request = stalled_logout
+        self.clock[0] += 61
+        try:
+            began = time.monotonic()
+            with self.assertRaises(SessionError) as denied:
+                self.sessions.local('didadi_session=' + handle)
+            self.assertEqual(denied.exception.status, 401)
+            self.assertLess(time.monotonic() - began, 1,
+                            'An expired-cookie 401 must not wait for Matrix logout')
+            self.assertTrue(upstream_entered.wait(1))
+            with self.assertRaises(SessionError):
+                self.sessions.local('didadi_session=' + handle)
+        finally:
+            release_upstream.set()
+        self.sessions._revoke_queue.join()
+        self.assertIn(active.access_token, self.invalid)
+
     def test_local_logout_validation_does_not_require_matrix_whoami(self):
         handle, active = self.sessions.login('alice', 'secret-a')
         cookie = 'didadi_session=' + handle
