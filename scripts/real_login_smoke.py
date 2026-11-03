@@ -192,7 +192,11 @@ def verify_restart(base, restart_proof):
     doc = retrieve('/api/document?' + urlencode({
         'room': record['room'], 'path': record['path']}))
     assert doc['content'] == record['body']
-    assert doc['commit'] == record['commit']
+    # The default revision is repository HEAD; another document may advance it.
+    # The original version must still be available via its immutable commit.
+    pinned = retrieve('/api/document?' + urlencode({
+        'room': record['room'], 'path': record['path'], 'commit': record['commit']}))
+    assert pinned['content'] == record['body'] and pinned['commit'] == record['commit']
     # The verified original handle is locally revoked and upstream logout
     # is attempted. A stale cookie cannot rehydrate again on any new process.
     request = Request(base + '/api/auth/logout', method='POST',
