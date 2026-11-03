@@ -143,8 +143,34 @@ try {
   await invalidPage.goto('/');
   await invalidPage.getByLabel('Matrix user ID').fill(accounts[0][0]);
   await invalidPage.getByLabel('Password').fill('wrong-browser-password');
-  await invalidPage.getByRole('button', {name: 'Sign in', exact: true}).click();
-  await expect(invalidPage.getByRole('alert')).toContainText(/Matrix rejected/, {timeout: 20000});
+  // The HTTP smoke immediately before the browser already used real password
+  // logins from this same loopback IP. Synapse can temporarily reply 429
+  // (rc_login.address); that is NOT proof an incorrect password was rejected.
+  // Retry only after the reported cooldown and require an actual 401.
+  let invalidPasswordRejected = false;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    await invalidPage.getByLabel('Password').fill('wrong-browser-password');
+    const loginResponse = invalidPage.waitForResponse(response =>
+      new URL(response.url()).pathname === '/api/auth/login' &&
+      response.request().method() === 'POST');
+    await invalidPage.getByRole('button', {name: 'Sign in', exact: true}).click();
+    const response = await loginResponse;
+    if (response.status() === 429) {
+      if (attempt === 3) throw new Error('Matrix login limiter did not recover after bounded retries');
+      const body = await response.json().catch(() => ({}));
+      const reported = Number(body.retry_after_ms);
+      const pause = Number.isFinite(reported) && reported > 0
+        ? Math.min(45000, Math.max(1500, reported + 500)) : 12000;
+      console.log('Real Matrix login rate-limited; retrying invalid-password check after cooldown');
+      await invalidPage.waitForTimeout(pause);
+      continue;
+    }
+    assert.equal(response.status(), 401, 'Wrong password must yield a real Matrix 401, not a transport error');
+    await expect(invalidPage.getByRole('alert')).toContainText(/Matrix rejected/, {timeout: 20000});
+    invalidPasswordRejected = true;
+    break;
+  }
+  assert.equal(invalidPasswordRejected, true, 'Wrong password was never rejected by Matrix');
   await expect(invalidPage.getByRole('main', {name: 'Matrix sign in'})).toBeVisible();
 
   await alice.page.getByRole('button', {name: /Sign out/}).click();
