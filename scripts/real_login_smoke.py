@@ -106,9 +106,16 @@ def run(base, credentials, restart_proof=None):
                           cookie=bob[1])
     second_again, _ = call('/api/document?' + urlencode({'room': room, 'path': second_name}),
                            cookie=bob[1])
-    assert first_again['content'] == body and first_again['commit'] == created['commit']
-    assert second_again['content'] == second_body and second_again['commit'] == second['commit']
+    # A document snapshot without ?commit uses the entire Git repository HEAD.
+    # Adding the second document advances HEAD even though the first blob is unchanged.
+    assert first_again['content'] == body and first_again['blob'] == created['blob']
+    assert second_again['content'] == second_body and second_again['blob'] == second['blob']
+    assert first_again['commit'] == second_again['commit'] == second['commit']
     assert second['commit'] != created['commit']
+    historical, _ = call('/api/document?' + urlencode({
+        'room': room, 'path': name, 'commit': created['commit']}), cookie=bob[1])
+    assert historical['content'] == body and historical['blob'] == created['blob']
+    assert historical['commit'] == created['commit']
 
     # Room members without power-level 50 may read but cannot publish Git content.
     denied(403, '/api/documents/' + name, 'PUT',
