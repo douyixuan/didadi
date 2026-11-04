@@ -1,8 +1,30 @@
 name: Real Matrix integration
 on:
   pull_request:
-    types: [synchronize]
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
+    paths:
+      - 'src/**'
+      - 'client/**'
+      - 'scripts/**'
+      - 'tests/**'
+      - 'deploy/**'
+      - 'docker-compose*.yml'
+      - 'requirements-runtime.txt'
+      - '.github/workflows/test.yml'
+      - '.github/workflows/real-matrix.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'client/**'
+      - 'scripts/**'
+      - 'tests/**'
+      - 'deploy/**'
+      - 'docker-compose*.yml'
+      - 'requirements-runtime.txt'
+      - '.github/workflows/test.yml'
+      - '.github/workflows/real-matrix.yml'
   workflow_dispatch:
     inputs:
       allow_real_matrix:
@@ -57,9 +79,10 @@ jobs:
           if-no-files-found: error
       - run: npm --prefix client run build
   matrix-smoke:
-    # One PR-scoped, isolated, synthetic real-Synapse acceptance run explicitly requested by the user.
-    # The existing workflow_dispatch approval requirement remains unchanged.
-    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.allow_real_matrix == true && inputs.approval_reference != '') || (github.event_name == 'pull_request' && github.event.pull_request.number == 90 && github.event.pull_request.head.repo.full_name == 'douyixuan/didadi' && github.event.pull_request.head.ref == 'feat/real-matrix-login-issue69') }}
+    # Always exercise genuine, ephemeral Synapse/Git/browser on trusted first-party
+    # code PRs and matching main pushes. Fork PRs never run this integration job.
+    # Manual dispatch still requires explicit approval and a reference.
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.allow_real_matrix == true && inputs.approval_reference != '') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'douyixuan/didadi' && github.event.pull_request.draft == false) || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -199,12 +222,16 @@ jobs:
           print('PASS REAL GIT immutable browser document at commit ' + proof['commit'])
           PY
       - name: Preserve credential-free real browser acceptance evidence
-        if: success()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: real-matrix-browser-evidence
-          path: .local/real-login-browser/
-          if-no-files-found: error
+          # Explicit allowlist: never upload session cookies, Matrix passwords,
+          # token files, browser profiles or local databases on failure.
+          path: |
+            .local/real-login-browser/*.png
+            .local/real-login-browser/git-proof.json
+          if-no-files-found: warn
           retention-days: 14
       - name: Diagnostics
         if: failure()
