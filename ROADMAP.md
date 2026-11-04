@@ -15,6 +15,10 @@ The available GitHub integration cannot create native milestone objects; the fol
 
 **Execution order:** #69 → #70 → #71 → #72, then #73–#76, #77–#80, #81–#84. Within one phase, independent work may proceed in parallel, but the phase cannot close without its exit test. Prior Issues #1/#2/#3/#11/#14/#15/#16/#18/#22 remain referenced; paused #12 and separately owned PR #41 are not silently changed.
 
+## P0 test-first and CI gates (2026-11-04)
+
+[P0 TDD/CI test matrix and CI policy](docs/P0_TDD_CI.md) defines Red → Green → Refactor → Evidence for #70–#72. The fast `Test` workflow validates guarded Python/React code plus production build; the real `Real Matrix integration` workflow validates the actual isolated Synapse/Document API/browser/Git path on trusted code PRs and relevant main pushes. These are **separate evidence levels**, not interchangeable. Only #69 currently meets its full acceptance; planned tests and workflow changes do not add leaves or close #85. Branch protection's required-check policy is unverified and should be addressed under #72.
+
 ## North star
 
 **Agent-native Workspace for developers and Agent builders.** A human and an external Agent are first-class members of a shared workspace. Discussion (Matrix) creates actionable work; the Agent executes with scoped authority; results become reviewable, versioned Markdown/Git artifacts. Do not attempt to win by duplicating every feature of Feishu, Notion, or Telegram.
