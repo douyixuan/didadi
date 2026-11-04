@@ -10,6 +10,7 @@ on:
       - 'tests/**'
       - 'deploy/**'
       - 'docker-compose*.yml'
+      - 'compose.yaml'
       - 'requirements-runtime.txt'
       - '.github/workflows/test.yml'
       - '.github/workflows/real-matrix.yml'
@@ -22,6 +23,7 @@ on:
       - 'tests/**'
       - 'deploy/**'
       - 'docker-compose*.yml'
+      - 'compose.yaml'
       - 'requirements-runtime.txt'
       - '.github/workflows/test.yml'
       - '.github/workflows/real-matrix.yml'
@@ -82,7 +84,7 @@ jobs:
     # Always exercise genuine, ephemeral Synapse/Git/browser on trusted first-party
     # code PRs and matching main pushes. Fork PRs never run this integration job.
     # Manual dispatch still requires explicit approval and a reference.
-    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.allow_real_matrix == true && inputs.approval_reference != '') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'douyixuan/didadi' && github.event.pull_request.draft == false) || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.allow_real_matrix == true && inputs.approval_reference != '') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.draft == false) || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
