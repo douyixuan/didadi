@@ -8,6 +8,8 @@ import {WorkspaceSearch} from './WorkspaceSearch';
 import {useThread} from './useThread';
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {connect, errorText} from './api';
+import {SignIn} from './SignIn';
+import {clearUserDrafts} from './localDrafts';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {BlockEditor} from './BlockEditor';
@@ -231,6 +233,7 @@ function MessageBody({body='',version,onOpenVersion,disabled=false}) {
 
 export function App({connector=connect}) {
   const [api,setApi]=useState(null),[error,setError]=useState(''),[rooms,setRooms]=useState([]),[room,setRoom]=useState('');
+  const [authRequired,setAuthRequired]=useState(false),[signingOut,setSigningOut]=useState(false);
   const [peopleOpen,setPeopleOpen]=useState(false);
   const [sourceOpen,setSourceOpen]=useState(false),[sourceRequest,setSourceRequest]=useState(null);
   const [quote,setQuote]=useState(null);
@@ -257,8 +260,19 @@ export function App({connector=connect}) {
   const roomCurrent=useRef(room);roomCurrent.current=room;
   useEffect(()=>{if(room&&location.protocol.startsWith('http')){const url=new URL(location.href);url.searchParams.set('room',room);window.history.replaceState({},'',url);}},[room]);
 
-  async function start(){setError('');try{const next=await connector();const list=await next.rooms();setApi(next);setRooms(list);const requested=new URLSearchParams(location.search).get('room');setRoom(list.some(r=>r.id===requested)?requested:(next.session.initialRoom||list[0]?.id||''));setOnline(true);refreshDocuments(next);}catch(e){setError(errorText(e));}}
+  async function start(){setError('');try{const next=await connector();const list=await next.rooms();setApi(next);setAuthRequired(false);setRooms(list);const requested=new URLSearchParams(location.search).get('room');setRoom(list.some(r=>r.id===requested)?requested:(list.some(r=>r.id===next.session.initialRoom)?next.session.initialRoom:(list[0]?.id||'')));setOnline(true);refreshDocuments(next);}catch(e){setApi(null);setOnline(false);if(e.status===401)setAuthRequired(true);else{setAuthRequired(false);setError(errorText(e));}}}
   useEffect(()=>{start();},[connector]);
+  useEffect(()=>{const expired=()=>{setApi(null);setAuthRequired(true);window.location.replace('/');};window.addEventListener('didadi-matrix-session-expired',expired);return()=>window.removeEventListener('didadi-matrix-session-expired',expired);},[]);
+  async function signOut(){
+    if(signingOut||!api?.logout)return;
+    setSigningOut(true);setError('');
+    try{
+      await api.logout();
+      try{clearUserDrafts(api.session);}catch{/* Storage restrictions cannot restore an invalidated Matrix token. */}
+      setApi(null);setAuthRequired(true);setRooms([]);setEvents([]);setTasks([]);
+      window.location.replace('/');
+    }catch(error){setError(errorText(error));setSigningOut(false);}
+  }
   async function refreshDocuments(current=api){
     if(!current?.documents)return;
     const sequence=++documentsSequence.current;
@@ -329,6 +343,7 @@ export function App({connector=connect}) {
     finally{updateTask(task.id,{historyBusy:false})}
   }
   function sent(id,mentioned,sourceRoom=roomCurrent.current){if(mentioned)setTasks(old=>[{id,room:sourceRoom,status:'queued'},...old.filter(t=>t.id!==id)].slice(0,8));}
+  if(authRequired)return <SignIn onSignedIn={start}/>;
   if(!api)return <main className="startup"><BookOpen size={30}/><h1>Didadi</h1><p>{error||'Opening your workspace…'}</p>{error&&<button className="primary" onClick={start}>Retry connection</button>}<span>Local workspace · example Agent, no LLM</span></main>;
   const selected=rooms.find(r=>r.id===room);
   const documentRoom=api.session.documentRoom||api.session.initialRoom||room;
@@ -351,7 +366,7 @@ export function App({connector=connect}) {
       {api.directChats&&<DirectChatPreferences api={api} revision={rooms.length} onRefresh={refreshRooms}/>}
       <RoomCreator api={api} onCreated={async result=>{setRooms(old=>old.some(item=>item.id===result.room_id)?old:[...old,{id:result.room_id,name:result.name,kind:result.kind,joinRule:'invite',agentJoined:false}]);setRoom(result.room_id);await refreshRooms();}}/>
     </div>
-    <div className="sidebar-bottom"><button className="agent-nav" onClick={()=>setPanel('agent')}><Bot size={17}/><span>Example Agent<small>Echo runtime · no LLM</small></span></button><div className="session-note"><span className={'available-dot '+(!online?'offline':'')}/>{online?(api.session.synthetic?'Browser-only preview':'Connected to local workspace'):'Reconnecting to workspace'}</div></div>
+    <div className="sidebar-bottom"><button className="agent-nav" onClick={()=>setPanel('agent')}><Bot size={17}/><span>Example Agent<small>Echo runtime · no LLM</small></span></button><div className="session-note"><span className={'available-dot '+(!online?'offline':'')}/>{online?(api.session.synthetic?'Browser-only preview':'Connected to local workspace'):'Reconnecting to workspace'}{api.session.liveMatrix&&<button className="signout" type="button" onClick={signOut} disabled={signingOut} title="Sign out of this Matrix device and clear its local drafts">{signingOut?'Signing out…':'Sign out'} · {api.session.userId}</button>}</div></div>
   </aside>
   <main className="main"><header className="workspace-header"><button className="mobile-nav" aria-label="Toggle navigation" onClick={()=>setNavOpen(!navOpen)}><BookOpen size={18}/></button><div className="breadcrumbs"><BookOpen size={15}/><span>Workspace</span><ChevronRight size={13}/><strong>{activeDocument}</strong></div><div className="header-actions">{api.members&&<button disabled={!room} onClick={()=>setPeopleOpen(true)}>People</button>}{api.readSource&&<button onClick={()=>{setSourceRequest(null);setSourceOpen(true)}}>Git source</button>}{api.searchMessages&&api.searchDocuments&&<button aria-label="Open full-text search" onClick={()=>setSearchOpen(true)}><Search size={17}/><span>Search</span></button>}<div className="mode-switch"><button aria-pressed={mode==='read'} onClick={()=>setMode('read')}>Read</button><button aria-pressed={mode==='edit'} onClick={()=>setMode('edit')}>Edit</button></div><span className="header-divider"/><button className={historyOpen?'active':''} aria-label="Version history" onClick={()=>setHistoryOpen(!historyOpen)}><History size={17}/></button><button className={panel==='discussion'?'active':''} onClick={()=>setPanel(panel==='discussion'?null:'discussion')}><MessageSquare size={17}/><span>Discussion</span></button><button className={panel==='agent'?'active':''} onClick={()=>setPanel(panel==='agent'?null:'agent')}><Bot size={17}/><span>Agent</span></button></div></header>
     {api.session.qa&&<div className="qa-banner">Visual regression capture · {api.session.qa} · isolated adapter</div>}

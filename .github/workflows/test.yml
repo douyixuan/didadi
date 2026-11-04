@@ -15,6 +15,10 @@ jobs:
           python-version: '3.13'
       - name: Temporary Git tests with network and process guards
         run: python3 -m scripts.offline_python
+      - name: Injected local Matrix login HTTP routing (not real Synapse)
+        run: python3 -m unittest discover -s tests -p test_real_matrix_client_server.py -v
+      - name: Compile real Matrix integration runner (syntax only)
+        run: python3 -m py_compile scripts/real_login_smoke.py
   react-client:
     runs-on: ubuntu-latest
     steps:
@@ -26,6 +30,8 @@ jobs:
           cache-dependency-path: client/package-lock.json
       - name: Install locked dependencies without lifecycle scripts
         run: npm ci --prefix client --ignore-scripts --no-audit --no-fund
+      - name: Parse browser acceptance runner (syntax only, not real E2E)
+        run: node --check client/scripts/real_login_browser.mjs
       - name: Injected UI and pagination tests with transport guards
         run: node node_modules/vitest/vitest.mjs run --config vitest.offline.config.js
         working-directory: client

@@ -32,10 +32,11 @@ mkdir -p .local/bundle
 chmod 700 .local .local/bundle
 docker compose -p didadi-bundle cp appservice:/config/agent-token .local/bundle/agent-token
 docker compose -p didadi-bundle cp appservice:/config/smoke-state.json .local/bundle/smoke-state.json
-chmod 600 .local/bundle/agent-token .local/bundle/smoke-state.json
+docker compose -p didadi-bundle cp appservice:/config/smoke-passwords.json .local/bundle/smoke-passwords.json
+chmod 600 .local/bundle/agent-token .local/bundle/smoke-state.json .local/bundle/smoke-passwords.json
 ```
 
-The smoke creates non-admin synthetic users and a private unencrypted room only on this local test Synapse. Re-running it creates a new fixture; do not run it over an active workspace whose identities you want to retain. Keep the copied state private.
+The smoke creates two genuine, non-admin Matrix test accounts and a private unencrypted room only on this local test Synapse. Their randomly generated passwords are held separately in `.local/bundle/smoke-passwords.json` (mode 0600): never upload this file, enable a public demo with these test identities or copy it into git. Re-running the smoke creates a new fixture; do not run it over an active workspace whose identities you want to retain. Keep the copied state private.
 
 ## Install and build
 
@@ -90,9 +91,61 @@ These commands modify only this synthetic workspace. The first verifies advertis
 
 Open http://127.0.0.1:8790/. Below the document, open **Read-only source repository**, select `example.py`, and choose **Read source in discussion** or **Replace document with file report**. The report replaces the current document, so use it on this synthetic fixture. **Edit** and **Save changes** save human changes directly to Git. **History** opens immutable versions; **Discussion** contains version receipts. **Export Markdown** downloads the current editor text, including unsaved edits. Export and physical IME behavior require separate browser verification; passing the commands above does not certify them.
 
+## Opt-in real Matrix sign-in (P0 #69 candidate)
+
+The default port 8790 remains the legacy **fixture-mode** adapter, and its offline acceptance does not test real sign-in. To enable a separate, cookie-authenticated client for the same **isolated loopback fixture**, start a fifth terminal with:
+
+```sh
+.venv-delivery/bin/python -m src.client_server --auth-mode matrix \
+  --state-file .local/bundle/smoke-state.json \
+  --token-file .local/bundle/agent-token \
+  --repo .local/bundle/documents.git --metadata .local/bundle/client.sqlite \
+  --repository-grants .local/bundle/repository-grants.json \
+  --matrix-url http://127.0.0.1:8020 --gateway-url http://127.0.0.1:9040 \
+  --port 8791
+```
+
+Open **http://127.0.0.1:8791/** and enter each full Matrix ID and corresponding private password from the file. A real Matrix login creates a server-held token and an HttpOnly SameSite cookie. Session refresh revalidates the token; **Sign out** revokes the current Matrix device where reachable and clears the browser's current-user recovery drafts. The fixture's raw Matrix tokens are never used for authentication in `--auth-mode matrix`. The current single-document-repository / fixed initial-room binding and shared Agent gateway credential still restrict this to isolated local testing; it is **not a hardened/public multi-tenant service**. With `--auth-mode matrix`, session handles and Matrix tokens are stored server-side in a private (0600) SQLite file at `<metadata>.matrix-sessions.sqlite` by default, or `--session-store` if supplied. Only the SHA-256 digest of each browser handle is stored. Browser refresh and a loopback backend restart now retain the session (revalidated via Matrix `whoami`); offline logout deletes the handle even if Matrix revocation is unconfirmed. **The local database contains sensitive bearer tokens**: keep it on private storage, never commit, back up publicly or serve it, and do not use this prototype as a public multi-user service. Tokens may remain valid on Synapse if the local store is deleted or the network is unavailable when a session expires; operator cleanup may be necessary.
+
+Run a reproducible **real Synapse + actual HTTP client + Git** check in this isolated environment. It covers two Matrix credentials, shared messages, two separate Git documents, metadata-only receipts, Bob's rejected document write, Bob-only room isolation, logout and invalid credentials. This is **not** a browser acceptance; real passwords stay local:
+
+```sh
+.venv-delivery/bin/python -m scripts.real_login_smoke \
+  --url http://127.0.0.1:8791 \
+  --credentials-file .local/bundle/smoke-passwords.json
+```
+
+The HTTP script saves **two** separate Git Markdown files through authenticated sessions, checks metadata-only receipts and forbidden edits, and verifies invalid credentials, private-room isolation and current-device logout. By itself, it does **not** prove browser UI or backend restart.
+
+**Actual backend process restart:** Run the HTTP smoke above with the additional flag `--restart-proof .local/bundle/real-login-restart.json`. Stop only your own client_server process, without deleting the .local directory or Compose volumes. Restart exactly the same matrix-authenticated server with the same metadata/session-store/repo/port, then execute:
+
+```sh
+.venv-delivery/bin/python -m scripts.real_login_smoke \
+  --url http://127.0.0.1:8791 \
+  --check-restart-proof .local/bundle/real-login-restart.json
+```
+
+This check restores the same real Matrix cookie and CSRF, reads the same immutable Git document, revokes the device and deletes its private one-time cookie proof. Never upload the cookie proof or the session database as artifacts.
+
+**Genuine browser E2E (not fixture mode):** With the isolated Synapse and matrix-authenticated client running, execute:
+
+```sh
+npm --prefix client install --no-save --package-lock=false --ignore-scripts \
+  --no-audit --no-fund @playwright/test@1.56.1
+./client/node_modules/.bin/playwright install chromium --with-deps
+node client/scripts/real_login_browser.mjs \
+  --url http://127.0.0.1:8791 \
+  --credentials-file .local/bundle/smoke-passwords.json \
+  --evidence-dir .local/bundle/real-login-browser
+```
+
+The browser runner uses two independent real Matrix accounts and isolated Chromium profiles: UI login, document create/edit/save to Git, read-only cross-user access, message delivery, private-room denial, refresh, incorrect-password rejection and UI logout. It writes a credential-free test-only `git-proof.json`: verify the marker with `git --git-dir=<documents.git> show <commit>:<path>`. Never run this on non-test users or public previews.
+
+The [Real Matrix integration workflow](../.github/workflows/real-matrix.yml) combines HTTP, actual backend restart, Playwright and immutable Git assertions **only after its existing explicit workflow_dispatch approval**. The ordinary offline Test workflow only parses the browser runner; its green status cannot establish a real browser result. Physical IME testing and a public deployment remain separate acceptance requirements.
+
 ## Stop and recover
 
-Press Control-C in the four process terminals. Stop only this Compose project, retaining its data:
+Press Control-C in the optional fifth Matrix-authenticated client terminal (port 8791) if started, then stop the four fixture-mode process terminals. Stop only this Compose project, retaining its data:
 
 ```sh
 docker compose -p didadi-bundle down
