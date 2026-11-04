@@ -26,15 +26,15 @@ The available GitHub integration cannot create native milestone objects; the fol
 ## What is already present, and what is NOT verified
 
 - The Oct 22 merge series (#52–#64) brought multi-document create/move, message-to-document, historical threads, body search, attachments, quotes, source-line references, People, room types and fictional session-contract tests onto `main`.
-- Latest `main` CI [Test #39755264542](https://github.com/douyixuan/didadi/actions/runs/39755264542) succeeded for commit `1f371893baa0`, but the archived merge evidence explicitly says this does not verify real login, production security, real Matrix on the final package, physical browser/IME behavior, public deployment, or real mobile interactions.
-- README still labels Phase 0; `docs/LOCAL_WORKSPACE.md` describes a loopback synthetic-identity dev environment. **Real login/logout are not implemented**: PR #64 is fictional only.
-- Only PR #41 is open, proposing ADR 0002. Issue #12 remains explicitly paused. Open Issues/unchecked boxes are not proof code is absent; reconcile code, exact SHA, tests and real acceptance before changing checkmarks.
+- Historical Oct 22 `main` CI [Test #39755264542](https://github.com/douyixuan/didadi/actions/runs/39755264542) did not establish real login. On Nov 4, #69 merged as [PR #90](https://github.com/douyixuan/didadi/pull/90) at `271f15a68fbc37356b3cb368943cb1871f9ce30c`; this main commit's [Test #41783890475](https://github.com/douyixuan/didadi/actions/runs/41783890475) succeeded. Merge tree `1122c4489b0dfe2951c689d04bb099b66853a0d3` is identical to real integration-tested head `4c6caf4f0f8eb62bb71c979b135da87b11f6b32c`; [Real Matrix integration #41587178841](https://github.com/douyixuan/didadi/actions/runs/41587178841) passed against isolated real Synapse/PostgreSQL, server API, Playwright/Chromium, and Git.
+- README still labels Phase 0. PR #64 remains fictional fixture-only, but merged PR #90 added **opt-in real Matrix login/logout and persistent per-device sessions in loopback-only mode**. See [#69 acceptance](https://github.com/douyixuan/didadi/issues/69) and [LOCAL_WORKSPACE](docs/LOCAL_WORKSPACE.md) for exact commands, credential handling and limits. The private session SQLite store contains server-side bearer tokens; this prototype must not be publicly deployed.
+- As of the Nov 4 evidence update, PR #41 remains separately owned and open, proposing ADR 0002. Issue #12 remains explicitly paused. P0 #70–#72 and the P0 milestone exit are **not yet accepted**; open Issues/unchecked boxes are not proof code is absent.
 
 ## Delivery phases (targets, not guaranteed dates)
 
 ### P0 · Real usable workspace — first 1–2 weeks (NOW)
 
-- [ ] **Real identity:** working Matrix sign-in, session persistence, current-device sign-out, rejected expired credentials; no fictional fallback in the actual product flow.
+- [x] **Real identity (#69, loopback test workspace):** genuine Matrix sign-in, refresh/backend-restart persistence, current-device sign-out, rejected invalid/expired session, denied cross-user access and no fixture fallback, with [real browser/Synapse/Git E2E](https://github.com/douyixuan/didadi/actions/runs/41587178841), [merged PR #90](https://github.com/douyixuan/didadi/pull/90), [main CI](https://github.com/douyixuan/didadi/actions/runs/41783890475) and [full #69 evidence](https://github.com/douyixuan/didadi/issues/69). This does not establish a public/secure multitenant Beta.
 - [ ] **Workspace flow:** account/room listing, private/group/channel entry, permissions and isolation, unread/status indicators (as supported) and understandable empty/error states.
 - [ ] **Human workflow:** a real user can send a message, create/edit a distinct Markdown document, reload and find the same Git-backed version; retry/conflict never silently loses drafts.
 - [ ] **Verification:** from clean install, two independent test accounts pass real Synapse + API + browser E2E; saved content is in Git and only metadata receipts are in Matrix; reconnect and retained-volume recovery pass.
@@ -88,8 +88,8 @@ The checked items below reflect the original narrow checkmark criteria; new phas
 
 ### 会话管理
 
-- [ ] 真实登录（待接入）
-- [ ] 当前设备退出（待接入）
+- [x] 真实登录（本地 Matrix 双账户验收 #69）
+- [x] 当前设备退出（本地真实注销验收 #69）
 - [ ] 房间列表浏览（待验收）
 - [ ] 未读消息提醒
 - [ ] 私聊会话（待验收）
