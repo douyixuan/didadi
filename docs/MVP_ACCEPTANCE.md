@@ -60,3 +60,15 @@ Phase0第四模块React+matrix-js-sdk文档/讨论/Agent任务视图已有真实
 3. **既有消息与历史。** 内置人工入口正文走API/Git；外部旧Matrix客户端仍可发送正文任务，历史消息和旧JSON提交没有重写。
 4. **独立暂停及设计。** Issue12历史性能工作保持原工作区暂停。ADR41由原owner处理，仍为Proposed；CRDT/live cursors、TypeScript迁移与生产授权等不被本轮代为接受。
 5. **完整产品功能。** 上方候选已补多文档、线程、正文搜索和消息转文档切片；登录/成员、附件、Agent注册/进度、Git关联/引用，以及各切片明确的跨路径/跨资源边界仍有缺口。按原文继续实现，V0.3未恢复的优先级保持待证；不能以Phase0未列为理由排除这些功能，也不能据此擅自追加未确认生产承诺。
+
+## 2026-11-04 增量验收 — P0 #69 真实 Matrix 身份（已在 main 交付）
+
+本节替代本文件历史审计中“真实登录/注销待接入”的过时状态；不自动关闭其余产品功能。验收对象是**仅绑定 loopback 的隔离自托管开发工作区**，不是公网 Beta 或正式多租户安全边界。
+
+- **源码与合并**：[PR #90](https://github.com/douyixuan/didadi/pull/90) 精确 head `4c6caf4f0f8eb62bb71c979b135da87b11f6b32c`，已合并到 main `271f15a68fbc37356b3cb368943cb1871f9ce30c`。两次提交的 Git **tree SHA 均为 `1122c4489b0dfe2951c689d04bb099b66853a0d3`**；已验证代码树相同。
+- **真实 E2E，不是 mock**：[Real Matrix integration #41587178841](https://github.com/douyixuan/didadi/actions/runs/41587178841) 成功。隔离 Synapse/PostgreSQL 与真实非管理员测试身份、Workspace API、Playwright Chromium、独立 Git 提交；验证 Alice/Bob 登录、刷新和服务端进程重启会话保留、401 密码拒绝、CSRF、房间隔离、两个 Markdown 独立保存、仅元数据回执、跨用户只读与退出。浏览器结果 `PASS REAL BROWSER`；原始 Markdown [固定 Git 证明](https://github.com/douyixuan/didadi/actions/runs/41587178841/artifacts/13208217850) 对应文档提交 `12af32a5aebc343910c8b7a65964f4ef92cb2a98`。附件仅含无凭据测试证据。
+- **额外验收**：[PR 精确头 Test #41587178746](https://github.com/douyixuan/didadi/actions/runs/41587178746) 与 [合并后 main Test #41783890475](https://github.com/douyixuan/didadi/actions/runs/41783890475) 均成功。针对原 Codex 线程已核对掉线登出、登录成功后初始化失败重试；旧审查线程全部解决，新增精确头 Codex review 无重大结论。
+- **复现**：按 [LOCAL_WORKSPACE](LOCAL_WORKSPACE.md) 启动隔离 Compose、`src.client_server --auth-mode matrix --port 8791`，运行 `python -m scripts.real_login_smoke --credentials-file .local/bundle/smoke-passwords.json` 及 `node client/scripts/real_login_browser.mjs --credentials-file .local/bundle/smoke-passwords.json`；工作流还验证后端重启、固定提交的 `git show` 和保留卷恢复，详见 [真实集成 workflow](../.github/workflows/real-matrix.yml)。测试帐号密码只存私有、不加入仓库和截图。
+- **未通过/不包含**：#70 的真实 DM/群组/频道、成员变更及未读语义；#71 草稿并发冲突、多文档 move/export 完整浏览器路径；#72 独立全新安装及恢复全链验收。物理中文 IME、公共 Demo/生产安全未验证；本地 SQLite 文件包含服务端明文 bearer token（mode 0600），只能用于隔离开发。P0 父项 #85 继续打开；#12 继续暂停，#18/PR #41 由原 owner 处理。
+
+**验收决议**：仅关闭子交付 [#69](https://github.com/douyixuan/didadi/issues/69) 并在 [#85](https://github.com/douyixuan/didadi/issues/85) 勾选其子项；其余 15 项维持未验收，不把源码、离线 CI 或本地体验误当公网发布。
