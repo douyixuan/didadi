@@ -310,7 +310,7 @@ export function App({connector=connect}) {
       const list=await api.rooms();
       const previous=roomCurrent.current;
       setRooms(list);
-      if(previous&&!list.some(item=>item.id===previous)){
+      if(!previous||!list.some(item=>item.id===previous)){
         // A real Matrix leave/kick must not keep a departed room selected or
         // retain its messages, quotes, task references or open room dialogs.
         const fallback=list.some(item=>item.id===api.session.initialRoom)
@@ -346,6 +346,7 @@ export function App({connector=connect}) {
       if(api.session.liveMatrix&&[403,404].includes(e?.status??e?.httpStatus)){
         // Matrix rejected live membership: immediately hide previously fetched
         // private messages even when the room-list refresh is still pending.
+        revision++;
         current=[];cursor=null;initialized=false;
         setEvents([]);setOlderCursor(null);setReplyTo(null);setQuote(null);
         setFilter(null);setSelectedMessages([]);
