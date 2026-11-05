@@ -26,6 +26,26 @@ describe('reliable message operations',()=>{
     await waitFor(()=>expect(send).toHaveBeenCalledTimes(2));expect(send.mock.calls[0][1]).toBe(send.mock.calls[1][1]);
   });
 });
+describe('P0 real Matrix room membership visibility',()=>{
+  it('discards revoked room messages and selects an authorized room after refreshing membership',async()=>{
+    const api=fixture();
+    api.rooms.mockResolvedValueOnce([
+      {id:'!room',name:'Private room',agentJoined:false},
+      {id:'!safe',name:'Safe room',agentJoined:false},
+    ]).mockResolvedValueOnce([{id:'!safe',name:'Safe room',agentJoined:false}]);
+    api.timeline.mockImplementation(async room=>room==='!room'
+      ?[{id:'$private',sender:'@other:local',time:1,content:{msgtype:'m.text',body:'Revoked private message'}}]
+      :[]);
+    render(<App connector={async()=>api}/>);
+    await screen.findByRole('heading',{name:'Team handbook'});
+    fireEvent.click(screen.getByRole('button',{name:'Discussion',exact:true}));
+    expect(await screen.findByText('Revoked private message')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'Refresh rooms'}));
+    await waitFor(()=>expect(screen.getByRole('button',{name:/Safe room/})).toHaveClass('room-selected'));
+    expect(screen.queryByText('Revoked private message')).not.toBeInTheDocument();
+  });
+});
+
 describe('document-first workspace',()=>{
   it('shows the document as the primary reading surface with collaboration closed',async()=>{const api=fixture();render(<App connector={async()=>api}/>);
     await screen.findByRole('heading',{name:'Team handbook'});expect(screen.queryByLabelText('Markdown document')).not.toBeInTheDocument();
