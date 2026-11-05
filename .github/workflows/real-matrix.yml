@@ -1,19 +1,11 @@
 name: Real Matrix integration
 on:
+  # Create a stable PR check for every change, including documentation-only PRs.
+  # Ineligible fork/draft PRs fail the gate (not a green skipped check).
+  # Maintainers must run trusted real E2E before merge; no secrets on fork code.
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
-    paths:
-      - 'src/**'
-      - 'client/**'
-      - 'scripts/**'
-      - 'tests/**'
-      - 'deploy/**'
-      - 'docker-compose*.yml'
-      - 'compose.yaml'
-      - 'requirements-runtime.txt'
-      - '.github/workflows/test.yml'
-      - '.github/workflows/real-matrix.yml'
   push:
     branches: [main]
     paths:
@@ -243,3 +235,18 @@ jobs:
       - name: Cleanup
         if: always()
         run: docker compose --profile test down -v
+  p0-real-e2e-gate:
+    name: p0-real-e2e-gate
+    if: ${{ always() }}
+    needs: [matrix-smoke]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require completed genuine Matrix/browser/Git E2E
+        env:
+          MATRIX_RESULT: ${{ needs.matrix-smoke.result }}
+        run: |
+          if [ "$MATRIX_RESULT" != "success" ]; then
+            echo "::error::Real Matrix integration did not succeed (result: $MATRIX_RESULT). Draft/fork/unapproved requests need a trusted maintainer-run E2E before merge."
+            exit 1
+          fi
+          echo "PASS: Real Synapse/Document API/Chromium/Git integration succeeded."
