@@ -299,6 +299,14 @@ def handler(workspace, dist, port, sessions=None):
                 elif parsed.path=='/api/direct-chats/retry' and method=='POST':
                     if query or not isinstance(body,dict) or set(body)!={'room'} or not isinstance(body['room'],str):raise ClientError(400,'Use only the existing room for synchronization retry.')
                     result=current_workspace.direct_chats.retry(body['room'])
+                elif parsed.path == '/api/rooms/leave' and method == 'POST':
+                    if (not isinstance(body,dict) or set(body)!={'room'} or
+                            not isinstance(body['room'],str) or not body['room'].startswith('!')):
+                        raise ClientError(400,'Choose one room to leave.')
+                    room=body['room']
+                    current_workspace.allowed(room)
+                    current_workspace.api('POST','/rooms/'+segment(room)+'/leave',{})
+                    result={'room':room,'left':True}
                 elif parsed.path == '/api/rooms' and method == 'POST':
                     try:result=current_workspace.direct_chats.after_create(current_workspace.room_service.create(body))
                     except RoomError as error:raise ClientError(error.status,error.message) from None
