@@ -46,6 +46,37 @@ describe('P0 real Matrix room membership visibility',()=>{
   });
 });
 
+describe('P0 revoked-room race regressions',()=>{
+  it('selects a newly joined room after starting with an empty room list',async()=>{
+    const api=fixture();
+    api.rooms.mockResolvedValueOnce([]).mockResolvedValueOnce([{id:'!safe',name:'Newly joined room'}]);
+    render(<App connector={async()=>api}/>);
+    await screen.findByRole('heading',{name:'Team handbook'});
+    fireEvent.click(screen.getByRole('button',{name:'Refresh rooms'}));
+    await waitFor(()=>expect(screen.getByRole('button',{name:'Newly joined room'})).toHaveClass('room-selected'));
+  });
+  it('does not resurrect revoked messages from an in-flight older-page response',async()=>{
+    const api=fixture(), intervals=new Map();let finishOlder;
+    const secret={id:'$secret',sender:'@other:local',time:1,content:{msgtype:'m.text',body:'Revoked room secret'}};
+    api.session.liveMatrix=true;
+    api.timelinePage=vi.fn().mockResolvedValueOnce({events:[secret],previousCursor:'older'})
+      .mockImplementationOnce(()=>new Promise(resolve=>{finishOlder=resolve;}))
+      .mockRejectedValueOnce(Object.assign(new Error('Membership revoked'),{status:403}));
+    const timer=vi.spyOn(globalThis,'setInterval').mockImplementation((callback,ms)=>{intervals.set(ms,callback);return ms;});
+    try{
+      render(<App connector={async()=>api}/>);
+      await screen.findByText('Revoked room secret');
+      fireEvent.click(screen.getByRole('button',{name:'Discussion',exact:true}));
+      fireEvent.click(screen.getByRole('button',{name:'Load earlier messages'}));
+      await waitFor(()=>expect(finishOlder).toBeTypeOf('function'));
+      await act(async()=>intervals.get(2000)());
+      await waitFor(()=>expect(screen.queryByText('Revoked room secret')).not.toBeInTheDocument());
+      await act(async()=>finishOlder({events:[{...secret,id:'$revived',content:{msgtype:'m.text',body:'Revoked room secret resurrected'}}],previousCursor:null}));
+      expect(screen.queryByText('Revoked room secret resurrected')).not.toBeInTheDocument();
+    }finally{timer.mockRestore()}
+  });
+});
+
 describe('document-first workspace',()=>{
   it('shows the document as the primary reading surface with collaboration closed',async()=>{const api=fixture();render(<App connector={async()=>api}/>);
     await screen.findByRole('heading',{name:'Team handbook'});expect(screen.queryByLabelText('Markdown document')).not.toBeInTheDocument();
