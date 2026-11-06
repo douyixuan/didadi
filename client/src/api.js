@@ -77,14 +77,22 @@ export async function connect() {
     async rooms() {
       const {joined_rooms: ids} = await client.getJoinedRooms();
       let direct=null;if(session.directChats){try{direct=await api('/api/direct-chats')}catch{/* Preference errors are shown separately; messaging remains available. */}}
-      return Promise.all(ids.map(async id => {
-        const state = await client.roomState(id);
+      // Membership may change after getJoinedRooms() but before roomState().
+      // Drop only rooms Matrix now denies; do not hide unrelated server errors.
+      const summaries = await Promise.all(ids.map(async id => {
+        let state;
+        try{state=await client.roomState(id);}
+        catch(error){
+          if([403,404].includes(error?.status??error?.httpStatus))return null;
+          throw error;
+        }
         return {id, name:state.find(e=>e.type==='m.room.name')?.content.name || 'Untitled room',
           directForYou:Boolean(direct?.mapped[id]?.length),
           encrypted:state.some(e=>e.type==='m.room.encryption'),
           kind:state.find(e=>e.type==='org.didadi.room')?.content.kind||'room',joinRule:state.find(e=>e.type==='m.room.join_rules')?.content.join_rule||'unknown',
           agentJoined:state.some(e=>e.type==='m.room.member' && e.state_key===session.agentId && e.content.membership==='join')};
       }));
+      return summaries.filter(Boolean);
     },
     threadPage:(room,root,from=null)=>threadPage(client,room,root,from),
     async message(room,id){const raw=await client.fetchRoomEvent(room,id);if(raw.event_id!==id||raw.type!=='m.room.message'||(raw.room_id&&raw.room_id!==room))throw new Error('Quoted message is unavailable.');return {id:raw.event_id,sender:raw.sender,content:raw.content,time:raw.origin_server_ts};},
@@ -92,6 +100,7 @@ export async function connect() {
     timeline:async room=>(await timelinePage(room)).events,
     send:(room, content, txn)=>client.sendEvent(room, 'm.room.message', content, txn),
     createRoom:(name,operation,options={})=>api('/api/rooms',{name,operation,...options}),
+    leaveRoom:room=>api('/api/rooms/leave',{room}),
     searchMessages:(room,query,next_batch=null)=>api('/api/search/messages',{room,query,next_batch}),
     searchDocuments:(room,query,after=null,commit=null)=>api('/api/search/documents',{room,query,after,commit}),
     documents:room=>api('/api/documents?room='+encodeURIComponent(room)),

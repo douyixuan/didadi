@@ -15,3 +15,32 @@ it('loads an old root independently and keeps only its thread replies in Matrix 
 it('retains advancing empty thread cursors and rejects an unavailable root',async()=>{
  const root=new MatrixEvent({event_id:'$root',type:'m.room.message',content:{body:'Root'}});const client={relations:vi.fn().mockResolvedValue({originalEvent:root,events:[],nextBatch:'next'})};expect((await threadPage(client,'!room','$root','start')).previousCursor).toBe('next');client.relations.mockResolvedValue({originalEvent:null,events:[]});await expect(threadPage(client,'!room','$root')).rejects.toThrow(/root is unavailable/);
 });
+
+
+import {connect} from './api';
+import {createClient} from 'matrix-js-sdk';
+
+vi.mock('matrix-js-sdk',async importOriginal=>({
+  ...(await importOriginal()),createClient:vi.fn(),
+}));
+
+it('P0 ROOM-02 keeps authorized room navigation when a departed room denies state during refresh',async()=>{
+  const originalFetch=globalThis.fetch;
+  const client={
+    getJoinedRooms:vi.fn().mockResolvedValue({joined_rooms:['!departed','!safe']}),
+    roomState:vi.fn(room=>room==='!departed'
+      ?Promise.reject(Object.assign(new Error('Forbidden'),{httpStatus:403}))
+      :Promise.resolve([{type:'m.room.name',content:{name:'Safe room'}}])),
+  };
+  vi.mocked(createClient).mockReturnValue(client);
+  globalThis.fetch=vi.fn().mockResolvedValue({ok:true,json:async()=>({
+    csrf:'unit-test-csrf',userId:'@alice:test',agentId:'@agent:test',
+    initialRoom:'!safe',liveMatrix:true,
+  })});
+  try{
+    const api=await connect();
+    const rooms=await api.rooms();
+    expect(rooms.map(room=>room.id)).toEqual(['!safe']);
+    expect(rooms[0].name).toBe('Safe room');
+  }finally{globalThis.fetch=originalFetch;vi.mocked(createClient).mockReset();}
+});

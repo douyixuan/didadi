@@ -303,23 +303,71 @@ export function App({connector=connect}) {
     catch(error){const known=error.status>=400&&error.status<500;if(known)fromMessagesAttempt.current=null;setFromMessagesUncertain(!known);setFromMessagesNotice(errorText(error)+(known?' Your selection is kept.':' Retry the same selection to confirm the result.'));}
     finally{fromMessagesLock.current=false;setFromMessagesBusy(false);}
   }
-  async function refreshRooms(){if(roomsRefreshing.current)return;roomsRefreshing.current=true;try{const list=await api.rooms();setRooms(list);roomsFailed.current=false;setRoomsError('');}catch(e){roomsFailed.current=true;setRoomsError(errorText(e));}finally{roomsRefreshing.current=false;}}
+  async function refreshRooms(){
+    if(roomsRefreshing.current)return;
+    roomsRefreshing.current=true;
+    try{
+      const list=await api.rooms();
+      const previous=roomCurrent.current;
+      setRooms(list);
+      // Discard departed-room task references even when another room is selected.
+      setTasks(old=>old.filter(task=>list.some(item=>item.id===task.room)));
+      if(!previous||!list.some(item=>item.id===previous)){
+        // A real Matrix leave/kick must not keep a departed room selected or
+        // retain its messages, quotes, task references or open room dialogs.
+        const fallback=list.some(item=>item.id===api.session.initialRoom)
+          ?api.session.initialRoom:(list[0]?.id||'');
+        setEvents([]);setOlderCursor(null);setReplyTo(null);setQuote(null);
+        setFilter(null);setSelectedMessages([]);
+        setPeopleOpen(false);setSourceOpen(false);setSearchOpen(false);
+        setRoom(fallback);
+        if(!fallback)setTimelineError('You are not joined to a room. Create or join one to see messages.');
+      }
+      roomsFailed.current=false;
+      setRoomsError('');
+    }catch(e){roomsFailed.current=true;setRoomsError(errorText(e));}
+    finally{roomsRefreshing.current=false;}
+  }
+  async function leaveSelectedRoom(){
+    if(!api?.leaveRoom||!room)return;
+    try{await api.leaveRoom(room);await refreshRooms();}
+    catch(error){setRoomsError('Unable to leave this room: '+errorText(error));}
+  }
   useEffect(()=>{if(!api||!room)return;let stopped=false,inFlight=false,initialized=false,olderBusy=false,revision=0,current=[],cursor=null;
     setEvents([]);setReplyTo(null);setQuote(null);setFilter(null);setOlderCursor(null);setLoadingOlder(false);setHistoryError('');setHistoryNotice('');historyScroll.current=null;
-    async function refresh(){if(inFlight)return;inFlight=true;try{
+    function evictInaccessibleRoom(){
+      // Invalidate requests started before the membership denial.
+      revision++;current=[];cursor=null;initialized=false;
+      setEvents([]);setOlderCursor(null);setReplyTo(null);setQuote(null);
+      setFilter(null);setSelectedMessages([]);
+      setPeopleOpen(false);setSourceOpen(false);setSearchOpen(false);
+      refreshRooms();
+    }
+    async function refresh(){if(inFlight)return;inFlight=true;const expected=revision;try{
       const page=api.timelinePage?await api.timelinePage(room):{events:await api.timeline(room),previousCursor:null};
-      if(!stopped){
+      if(!stopped&&expected===revision){
         const gap=initialized&&current.length&&page.events.length&&!current.some(old=>page.events.some(next=>old.id===next.id));
         if(!initialized||gap){current=page.events;cursor=page.previousCursor;initialized=true;if(gap){revision++;setHistoryNotice('Recent messages advanced beyond the loaded page. Load earlier messages again to reconnect history.');}}
         else current=mergeMessages(current,page.events);
         setEvents(current);setOlderCursor(cursor);setTimelineError('');setOnline(true);if(roomsFailed.current)refreshRooms();
       }
-    }catch(e){if(!stopped){setTimelineError(errorText(e));setOnline(false);}}finally{inFlight=false}}
+    }catch(e){if(!stopped){
+      if(api.session.liveMatrix&&[403,404].includes(e?.status??e?.httpStatus)){
+        // Hide revoked private data before the room list request returns.
+        evictInaccessibleRoom();
+      }
+      setTimelineError(errorText(e));setOnline(false);
+    }}finally{inFlight=false}}
     const older=async()=>{if(stopped||olderBusy||!cursor||!api.timelinePage)return;olderBusy=true;setLoadingOlder(true);setHistoryError('');const expected=revision,from=cursor;
       try{const page=await api.timelinePage(room,from);if(stopped||expected!==revision)return;
         const merged=mergeMessages(page.events,current),node=timelineRef.current;if(node&&merged.length!==current.length)historyScroll.current={height:node.scrollHeight,top:node.scrollTop};
         current=merged;cursor=page.previousCursor===from?null:page.previousCursor;setEvents(current);setOlderCursor(cursor);if(page.events.length)setHistoryNotice('');
-      }catch(e){if(!stopped&&expected===revision)setHistoryError(errorText(e)+' Earlier messages were not loaded. Retry; your messages and draft are kept.');}
+      }catch(e){if(!stopped&&expected===revision){
+        if(api.session.liveMatrix&&[403,404].includes(e?.status??e?.httpStatus)){
+          evictInaccessibleRoom();setTimelineError(errorText(e));setOnline(false);
+        }
+        setHistoryError(errorText(e)+' Earlier messages were not loaded. Retry; your messages and draft are kept.');
+      }}
       finally{olderBusy=false;if(!stopped)setLoadingOlder(false);}
     };
     loadOlderAction.current=older;refresh();const timer=setInterval(refresh,2000);return()=>{stopped=true;clearInterval(timer);if(loadOlderAction.current===older)loadOlderAction.current=null};
@@ -347,7 +395,7 @@ export function App({connector=connect}) {
   if(!api)return <main className="startup"><BookOpen size={30}/><h1>Didadi</h1><p>{error||'Opening your workspace…'}</p>{error&&<button className="primary" onClick={start}>Retry connection</button>}<span>Local workspace · example Agent, no LLM</span></main>;
   const selected=rooms.find(r=>r.id===room);
   const documentRoom=api.session.documentRoom||api.session.initialRoom||room;
-  const displayed=filter&&api?.threadPage?thread.events:events.filter(e=>!filter||e.id===filter||e.content['m.relates_to']?.event_id===filter);
+  const displayed=!selected?[]:filter&&api?.threadPage?thread.events:events.filter(e=>!filter||e.id===filter||e.content['m.relates_to']?.event_id===filter);
   return <>{peopleOpen&&<RoomPeople key={room} api={api} room={room} name={selected?.name} onClose={()=>setPeopleOpen(false)}/>} {sourceOpen&&<SourceViewer key={room+JSON.stringify(sourceRequest)} api={api} room={room} reference={sourceRequest} onClose={()=>setSourceOpen(false)} onSent={sent}/>} {searchOpen&&<WorkspaceSearch api={api} room={room} documentRoom={documentRoom} initialQuery={search} onClose={()=>setSearchOpen(false)} onDocument={result=>{if(!openDocument(result.name))return false;setRequestedVersion({commit:result.commit});return true;}} onMessage={result=>{setRoom(result.room);setPanel('discussion');setFilter(result.content['m.relates_to']?.rel_type==='m.thread'?result.content['m.relates_to'].event_id:result.id);return true;}}/>}{api.session.synthetic&&<div className="preview-banner" role="note">Interactive UI preview · synthetic browser-only data · no Matrix/Git backend or LLM</div>}<div className="workspace"><aside className={'sidebar '+(navOpen?'nav-open':'')}>
     <div className="workspace-switch"><span className="workspace-logo"><BookOpen size={19}/></span><strong>Didadi</strong><ChevronDown size={15}/><span className="local-pill">{api.session.synthetic?'Preview':'Local'}</span></div>
     <div className="workspace-search"><Search size={16}/><input ref={searchRef} aria-label="Search workspace" placeholder="Search workspace" value={search} onChange={e=>setSearch(e.target.value)}/></div>
@@ -368,7 +416,7 @@ export function App({connector=connect}) {
     </div>
     <div className="sidebar-bottom"><button className="agent-nav" onClick={()=>setPanel('agent')}><Bot size={17}/><span>Example Agent<small>Echo runtime · no LLM</small></span></button><div className="session-note"><span className={'available-dot '+(!online?'offline':'')}/>{online?(api.session.synthetic?'Browser-only preview':'Connected to local workspace'):'Reconnecting to workspace'}{api.session.liveMatrix&&<button className="signout" type="button" onClick={signOut} disabled={signingOut} title="Sign out of this Matrix device and clear its local drafts">{signingOut?'Signing out…':'Sign out'} · {api.session.userId}</button>}</div></div>
   </aside>
-  <main className="main"><header className="workspace-header"><button className="mobile-nav" aria-label="Toggle navigation" onClick={()=>setNavOpen(!navOpen)}><BookOpen size={18}/></button><div className="breadcrumbs"><BookOpen size={15}/><span>Workspace</span><ChevronRight size={13}/><strong>{activeDocument}</strong></div><div className="header-actions">{api.members&&<button disabled={!room} onClick={()=>setPeopleOpen(true)}>People</button>}{api.readSource&&<button onClick={()=>{setSourceRequest(null);setSourceOpen(true)}}>Git source</button>}{api.searchMessages&&api.searchDocuments&&<button aria-label="Open full-text search" onClick={()=>setSearchOpen(true)}><Search size={17}/><span>Search</span></button>}<div className="mode-switch"><button aria-pressed={mode==='read'} onClick={()=>setMode('read')}>Read</button><button aria-pressed={mode==='edit'} onClick={()=>setMode('edit')}>Edit</button></div><span className="header-divider"/><button className={historyOpen?'active':''} aria-label="Version history" onClick={()=>setHistoryOpen(!historyOpen)}><History size={17}/></button><button className={panel==='discussion'?'active':''} onClick={()=>setPanel(panel==='discussion'?null:'discussion')}><MessageSquare size={17}/><span>Discussion</span></button><button className={panel==='agent'?'active':''} onClick={()=>setPanel(panel==='agent'?null:'agent')}><Bot size={17}/><span>Agent</span></button></div></header>
+  <main className="main"><header className="workspace-header"><button className="mobile-nav" aria-label="Toggle navigation" onClick={()=>setNavOpen(!navOpen)}><BookOpen size={18}/></button><div className="breadcrumbs"><BookOpen size={15}/><span>Workspace</span><ChevronRight size={13}/><strong>{activeDocument}</strong></div><div className="header-actions">{api.members&&<button disabled={!room} onClick={()=>setPeopleOpen(true)}>People</button>}{api.leaveRoom&&room&&room!==documentRoom&&<button type="button" onClick={leaveSelectedRoom} aria-label="Leave current room">Leave room</button>}{api.readSource&&<button onClick={()=>{setSourceRequest(null);setSourceOpen(true)}}>Git source</button>}{api.searchMessages&&api.searchDocuments&&<button aria-label="Open full-text search" onClick={()=>setSearchOpen(true)}><Search size={17}/><span>Search</span></button>}<div className="mode-switch"><button aria-pressed={mode==='read'} onClick={()=>setMode('read')}>Read</button><button aria-pressed={mode==='edit'} onClick={()=>setMode('edit')}>Edit</button></div><span className="header-divider"/><button className={historyOpen?'active':''} aria-label="Version history" onClick={()=>setHistoryOpen(!historyOpen)}><History size={17}/></button><button className={panel==='discussion'?'active':''} onClick={()=>setPanel(panel==='discussion'?null:'discussion')}><MessageSquare size={17}/><span>Discussion</span></button><button className={panel==='agent'?'active':''} onClick={()=>setPanel(panel==='agent'?null:'agent')}><Bot size={17}/><span>Agent</span></button></div></header>
     {api.session.qa&&<div className="qa-banner">Visual regression capture · {api.session.qa} · isolated adapter</div>}
     {roomsError&&<div className="global-error" role="alert">Room list is reconnecting: {roomsError}</div>}
     {error&&<div className="global-error" role="alert"><AlertCircle size={16}/>{error}<button onClick={()=>setError('')} aria-label="Dismiss error"><X size={15}/></button></div>}

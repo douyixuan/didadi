@@ -214,6 +214,17 @@ class ClientServerTests(unittest.TestCase):
                 self.assertEqual(caught.exception.code,403)
             result=json.loads(fetch('/api/rooms','POST',{'name':'room','operation':'operation-id'},{'X-CSRF-Token':self.workspace.csrf}))
             self.assertEqual(result['room_id'],'!created:local')
+            with self.assertRaises(HTTPError) as other_room:
+                fetch('/api/rooms/leave','POST',{'room':'!not-joined:local'},
+                      {'X-CSRF-Token':self.workspace.csrf})
+            self.assertEqual(other_room.exception.code,403)
+            with self.assertRaises(HTTPError) as missing_room:
+                fetch('/api/rooms/leave','POST',{}, {'X-CSRF-Token':self.workspace.csrf})
+            self.assertEqual(missing_room.exception.code,400)
+            left=json.loads(fetch('/api/rooms/leave','POST',{'room':'!created:local'},
+                                  {'X-CSRF-Token':self.workspace.csrf}))
+            self.assertEqual(left,{'room':'!created:local','left':True})
+            self.assertTrue(any(method=='POST' and path.endswith('/leave') for method,path,_,_ in self.calls))
         finally:server.shutdown();server.server_close();thread.join()
 
     def test_external_backends_are_rejected(self):

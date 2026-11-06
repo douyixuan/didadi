@@ -125,8 +125,9 @@ try {
   await expect(bob.page.locator('.timeline')).toContainText(message, {timeout: 45000});
 
   // A private Bob-only Matrix room must not be visible to Alice.
+  const privateName = 'Browser private ' + randomUUID().slice(0, 8);
   const privateRoom = await browserRequest(bob.page, '/api/rooms', {
-    name: 'Browser private ' + randomUUID().slice(0, 8),
+    name: privateName,
     kind: 'group', participants: [], operation: randomUUID(),
   });
   assert.equal(privateRoom.status, 200, 'Bob should be able to create a real private room');
@@ -134,6 +135,34 @@ try {
     '/matrix/_matrix/client/v3/rooms/' +
     encodeURIComponent(privateRoom.data.room_id) + '/messages?dir=b');
   assert.equal(isolated.status, 403, 'Alice must be denied Bob-only room content');
+
+  // Genuine Matrix member leaves a room from the browser. Its earlier
+  // private timeline must disappear and every old HTTP room route be denied.
+  // This is a #70 membership-revocation slice, not full #70 acceptance.
+  await bob.page.getByRole('button', {name: 'Refresh rooms'}).click();
+  const newPrivate = bob.page.locator('nav[aria-label="Rooms"] button.room')
+    .filter({hasText: privateName});
+  await expect(newPrivate).toBeVisible({timeout: 30000});
+  await newPrivate.click();
+  await expect(newPrivate).toHaveClass(/room-selected/, {timeout: 30000});
+  const privateMessage = 'Departed room secret ' + randomUUID().replaceAll('-', '');
+  await bob.page.locator('.composer textarea').fill(privateMessage);
+  await bob.page.locator('.composer').getByRole('button', {name: /^Send/}).click();
+  await expect(bob.page.locator('.timeline')).toContainText(privateMessage, {timeout: 45000});
+  const deniedLeave = await browserRequest(alice.page, '/api/rooms/leave',
+    {room: privateRoom.data.room_id});
+  assert.equal(deniedLeave.status, 403, 'Non-member cannot leave another account room');
+  await bob.page.getByRole('button', {name: 'Leave current room'}).click();
+  await expect(newPrivate).toHaveCount(0, {timeout: 30000});
+  await expect(bob.page.locator('.timeline')).not.toContainText(privateMessage, {timeout: 30000});
+  const departedRead = await browserRequest(bob.page,
+    '/matrix/_matrix/client/v3/rooms/' +
+    encodeURIComponent(privateRoom.data.room_id) + '/messages?dir=b');
+  assert.equal(departedRead.status, 403, 'Live membership must deny departed-room history');
+  const departedAgain = await browserRequest(bob.page, '/api/rooms/leave',
+    {room: privateRoom.data.room_id});
+  assert.equal(departedAgain.status, 403, 'Repeated leave cannot reacquire membership');
+  console.log('PASS REAL ROOM #70: browser room leave, message eviction, non-member denial, denied stale reads');
 
   // Wrong passwords are genuinely rejected; current-device logout must not
   // invalidate another browser's real Matrix session or shared Git document.
