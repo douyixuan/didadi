@@ -310,6 +310,8 @@ export function App({connector=connect}) {
       const list=await api.rooms();
       const previous=roomCurrent.current;
       setRooms(list);
+      // Discard departed-room task references even when another room is selected.
+      setTasks(old=>old.filter(task=>list.some(item=>item.id===task.room)));
       if(!previous||!list.some(item=>item.id===previous)){
         // A real Matrix leave/kick must not keep a departed room selected or
         // retain its messages, quotes, task references or open room dialogs.
@@ -318,7 +320,6 @@ export function App({connector=connect}) {
         setEvents([]);setOlderCursor(null);setReplyTo(null);setQuote(null);
         setFilter(null);setSelectedMessages([]);
         setPeopleOpen(false);setSourceOpen(false);setSearchOpen(false);
-        setTasks(old=>old.filter(task=>list.some(item=>item.id===task.room)));
         setRoom(fallback);
         if(!fallback)setTimelineError('You are not joined to a room. Create or join one to see messages.');
       }
@@ -334,9 +335,17 @@ export function App({connector=connect}) {
   }
   useEffect(()=>{if(!api||!room)return;let stopped=false,inFlight=false,initialized=false,olderBusy=false,revision=0,current=[],cursor=null;
     setEvents([]);setReplyTo(null);setQuote(null);setFilter(null);setOlderCursor(null);setLoadingOlder(false);setHistoryError('');setHistoryNotice('');historyScroll.current=null;
-    async function refresh(){if(inFlight)return;inFlight=true;try{
+    function evictInaccessibleRoom(){
+      // Invalidate requests started before the membership denial.
+      revision++;current=[];cursor=null;initialized=false;
+      setEvents([]);setOlderCursor(null);setReplyTo(null);setQuote(null);
+      setFilter(null);setSelectedMessages([]);
+      setPeopleOpen(false);setSourceOpen(false);setSearchOpen(false);
+      refreshRooms();
+    }
+    async function refresh(){if(inFlight)return;inFlight=true;const expected=revision;try{
       const page=api.timelinePage?await api.timelinePage(room):{events:await api.timeline(room),previousCursor:null};
-      if(!stopped){
+      if(!stopped&&expected===revision){
         const gap=initialized&&current.length&&page.events.length&&!current.some(old=>page.events.some(next=>old.id===next.id));
         if(!initialized||gap){current=page.events;cursor=page.previousCursor;initialized=true;if(gap){revision++;setHistoryNotice('Recent messages advanced beyond the loaded page. Load earlier messages again to reconnect history.');}}
         else current=mergeMessages(current,page.events);
@@ -344,14 +353,8 @@ export function App({connector=connect}) {
       }
     }catch(e){if(!stopped){
       if(api.session.liveMatrix&&[403,404].includes(e?.status??e?.httpStatus)){
-        // Matrix rejected live membership: immediately hide previously fetched
-        // private messages even when the room-list refresh is still pending.
-        revision++;
-        current=[];cursor=null;initialized=false;
-        setEvents([]);setOlderCursor(null);setReplyTo(null);setQuote(null);
-        setFilter(null);setSelectedMessages([]);
-        setPeopleOpen(false);setSourceOpen(false);setSearchOpen(false);
-        refreshRooms();
+        // Hide revoked private data before the room list request returns.
+        evictInaccessibleRoom();
       }
       setTimelineError(errorText(e));setOnline(false);
     }}finally{inFlight=false}}
@@ -359,7 +362,12 @@ export function App({connector=connect}) {
       try{const page=await api.timelinePage(room,from);if(stopped||expected!==revision)return;
         const merged=mergeMessages(page.events,current),node=timelineRef.current;if(node&&merged.length!==current.length)historyScroll.current={height:node.scrollHeight,top:node.scrollTop};
         current=merged;cursor=page.previousCursor===from?null:page.previousCursor;setEvents(current);setOlderCursor(cursor);if(page.events.length)setHistoryNotice('');
-      }catch(e){if(!stopped&&expected===revision)setHistoryError(errorText(e)+' Earlier messages were not loaded. Retry; your messages and draft are kept.');}
+      }catch(e){if(!stopped&&expected===revision){
+        if(api.session.liveMatrix&&[403,404].includes(e?.status??e?.httpStatus)){
+          evictInaccessibleRoom();setTimelineError(errorText(e));setOnline(false);
+        }
+        setHistoryError(errorText(e)+' Earlier messages were not loaded. Retry; your messages and draft are kept.');
+      }}
       finally{olderBusy=false;if(!stopped)setLoadingOlder(false);}
     };
     loadOlderAction.current=older;refresh();const timer=setInterval(refresh,2000);return()=>{stopped=true;clearInterval(timer);if(loadOlderAction.current===older)loadOlderAction.current=null};
