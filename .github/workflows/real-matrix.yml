@@ -204,6 +204,15 @@ jobs:
             --url http://127.0.0.1:8791 \
             --credentials-file .local/smoke-passwords.json \
             --evidence-dir .local/real-login-browser
+          # P0 #71: second real Matrix device pair; restarted Synapse retains
+          # authenticated user state, Git history and the Document API.
+          # Never expose the ephemeral login secrets to artifacts or logs.
+          docker compose restart synapse
+          docker compose up -d --wait --wait-timeout 90 synapse
+          node client/scripts/cross_user_receipt_browser.mjs \
+            --url http://127.0.0.1:8791 \
+            --credentials-file .local/smoke-passwords.json \
+            --evidence-dir .local/real-login-browser
           python3 - <<'PY'
           import json
           import subprocess
