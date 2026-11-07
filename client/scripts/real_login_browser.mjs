@@ -169,6 +169,9 @@ try {
   await bob.page.reload();
   await expect(bob.page.locator('nav[aria-label="Rooms"] button.room').filter({hasText: directName}))
     .toBeVisible({timeout: 30000});
+  // Reload closes the collaboration pane; the later private-room composer
+  // must be visibly reopened or the real Chromium test stalls on a hidden input.
+  await bob.page.getByRole('button', {name: 'Discussion', exact: true}).click();
   console.log('PASS REAL ROOM #70: creator UI, Matrix invitation, before-join denial, joined DM, reload');
 
   // A private Bob-only Matrix room must not be visible to Alice.
