@@ -48,7 +48,10 @@ class RoomServiceTests(unittest.TestCase):
     def test_real_live_user_can_invite_only_verified_local_matrix_identity(self):
         from src.matrix_http import segment
         old_api=self.api
+        profiles=[]
         def profile_api(method,path,data=None):
+            if path.startswith('/profile/'):
+                profiles.append(path)
             if path=='/profile/'+segment(self.peer):
                 return {'displayname':'Bob'}
             if path.startswith('/profile/'):
@@ -57,8 +60,7 @@ class RoomServiceTests(unittest.TestCase):
         live=RoomService(self.db,profile_api,self.user,allow_local_members=True)
         direct={**self.data,'kind':'direct','participants':[self.peer]}
         self.assertEqual(live.create(direct)['participants'],[self.peer])
-        self.assertIn(('GET','/profile/'+segment(self.peer),None),self.calls if False else
-                      [('GET','/profile/'+segment(self.peer),None)])
+        self.assertEqual(profiles, ['/profile/'+segment(self.peer)])
         for candidate in ('@missing:didadi.localhost','@outsider:remote.invalid',
                           self.user,AGENT):
             with self.subTest(candidate=candidate),self.assertRaises(RoomError) as failure:
@@ -67,7 +69,8 @@ class RoomServiceTests(unittest.TestCase):
             self.assertEqual(failure.exception.status,403)
         # Opt-in real lookup never widens the synthetic/fixture contact set.
         with self.assertRaises(RoomError):
-            self.service.create(direct)
+            self.service.create({**direct,'operation':'synthetic-is-restricted',
+                                 'participants':['@new:didadi.localhost']})
 
     def test_unsupported_visibility_contacts_and_direct_options_fail_before_create(self):
         for change in ({'visibility':'public'},{'participants':['@third:external.invalid']},{'kind':'direct'},{'kind':'direct','participants':[self.peer],'invite_agent':True},{'kind':[]},{'invite_agent':'yes'},{'participants':[self.peer,self.peer]}):
