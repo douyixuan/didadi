@@ -25,6 +25,7 @@ export function RoomInvites({api, onJoined}) {
 
   useEffect(() => {
     setInvites([]);
+    setBusy('');
     refresh();
     return () => {revision.current += 1;};
   }, [api]);
@@ -57,7 +58,7 @@ export function RoomInvites({api, onJoined}) {
     {!loading && !invites.length && !error && <p>No pending invitations</p>}
     {invites.map(item => <div key={item.room} className="room-invite">
       <span>{item.name}</span>
-      <button type="button" disabled={Boolean(busy)} onClick={() => join(item.room)}
+      <button type="button" disabled={Boolean(busy) || loading} onClick={() => join(item.room)}
         aria-label={`Join invitation ${item.name}`}>{busy===item.room?'Joining…':'Join'}</button>
     </div>)}
   </section>;
