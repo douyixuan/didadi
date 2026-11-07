@@ -53,3 +53,12 @@ it('lets a different authenticated room member open an author-matched Git receip
  }}},'@agent',false,bob,'Team/A.md')).toBeNull();
  expect(documentVersion(receipt,'@agent',false,bob,'Team/B.md')).toBeNull();
 });
+
+it('preserves browser-only synthetic direct-save version links',()=>{
+ const sample={sender:'sample-user',content:{body:'Saved browser snapshot',
+   'org.didadi.document.commit':{version:1,path:'demo.md',commit:'sample-123abc',
+     blob:'sample-123abc',author:'sample-user'}}};
+ expect(documentVersion(sample,'sample-agent',true,'sample-user')).toBe('sample-123abc');
+ expect(documentVersion({...sample,sender:'sample-other'},'sample-agent',true,'sample-user')).toBeNull();
+ expect(documentVersion(sample,'sample-agent',false,'sample-user')).toBeNull();
+});
