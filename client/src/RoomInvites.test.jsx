@@ -40,3 +40,21 @@ it('discards late invitations from a previous authenticated account',async()=>{
   expect(screen.getByText('New account room')).toBeInTheDocument();
   expect(joined).not.toHaveBeenCalled();
 });
+
+it('enables new-session invitations when the previous join returns late',async()=>{
+  let finishJoin;
+  const old={invites:vi.fn().mockResolvedValue([{room:'!old:local',name:'Old invite'}]),
+    joinRoom:vi.fn(()=>new Promise(resolve=>{finishJoin=resolve;}))};
+  const next={invites:vi.fn().mockResolvedValue([{room:'!fresh:local',name:'New invite'}]),
+    joinRoom:vi.fn().mockResolvedValue({room:'!fresh:local',joined:true})};
+  const joined=vi.fn();
+  const view=render(<RoomInvites api={old} onJoined={joined}/>);
+  fireEvent.click(await screen.findByRole('button',{name:'Join invitation Old invite'}));
+  await waitFor(()=>expect(finishJoin).toBeTypeOf('function'));
+  view.rerender(<RoomInvites api={next} onJoined={joined}/>);
+  const fresh=await screen.findByRole('button',{name:'Join invitation New invite'});
+  expect(fresh).toBeEnabled();
+  expect(screen.getByRole('button',{name:'Refresh invitations'})).toBeEnabled();
+  await act(async()=>finishJoin({room:'!old:local',joined:true}));
+  expect(fresh).toBeEnabled();expect(joined).not.toHaveBeenCalled();
+});
