@@ -100,6 +100,8 @@ export async function connect() {
     timeline:async room=>(await timelinePage(room)).events,
     send:(room, content, txn)=>client.sendEvent(room, 'm.room.message', content, txn),
     createRoom:(name,operation,options={})=>api('/api/rooms',{name,operation,...options}),
+    ...(session.liveMatrix?{invites:async()=>(await api('/api/rooms/invites')).invites,
+      joinRoom:room=>api('/api/rooms/join',{room})}:{}),
     leaveRoom:room=>api('/api/rooms/leave',{room}),
     searchMessages:(room,query,next_batch=null)=>api('/api/search/messages',{room,query,next_batch}),
     searchDocuments:(room,query,after=null,commit=null)=>api('/api/search/documents',{room,query,after,commit}),
