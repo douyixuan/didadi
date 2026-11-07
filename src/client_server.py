@@ -54,7 +54,7 @@ class Workspace:
         with sqlite3.connect(self.metadata) as db:
             db.execute('CREATE TABLE IF NOT EXISTS rooms (id TEXT PRIMARY KEY, operation TEXT UNIQUE)')
             db.execute('INSERT OR IGNORE INTO rooms VALUES (?,?)', (state['room'], 'seed'))
-        self.room_service=RoomService(self.metadata,self.api,self.user_id,fixture_contacts)
+        self.room_service=RoomService(self.metadata,self.api,self.user_id,fixture_contacts,allow_local_members=live)
         self.direct_chats=DirectChats(self.metadata,self.api,self.user_id,self.allowed)
 
     def api(self, method, path, data=None, query=None):
@@ -312,7 +312,7 @@ def handler(workspace, dist, port, sessions=None):
                 if parsed.path == '/api/session' and method == 'GET':
                     result = {'csrf': current_workspace.csrf, 'userId': current_workspace.user_id, 'agentId': AGENT,
                               'initialRoom': current_workspace.state['room'], 'documentRoom': current_workspace.state['room'], 'documentSave': 'direct-v1', 'qa': getattr(workspace, 'qa', None), 'agentLabel': 'Example echo agent · no LLM',
-                              'directChats':True, 'liveMatrix': sessions is not None, 'repositoryReads': current_workspace.repository_choices(), 'roomCreation':{'version':1,'visibility':'private','kinds':['direct','group','channel'],'contacts':list(current_workspace.room_service.contacts)}}
+                              'directChats':True, 'liveMatrix': sessions is not None, 'repositoryReads': current_workspace.repository_choices(), 'roomCreation':{'version':1,'visibility':'private','kinds':['direct','group','channel'],'contacts':list(current_workspace.room_service.contacts),'allowLocalMembers':current_workspace.live}}
                 elif parsed.path=='/api/attachments' and method=='POST':
                     if set(query)-{'room','name','operation','type','root'} or any(len(values)!=1 for values in query.values()):raise ClientError(400,'Unknown attachment parameter.')
                     result=current_workspace.attachments.upload(query.get('room',[''])[0],query.get('name',[''])[0],query.get('operation',[''])[0],query.get('type',['application/octet-stream'])[0],body,query.get('root',[None])[0])
