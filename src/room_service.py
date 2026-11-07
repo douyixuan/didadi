@@ -34,7 +34,7 @@ class RoomService:
         # auto-invitation is introduced.
         server=self.user_id.split(':',1)[1]
         for peer in sorted(unknown):
-            if (not re.fullmatch(r'@[^\\s:]+:'+re.escape(server),peer) or
+            if (not re.fullmatch(r'@[^\s:]+:'+re.escape(server),peer) or
                     peer in {self.user_id,AGENT}):
                 raise RoomError(403,'Only existing local Matrix members may be invited.')
             try:
