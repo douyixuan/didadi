@@ -67,6 +67,60 @@ class Workspace:
         if self.live and room not in self.api('GET', '/joined_rooms')['joined_rooms']:
             raise ClientError(403, 'You are not joined to this room.')
 
+    def invitations(self):
+        """Only current user's live Matrix invites to already registered local rooms."""
+        if not self.live:
+            return []
+        with sqlite3.connect(self.metadata) as db:
+            known = {row[0] for row in db.execute('SELECT id FROM rooms')}
+        # Restrict expensive joined-room payloads, without filtering invite_state.
+        minimal = {'room': {'timeline': {'limit': 0},
+                            'state': {'types': []}, 'ephemeral': {'types': []},
+                            'account_data': {'types': []}}, 'presence': {'types': []}}
+        response = self.api('GET', '/sync', query={'timeout': '0', 'filter': json.dumps(minimal)})
+        invites = response.get('rooms', {}).get('invite', {})
+        if not isinstance(invites, dict):
+            raise ClientError(503, 'Matrix invitations are unavailable. Retry.')
+        joined = set(self.api('GET', '/joined_rooms')['joined_rooms'])
+        found = []
+        for room, invitation in invites.items():
+            if room not in known or room in joined or not isinstance(invitation, dict):
+                continue
+            state = invitation.get('invite_state', {}).get('events', [])
+            if not isinstance(state, list):
+                continue
+            # Matrix's invitation to this actor, not any member state in an
+            # attacker-supplied room, is the only eligibility signal.
+            if not any(isinstance(event, dict) and
+                       event.get('type') == 'm.room.member' and
+                       event.get('state_key') == self.user_id and
+                       isinstance(event.get('content'), dict) and
+                       event['content'].get('membership') == 'invite'
+                       for event in state):
+                continue
+            name = next((event.get('content', {}).get('name')
+                         for event in state if isinstance(event, dict) and
+                         event.get('type') == 'm.room.name' and
+                         isinstance(event.get('content'), dict)), None)
+            found.append({'room': room, 'name': name[:60] if isinstance(name, str) and name.strip()
+                          else 'Private room invitation'})
+        return sorted(found, key=lambda item: item['room'])
+
+    def join_invitation(self, room):
+        if not self.live or not isinstance(room, str) or not room.startswith('!') or len(room) > 512:
+            raise ClientError(400, 'Choose one live Matrix invitation.')
+        with sqlite3.connect(self.metadata) as db:
+            if db.execute('SELECT 1 FROM rooms WHERE id=?', (room,)).fetchone() is None:
+                raise ClientError(403, 'This room is not available for your account.')
+        if room in set(self.api('GET', '/joined_rooms')['joined_rooms']):
+            return {'room': room, 'joined': True}
+        if room not in {item['room'] for item in self.invitations()}:
+            raise ClientError(403, 'No current Matrix invitation to this room.')
+        result = self.api('POST', '/rooms/' + segment(room) + '/join', {})
+        if result.get('room_id') != room:
+            raise ClientError(503, 'Matrix join result is unconfirmed. Refresh invitations and retry.')
+        return {'room': room, 'joined': True}
+
     def repository_choices(self):
         with sqlite3.connect(self.metadata) as db:
             rooms = {row[0] for row in db.execute('SELECT id FROM rooms')}
@@ -299,6 +353,13 @@ def handler(workspace, dist, port, sessions=None):
                 elif parsed.path=='/api/direct-chats/retry' and method=='POST':
                     if query or not isinstance(body,dict) or set(body)!={'room'} or not isinstance(body['room'],str):raise ClientError(400,'Use only the existing room for synchronization retry.')
                     result=current_workspace.direct_chats.retry(body['room'])
+                elif parsed.path == '/api/rooms/invites' and method == 'GET':
+                    if query:raise ClientError(400, 'Invitations belong to the current Matrix account.')
+                    result = {'invites': current_workspace.invitations()}
+                elif parsed.path == '/api/rooms/join' and method == 'POST':
+                    if (query or not isinstance(body, dict) or set(body) != {'room'}):
+                        raise ClientError(400, 'Choose exactly one invited room to join.')
+                    result = current_workspace.join_invitation(body['room'])
                 elif parsed.path == '/api/rooms/leave' and method == 'POST':
                     if (not isinstance(body,dict) or set(body)!={'room'} or
                             not isinstance(body['room'],str) or not body['room'].startswith('!')):
