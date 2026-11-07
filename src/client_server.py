@@ -54,7 +54,7 @@ class Workspace:
         with sqlite3.connect(self.metadata) as db:
             db.execute('CREATE TABLE IF NOT EXISTS rooms (id TEXT PRIMARY KEY, operation TEXT UNIQUE)')
             db.execute('INSERT OR IGNORE INTO rooms VALUES (?,?)', (state['room'], 'seed'))
-        self.room_service=RoomService(self.metadata,self.api,self.user_id,fixture_contacts)
+        self.room_service=RoomService(self.metadata,self.api,self.user_id,fixture_contacts,allow_local_members=live)
         self.direct_chats=DirectChats(self.metadata,self.api,self.user_id,self.allowed)
 
     def api(self, method, path, data=None, query=None):
@@ -66,6 +66,56 @@ class Workspace:
                 raise ClientError(403, 'This room is not part of this workspace.')
         if self.live and room not in self.api('GET', '/joined_rooms')['joined_rooms']:
             raise ClientError(403, 'You are not joined to this room.')
+
+    def invitations(self):
+        """Only current user's live Matrix invites to already registered local rooms."""
+        if not self.live:
+            return []
+        with sqlite3.connect(self.metadata) as db:
+            known = {row[0] for row in db.execute('SELECT id FROM rooms')}
+        # Restrict expensive joined-room payloads, without filtering invite_state.
+        minimal = {'room': {'timeline': {'limit': 0},
+                            'state': {'types': []}, 'ephemeral': {'types': []},
+                            'account_data': {'types': []}}, 'presence': {'types': []}}
+        response = self.api('GET', '/sync', query={'timeout': '0', 'filter': json.dumps(minimal)})
+        invites = response.get('rooms', {}).get('invite', {})
+        if not isinstance(invites, dict):
+            raise ClientError(503, 'Matrix invitations are unavailable. Retry.')
+        joined = set(self.api('GET', '/joined_rooms')['joined_rooms'])
+        found = []
+        for room, invitation in invites.items():
+            if room not in known or room in joined or not isinstance(invitation, dict):
+                continue
+            state = invitation.get('invite_state', {}).get('events', [])
+            if not isinstance(state, list):
+                continue
+            # The authenticated Synapse rooms.invite map is the current
+            # account's authoritative invitation set. invite_state is optional
+            # stripped room decoration, NOT a second membership proof: the
+            # Matrix spec does not require any m.room.member event here.
+            # Joining still requires a fresh invite and confirmation by Synapse.
+            name = next((event.get('content', {}).get('name')
+                         for event in state if isinstance(event, dict) and
+                         event.get('type') == 'm.room.name' and
+                         isinstance(event.get('content'), dict)), None)
+            found.append({'room': room, 'name': name[:60] if isinstance(name, str) and name.strip()
+                          else 'Private room invitation'})
+        return sorted(found, key=lambda item: item['room'])
+
+    def join_invitation(self, room):
+        if not self.live or not isinstance(room, str) or not room.startswith('!') or len(room) > 512:
+            raise ClientError(400, 'Choose one live Matrix invitation.')
+        with sqlite3.connect(self.metadata) as db:
+            if db.execute('SELECT 1 FROM rooms WHERE id=?', (room,)).fetchone() is None:
+                raise ClientError(403, 'This room is not available for your account.')
+        if room in set(self.api('GET', '/joined_rooms')['joined_rooms']):
+            return {'room': room, 'joined': True}
+        if room not in {item['room'] for item in self.invitations()}:
+            raise ClientError(403, 'No current Matrix invitation to this room.')
+        result = self.api('POST', '/rooms/' + segment(room) + '/join', {})
+        if result.get('room_id') != room:
+            raise ClientError(503, 'Matrix join result is unconfirmed. Refresh invitations and retry.')
+        return {'room': room, 'joined': True}
 
     def repository_choices(self):
         with sqlite3.connect(self.metadata) as db:
@@ -258,7 +308,7 @@ def handler(workspace, dist, port, sessions=None):
                 if parsed.path == '/api/session' and method == 'GET':
                     result = {'csrf': current_workspace.csrf, 'userId': current_workspace.user_id, 'agentId': AGENT,
                               'initialRoom': current_workspace.state['room'], 'documentRoom': current_workspace.state['room'], 'documentSave': 'direct-v1', 'qa': getattr(workspace, 'qa', None), 'agentLabel': 'Example echo agent · no LLM',
-                              'directChats':True, 'liveMatrix': sessions is not None, 'repositoryReads': current_workspace.repository_choices(), 'roomCreation':{'version':1,'visibility':'private','kinds':['direct','group','channel'],'contacts':list(current_workspace.room_service.contacts)}}
+                              'directChats':True, 'liveMatrix': sessions is not None, 'repositoryReads': current_workspace.repository_choices(), 'roomCreation':{'version':1,'visibility':'private','kinds':['direct','group','channel'],'contacts':list(current_workspace.room_service.contacts),'allowLocalMembers':getattr(current_workspace,'live',False)}}
                 elif parsed.path=='/api/attachments' and method=='POST':
                     if set(query)-{'room','name','operation','type','root'} or any(len(values)!=1 for values in query.values()):raise ClientError(400,'Unknown attachment parameter.')
                     result=current_workspace.attachments.upload(query.get('room',[''])[0],query.get('name',[''])[0],query.get('operation',[''])[0],query.get('type',['application/octet-stream'])[0],body,query.get('root',[None])[0])
@@ -299,6 +349,13 @@ def handler(workspace, dist, port, sessions=None):
                 elif parsed.path=='/api/direct-chats/retry' and method=='POST':
                     if query or not isinstance(body,dict) or set(body)!={'room'} or not isinstance(body['room'],str):raise ClientError(400,'Use only the existing room for synchronization retry.')
                     result=current_workspace.direct_chats.retry(body['room'])
+                elif parsed.path == '/api/rooms/invites' and method == 'GET':
+                    if query:raise ClientError(400, 'Invitations belong to the current Matrix account.')
+                    result = {'invites': current_workspace.invitations()}
+                elif parsed.path == '/api/rooms/join' and method == 'POST':
+                    if (query or not isinstance(body, dict) or set(body) != {'room'}):
+                        raise ClientError(400, 'Choose exactly one invited room to join.')
+                    result = current_workspace.join_invitation(body['room'])
                 elif parsed.path == '/api/rooms/leave' and method == 'POST':
                     if (not isinstance(body,dict) or set(body)!={'room'} or
                             not isinstance(body['room'],str) or not body['room'].startswith('!')):

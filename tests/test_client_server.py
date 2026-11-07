@@ -128,6 +128,44 @@ class ClientServerTests(unittest.TestCase):
         self.assertEqual(self.workspace.create_room('stable-request-id','Client room')['room_id'],'!created:local')
         self.workspace.allowed('!created:local')
 
+    def test_p0_invites_are_live_actor_scoped_and_join_is_opt_in(self):
+        # Red: an invite is not a joined room and must never grant data reads.
+        from src.matrix_http import segment
+        invite='!invited:local'
+        with sqlite3.connect(self.workspace.metadata) as db:
+            db.execute('INSERT INTO rooms VALUES (?,?)',(invite,'known-private-room'))
+        self.workspace.live=True
+        joined={'!seed:local'}
+        invitation=True
+        calls=[]
+        def matrix(method,path,data=None,query=None):
+            calls.append((method,path))
+            if path=='/sync':
+                # Real Synapse's stripped invite_state is decorative: it
+                # need not contain the invitee's m.room.member event.
+                events=[{'type':'m.room.name','content':{'name':'Team DM'}}] if invitation else []
+                return {'rooms':{'invite':{invite:{'invite_state':{'events':events}},
+                                          '!foreign:local':{'invite_state':{'events':events}}}}}
+            if path=='/joined_rooms':return {'joined_rooms':list(joined)}
+            if path=='/rooms/'+segment(invite)+'/join':
+                joined.add(invite)
+                return {'room_id':invite}
+            return self.api(method,path,data,query)
+        with patch.object(self.workspace,'api',side_effect=matrix):
+            with self.assertRaises(ClientError):
+                self.workspace.allowed(invite)
+            self.assertEqual(self.workspace.invitations(),[{'room':invite,'name':'Team DM'}])
+            for other in ('!foreign:local','!missing:local','wrong'):
+                with self.subTest(room=other),self.assertRaises(ClientError) as error:
+                    self.workspace.join_invitation(other)
+                self.assertIn(error.exception.status,(400,403))
+            self.assertFalse(any(path.endswith('/join') for method,path in calls))
+            self.assertEqual(self.workspace.join_invitation(invite),{'room':invite,'joined':True})
+            self.workspace.allowed(invite)
+            self.assertEqual(self.workspace.invitations(),[])
+            self.assertEqual(self.workspace.join_invitation(invite),{'room':invite,'joined':True})
+            self.assertEqual(sum(path.endswith('/join') for method,path in calls),1)
+
     def test_named_document_http_creation_errors_and_room_boundary(self):
         def document_api(method, path, data=None):
             if method=='GET' and '/event/' in path:

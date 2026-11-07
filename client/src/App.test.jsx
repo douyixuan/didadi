@@ -805,3 +805,23 @@ it('sends a quote relation without copying the source body or adding mentions',a
 it('keeps an uncertain quote transaction even if the parent quote target changes',async()=>{const send=vi.fn().mockRejectedValueOnce(new Error('Lost response')).mockResolvedValue({event_id:'$reply'}),props={onSend:send,busyRoom:'!room',agentId:'@agent',clearReply:idle,onSent:idle,defaultMention:false};const view=render(<Composer {...props} quote={{id:'$first',sender:'@a',content:{body:'first'}}}/>);fireEvent.change(screen.getByLabelText('Message'),{target:{value:'keep response'}});fireEvent.click(screen.getByRole('button',{name:'Send'}));await screen.findByRole('alert');expect(screen.getByLabelText('Message')).toBeDisabled();expect(screen.getByRole('button',{name:'Cancel quote'})).toBeDisabled();view.rerender(<Composer {...props} quote={{id:'$second',sender:'@b',content:{body:'second'}}}/>);fireEvent.click(screen.getByRole('button',{name:'Send'}));await waitFor(()=>expect(send).toHaveBeenCalledTimes(2));expect(send.mock.calls[1]).toEqual(send.mock.calls[0]);});
 
 it('recovers the original unknown quote after sending in another room',async()=>{const send=vi.fn().mockRejectedValueOnce(new Error('Unknown')).mockResolvedValue({event_id:'$ok'}),props={onSend:send,agentId:'@agent',clearReply:idle,onSent:idle,defaultMention:false};const view=render(<Composer {...props} busyRoom="!one" quote={{id:'$first',sender:'@a',content:{body:'first'}}}/>);fireEvent.change(screen.getByLabelText('Message'),{target:{value:'room one'}});fireEvent.click(screen.getByRole('button',{name:'Send'}));await screen.findByRole('alert');view.rerender(<Composer {...props} busyRoom="!two"/>);fireEvent.change(screen.getByLabelText('Message'),{target:{value:'room two'}});fireEvent.click(screen.getByRole('button',{name:'Send'}));await waitFor(()=>expect(screen.getByLabelText('Message')).toHaveValue(''));view.rerender(<Composer {...props} busyRoom="!one"/>);expect(screen.getByLabelText('Message')).toHaveValue('room one');expect(screen.getByLabelText('Message')).toBeDisabled();fireEvent.click(screen.getByRole('button',{name:'Send'}));await waitFor(()=>expect(send).toHaveBeenCalledTimes(3));expect(send.mock.calls[2]).toEqual(send.mock.calls[0]);});
+
+it('queues an authoritative post-join room refresh behind an older in-flight snapshot',async()=>{
+  const api=fixture();let resolveOlder;
+  api.rooms.mockResolvedValueOnce([{id:'!room',name:'Workspace',agentJoined:false}])
+    .mockImplementationOnce(()=>new Promise(resolve=>{resolveOlder=resolve;}))
+    .mockResolvedValue([{id:'!room',name:'Workspace',agentJoined:false},
+      {id:'!invited',name:'New DM',agentJoined:false}]);
+  api.invites=vi.fn().mockResolvedValue([{room:'!invited',name:'New DM'}]);
+  api.joinRoom=vi.fn().mockResolvedValue({room:'!invited',joined:true});
+  render(<App connector={async()=>api}/>);
+  await screen.findByRole('heading',{name:'Team handbook'});
+  await screen.findByRole('button',{name:'Join invitation New DM'});
+  fireEvent.click(screen.getByRole('button',{name:'Refresh rooms'}));
+  await waitFor(()=>expect(resolveOlder).toBeTypeOf('function'));
+  fireEvent.click(screen.getByRole('button',{name:'Join invitation New DM'}));
+  await act(async()=>resolveOlder([{id:'!room',name:'Workspace',agentJoined:false}]));
+  await waitFor(()=>expect(screen.getByRole('button',{name:/New DM/})).toHaveClass('room-selected'));
+  expect(api.rooms.mock.calls.length).toBeGreaterThanOrEqual(3);
+  expect(api.joinRoom).toHaveBeenCalledWith('!invited');
+});

@@ -1,5 +1,6 @@
 import {DirectChatPreferences} from './DirectChatPreferences';
 import {RoomCreator} from './RoomCreator';
+import {RoomInvites} from './RoomInvites';
 import {RoomPeople} from './RoomPeople';
 import {SourceViewer} from './SourceViewer';
 import {QuotedMessage,replyBody} from './QuotedMessage';
@@ -256,7 +257,7 @@ export function App({connector=connect}) {
   const timelineRef=useRef(null);
   const thread=useThread(api,room,filter,()=>{const node=timelineRef.current;if(node)historyScroll.current={height:node.scrollHeight,top:node.scrollTop};});
   useEffect(()=>{const node=timelineRef.current;if(!node)return;if(historyScroll.current){const before=historyScroll.current;historyScroll.current=null;node.scrollTop=before.top+node.scrollHeight-before.height;}else node.scrollTop=node.scrollHeight;},[filter&&api?.threadPage?thread.events.length:events.length,filter,panel]);
-  const roomsFailed=useRef(false),roomsRefreshing=useRef(false);
+  const roomsFailed=useRef(false),roomsRefreshing=useRef(null);
   const roomCurrent=useRef(room);roomCurrent.current=room;
   useEffect(()=>{if(room&&location.protocol.startsWith('http')){const url=new URL(location.href);url.searchParams.set('room',room);window.history.replaceState({},'',url);}},[room]);
 
@@ -304,8 +305,8 @@ export function App({connector=connect}) {
     finally{fromMessagesLock.current=false;setFromMessagesBusy(false);}
   }
   async function refreshRooms(){
-    if(roomsRefreshing.current)return;
-    roomsRefreshing.current=true;
+    if(roomsRefreshing.current)return roomsRefreshing.current;
+    const operation=(async()=>{
     try{
       const list=await api.rooms();
       const previous=roomCurrent.current;
@@ -326,7 +327,10 @@ export function App({connector=connect}) {
       roomsFailed.current=false;
       setRoomsError('');
     }catch(e){roomsFailed.current=true;setRoomsError(errorText(e));}
-    finally{roomsRefreshing.current=false;}
+    })();
+    roomsRefreshing.current=operation;
+    try{return await operation;}
+    finally{if(roomsRefreshing.current===operation)roomsRefreshing.current=null;}
   }
   async function leaveSelectedRoom(){
     if(!api?.leaveRoom||!room)return;
@@ -412,6 +416,7 @@ export function App({connector=connect}) {
     <div className="nav-section rooms-section"><div className="section-heading"><span>Rooms</span><button aria-label="Refresh rooms" onClick={refreshRooms}><RefreshCw size={13}/></button></div>
       <nav aria-label="Rooms">{rooms.filter(r=>r.name.toLowerCase().includes(search.toLowerCase())).map(r=><button className={'room '+(r.id===room?'room-selected':'')} key={r.id} onClick={()=>{setRoom(r.id);setNavOpen(false)}}><MessageSquare size={15}/><span>{r.name}{r.kind&&<small>{r.kind==='direct'?'Private conversation':r.kind==='channel'?'Channel':r.kind==='group'?'Group':'Room'} · {r.joinRule==='invite'?'invite only':r.joinRule||'unknown access'}{r.directForYou?' · Direct for you':''}</small>}</span></button>)}</nav>
       {api.directChats&&<DirectChatPreferences api={api} revision={rooms.length} onRefresh={refreshRooms}/>}
+      {api.invites&&<RoomInvites key={api.session.userId} api={api} onJoined={async roomId=>{const earlier=roomsRefreshing.current;if(earlier)await earlier;await refreshRooms();setRoom(roomId);setNavOpen(false);}}/>}
       <RoomCreator api={api} onCreated={async result=>{setRooms(old=>old.some(item=>item.id===result.room_id)?old:[...old,{id:result.room_id,name:result.name,kind:result.kind,joinRule:'invite',agentJoined:false}]);setRoom(result.room_id);await refreshRooms();}}/>
     </div>
     <div className="sidebar-bottom"><button className="agent-nav" onClick={()=>setPanel('agent')}><Bot size={17}/><span>Example Agent<small>Echo runtime · no LLM</small></span></button><div className="session-note"><span className={'available-dot '+(!online?'offline':'')}/>{online?(api.session.synthetic?'Browser-only preview':'Connected to local workspace'):'Reconnecting to workspace'}{api.session.liveMatrix&&<button className="signout" type="button" onClick={signOut} disabled={signingOut} title="Sign out of this Matrix device and clear its local drafts">{signingOut?'Signing out…':'Sign out'} · {api.session.userId}</button>}</div></div>
