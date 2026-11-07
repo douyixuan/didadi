@@ -61,10 +61,10 @@ class RoomServiceTests(unittest.TestCase):
         direct={**self.data,'kind':'direct','participants':[self.peer]}
         self.assertEqual(live.create(direct)['participants'],[self.peer])
         self.assertEqual(profiles, ['/profile/'+segment(self.peer)])
-        for candidate in ('@missing:didadi.localhost','@outsider:remote.invalid',
-                          self.user,AGENT):
+        for index,candidate in enumerate(('@missing:didadi.localhost',
+                          '@outsider:remote.invalid', self.user,AGENT)):
             with self.subTest(candidate=candidate),self.assertRaises(RoomError) as failure:
-                live.create({**direct,'operation':'another-'+candidate.split(':')[0][1:],
+                live.create({**direct,'operation':'different-'+str(index)+'-request',
                              'participants':[candidate]})
             self.assertEqual(failure.exception.status,403)
         # Opt-in real lookup never widens the synthetic/fixture contact set.
