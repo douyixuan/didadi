@@ -89,15 +89,11 @@ class Workspace:
             state = invitation.get('invite_state', {}).get('events', [])
             if not isinstance(state, list):
                 continue
-            # Matrix's invitation to this actor, not any member state in an
-            # attacker-supplied room, is the only eligibility signal.
-            if not any(isinstance(event, dict) and
-                       event.get('type') == 'm.room.member' and
-                       event.get('state_key') == self.user_id and
-                       isinstance(event.get('content'), dict) and
-                       event['content'].get('membership') == 'invite'
-                       for event in state):
-                continue
+            # The authenticated Synapse rooms.invite map is the current
+            # account's authoritative invitation set. invite_state is optional
+            # stripped room decoration, NOT a second membership proof: the
+            # Matrix spec does not require any m.room.member event here.
+            # Joining still requires a fresh invite and confirmation by Synapse.
             name = next((event.get('content', {}).get('name')
                          for event in state if isinstance(event, dict) and
                          event.get('type') == 'm.room.name' and
