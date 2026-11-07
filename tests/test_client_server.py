@@ -141,8 +141,9 @@ class ClientServerTests(unittest.TestCase):
         def matrix(method,path,data=None,query=None):
             calls.append((method,path))
             if path=='/sync':
-                events=[{'type':'m.room.member','state_key':'@human:local','content':{'membership':'invite'}},
-                        {'type':'m.room.name','content':{'name':'Team DM'}}] if invitation else []
+                # Real Synapse's stripped invite_state is decorative: it
+                # need not contain the invitee's m.room.member event.
+                events=[{'type':'m.room.name','content':{'name':'Team DM'}}] if invitation else []
                 return {'rooms':{'invite':{invite:{'invite_state':{'events':events}},
                                           '!foreign:local':{'invite_state':{'events':events}}}}}
             if path=='/joined_rooms':return {'joined_rooms':list(joined)}
