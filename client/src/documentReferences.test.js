@@ -38,3 +38,18 @@ it('requires a matching document path before opening a named receipt',()=>{
  expect(documentVersion(receipt,'@agent',false,'@human','Other.md')).toBeNull();
  expect(documentVersion(event,'@agent',false,'@human','设计/Notes.md')).toBeNull();
 });
+
+it('lets a different authenticated room member open an author-matched Git receipt',()=>{
+ const alice='@alice:didadi.localhost',bob='@bob:didadi.localhost';
+ const receipt={sender:alice,content:{body:'Saved A.md', 'org.didadi.document.commit':{
+   version:1,path:'Team/A.md',commit,blob:'b'.repeat(40),author:alice,
+ }}};
+ // Matrix event sender and receipt author agree, but the current viewer is Bob.
+ // Metadata is a navigation hint: the canonical Git revision is verified on open.
+ expect(documentVersion(receipt,'@agent',false,bob,'Team/A.md')).toBe(commit);
+ expect(documentVersion({...receipt,sender:bob},'@agent',false,bob,'Team/A.md')).toBeNull();
+ expect(documentVersion({...receipt,content:{...receipt.content,'org.didadi.document.commit':{
+   ...receipt.content['org.didadi.document.commit'],author:bob,
+ }}},'@agent',false,bob,'Team/A.md')).toBeNull();
+ expect(documentVersion(receipt,'@agent',false,bob,'Team/B.md')).toBeNull();
+});
