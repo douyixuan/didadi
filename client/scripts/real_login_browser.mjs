@@ -134,17 +134,24 @@ try {
   await alice.page.getByRole('button', {name: 'Create local room'}).click();
   await expect(alice.page.getByText('Private room created.', {exact: true}))
     .toBeVisible({timeout: 45000});
+  const aliceDirectButton = alice.page.locator('nav[aria-label="Rooms"] button.room')
+    .filter({hasText: directName});
+  await expect(aliceDirectButton).toHaveClass(/room-selected/, {timeout: 30000});
+  const createdDirect = new URL(alice.page.url()).searchParams.get('room');
+  assert.ok(createdDirect?.startsWith('!'), 'Creator must select the real Matrix room ID');
   const invited = await browserRequest(bob.page, '/api/rooms/invites');
   assert.equal(invited.status, 200);
-  const pending = invited.data.invites.find(item => item.name === directName);
-  assert.ok(pending?.room?.startsWith('!'), 'Bob must receive a genuine Synapse invite');
+  const pending = invited.data.invites.find(item => item.room === createdDirect);
+  assert.ok(pending, 'Bob must receive the exact invited Matrix room: ' +
+    JSON.stringify({createdDirect, invites: invited.data.invites}));
+  assert.ok(pending.room.startsWith('!'), 'An invitation needs a real Synapse room ID');
   const unauthorizedBeforeJoin = await browserRequest(bob.page,
     '/matrix/_matrix/client/v3/rooms/' + encodeURIComponent(pending.room) + '/messages?dir=b');
   assert.equal(unauthorizedBeforeJoin.status, 403, 'Invite alone cannot read room history');
   const unrelated = await browserRequest(bob.page, '/api/rooms/join', {room: '!foreign:localhost'});
   assert.equal(unrelated.status, 403, 'A known Matrix account cannot join an unregistered room');
   await bob.page.getByRole('button', {name: 'Refresh invitations'}).click();
-  await bob.page.getByRole('button', {name: 'Join invitation ' + directName}).click();
+  await bob.page.getByRole('button', {name: 'Join invitation ' + pending.name}).click();
   const joinedDirect = bob.page.locator('nav[aria-label="Rooms"] button.room').filter({hasText: directName});
   await expect(joinedDirect).toHaveClass(/room-selected/, {timeout: 30000});
   const directSecret = 'DM after join ' + randomUUID().replaceAll('-', '');
