@@ -1,5 +1,5 @@
 import React from 'react';
-import {fireEvent,render,screen,waitFor} from '@testing-library/react';
+import {act,fireEvent,render,screen,waitFor} from '@testing-library/react';
 import {it,expect,vi} from 'vitest';
 import {RoomInvites} from './RoomInvites';
 
@@ -24,4 +24,19 @@ it('retains a denied invitation without revealing a joined room',async()=>{
   await screen.findByText('No current Matrix invitation');
   expect(joined).not.toHaveBeenCalled();
   expect(screen.getByRole('button',{name:'Join invitation Private room'})).toBeEnabled();
+});
+
+it('discards late invitations from a previous authenticated account',async()=>{
+  let resolveFirst;
+  const oldApi={invites:vi.fn(()=>new Promise(resolve=>{resolveFirst=resolve;})),joinRoom:vi.fn()};
+  const newApi={invites:vi.fn().mockResolvedValue([{room:'!new:local',name:'New account room'}]),joinRoom:vi.fn()};
+  const joined=vi.fn();
+  const view=render(<RoomInvites api={oldApi} onJoined={joined}/>);
+  await waitFor(()=>expect(resolveFirst).toBeTypeOf('function'));
+  view.rerender(<RoomInvites api={newApi} onJoined={joined}/>);
+  await screen.findByRole('button',{name:'Join invitation New account room'});
+  await act(async()=>resolveFirst([{room:'!old:local',name:'Former account secret'}]));
+  expect(screen.queryByText('Former account secret')).toBeNull();
+  expect(screen.getByText('New account room')).toBeInTheDocument();
+  expect(joined).not.toHaveBeenCalled();
 });
