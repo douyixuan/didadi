@@ -11,12 +11,13 @@ class RoomError(Exception):
     def __init__(self,status,message):self.status,self.message=status,message
 
 class RoomService:
-    def __init__(self,metadata,api,user_id,contacts=()):
+    def __init__(self,metadata,api,user_id,contacts=(),allow_local_members=False):
         self.metadata,self.api,self.user_id=str(metadata),api,user_id
         server=user_id.split(':',1)[1]
         if len(contacts)>32 or any(not isinstance(user,str) or not re.fullmatch(r'@[^\s:]+:'+re.escape(server),user) or user in {user_id,AGENT} for user in contacts):
             raise ValueError('fixture contacts must be other explicitly configured local identities')
         self.contacts=tuple(sorted(set(contacts)))
+        self.allow_local_members=allow_local_members
         with sqlite3.connect(self.metadata) as db:db.execute('CREATE TABLE IF NOT EXISTS room_intents(operation TEXT PRIMARY KEY, request_hash TEXT NOT NULL, room_id TEXT)')
 
     def create(self,data):
@@ -25,7 +26,23 @@ class RoomService:
         operation,name=data['operation'],data['name'];kind=data.get('kind','group');peers=data.get('participants',[]);invite_agent=data.get('invite_agent',False)
         if (not isinstance(operation,str) or not re.fullmatch(r'[a-zA-Z0-9-]{8,80}',operation) or not isinstance(name,str) or not 1<=len(name.strip())<=60 or not isinstance(kind,str) or kind not in {'direct','group','channel'} or type(invite_agent)!=bool or not isinstance(peers,list) or len(peers)>32 or any(not isinstance(peer,str) for peer in peers) or len(set(peers))!=len(peers)):
             raise RoomError(400,'Choose a private room type, a name of 1–60 characters and valid participants.')
-        if not set(peers)<=set(self.contacts):raise RoomError(403,'Only explicitly configured local fixture contacts can be invited here.')
+        unknown=set(peers)-set(self.contacts)
+        if unknown and not self.allow_local_members:
+            raise RoomError(403,'Only explicitly configured local fixture contacts can be invited here.')
+        # Explicit user-entered identities are supported only for authenticated
+        # local Matrix accounts; no directory enumeration, federation or Agent
+        # auto-invitation is introduced.
+        server=self.user_id.split(':',1)[1]
+        for peer in sorted(unknown):
+            if (not re.fullmatch(r'@[^\\s:]+:'+re.escape(server),peer) or
+                    peer in {self.user_id,AGENT}):
+                raise RoomError(403,'Only existing local Matrix members may be invited.')
+            try:
+                self.api('GET','/profile/'+segment(peer))
+            except MatrixError as error:
+                if error.status in {403,404}:
+                    raise RoomError(403,'Only existing local Matrix members may be invited.') from None
+                raise
         if kind=='direct' and (len(peers)!=1 or invite_agent):raise RoomError(400,'A private conversation needs exactly one person and no Agent.')
         name=name.strip();peers=sorted(peers)
         spec={'actor':self.user_id,'name':name,'kind':kind,'participants':peers,'invite_agent':invite_agent,'visibility':'private'}
