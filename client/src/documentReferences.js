@@ -1,6 +1,6 @@
 export function documentVersion(event,agentId,synthetic=false,humanId=null,path='demo.md'){
   const receipt=event?.content?.['org.didadi.document.commit'];
-  if(receipt!==undefined)return event?.sender===humanId&&receipt?.author===humanId&&receipt.version===1&&receipt.path===path&&(synthetic?/^sample-[a-z0-9-]+$/:/^[a-f0-9]{40}$/).test(receipt.commit)?receipt.commit:null;
+  if(receipt!==undefined)return typeof receipt?.author==='string'&&receipt.author.startsWith('@')&&event?.sender===receipt.author&&receipt.version===1&&receipt.path===path&&(synthetic?/^sample-[a-z0-9-]+$/:/^[a-f0-9]{40}$/).test(receipt.commit)?receipt.commit:null;
   if(event?.sender!==agentId)return null;
   const content=event.content||{},body=content.body;
   if(typeof body!=='string'||content['m.relates_to']?.rel_type!=='m.thread')return null;
