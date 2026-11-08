@@ -163,7 +163,7 @@ jobs:
           docker compose cp appservice:/config/smoke-passwords.json .local/smoke-passwords.json
           chmod 600 .local/smoke-passwords.json
           start_client() {
-            python3 -m src.client_server --auth-mode matrix \
+            DIDADI_INVITE_PROBE=1 python3 -m src.client_server --auth-mode matrix \
               --state-file .local/smoke-state.json \
               --token-file .local/agent-token \
               --repo .local/documents.git \
@@ -230,6 +230,8 @@ jobs:
       - name: Diagnostics
         if: failure()
         run: |
+          # Aggregate counts only; never print cookies, client logs or tokens.
+          grep '^INVITE_PROBE ' .local/real-login-client.log | tail -n 10 || true
           docker compose ps -a
           docker compose logs --no-color --tail=150 synapse postgres appservice
       - name: Cleanup
