@@ -141,6 +141,12 @@ class ClientServerTests(unittest.TestCase):
         def matrix(method,path,data=None,query=None):
             calls.append((method,path))
             if path=='/sync':
+                # A state.types=[] filter can suppress the invite_state and
+                # entire invitation on Synapse; preserve the room state filter.
+                # This models the observed real browser failure in #42346349936.
+                filtered=json.loads(query['filter'])['room']
+                if filtered.get('state',{}).get('types')==[]:
+                    return {'rooms':{'invite':{}}}
                 # Real Synapse's stripped invite_state is decorative: it
                 # need not contain the invitee's m.room.member event.
                 events=[{'type':'m.room.name','content':{'name':'Team DM'}}] if invitation else []
