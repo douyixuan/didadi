@@ -23,3 +23,16 @@ it('accepts an existing same-server Matrix ID including homeserver port',async()
     kind:'direct',participants:['@bob:localhost:8448'],invite_agent:false
   });
 });
+
+
+it('rejects deceptive local-user IDs with an extra homeserver prefix',()=>{
+  const api=fixture();
+  api.session.userId='@alice:localhost:8448';
+  api.session.agentId='@agent:localhost:8448';
+  api.session.roomCreation={version:1,contacts:[],allowLocalMembers:true};
+  render(<RoomCreator api={api} onCreated={()=>{}}/>);
+  fireEvent.change(screen.getByLabelText('Matrix user ID to invite'),{target:{value:'@bob:evil:localhost:8448'}});
+  fireEvent.click(screen.getByRole('button',{name:'Add person'}));
+  expect(screen.queryByRole('button',{name:'Remove @bob:evil:localhost:8448'})).toBeNull();
+  expect(screen.getByRole('alert')).toHaveTextContent('Enter a different existing local Matrix user ID.');
+});
