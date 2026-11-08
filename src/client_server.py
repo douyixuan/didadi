@@ -73,13 +73,11 @@ class Workspace:
             return []
         with sqlite3.connect(self.metadata) as db:
             known = {row[0] for row in db.execute('SELECT id FROM rooms')}
-        # Suppress joined-room timelines, but never set state.types=[]: Synapse
-        # can suppress stripped invite_state (and the invite) with that filter.
-        # /sync rooms.invite is the current authenticated user's invite source.
-        minimal = {'room': {'timeline': {'limit': 0},
-                            'ephemeral': {'types': []},
-                            'account_data': {'types': []}}, 'presence': {'types': []}}
-        response = self.api('GET', '/sync', query={'timeout': '0', 'filter': json.dumps(minimal)})
+        # An initial /sync must preserve all invite membership state. Room
+        # filters can unexpectedly suppress invited rooms on real Synapse.
+        # This is loopback-only; a production implementation needs a cached,
+        # incremental sync rather than repeated unfiltered initial snapshots.
+        response = self.api('GET', '/sync', query={'timeout': '0'})
         invites = response.get('rooms', {}).get('invite', {})
         if not isinstance(invites, dict):
             raise ClientError(503, 'Matrix invitations are unavailable. Retry.')
