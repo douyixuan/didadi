@@ -4,6 +4,7 @@ import hashlib
 import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
 import mimetypes
 from pathlib import Path
 import re
@@ -100,6 +101,12 @@ class Workspace:
                          isinstance(event.get('content'), dict)), None)
             found.append({'room': room, 'name': name[:60] if isinstance(name, str) and name.strip()
                           else 'Private room invitation'})
+        if os.getenv('DIDADI_INVITE_PROBE') == '1':
+            # Aggregate-only diagnostics: no account names, room IDs, tokens
+            # or invite payloads in public CI logs.
+            print('INVITE_PROBE source=%d registered=%d known_source=%d joined_source=%d visible=%d' %
+                  (len(invites), len(known), len(set(invites) & known),
+                   len(set(invites) & joined), len(found)), flush=True)
         return sorted(found, key=lambda item: item['room'])
 
     def join_invitation(self, room):
