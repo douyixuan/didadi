@@ -74,11 +74,11 @@ class Workspace:
             return []
         with sqlite3.connect(self.metadata) as db:
             known = {row[0] for row in db.execute('SELECT id FROM rooms')}
-        # An initial /sync must preserve all invite membership state. Room
-        # filters can unexpectedly suppress invited rooms on real Synapse.
-        # This is loopback-only; a production implementation needs a cached,
-        # incremental sync rather than repeated unfiltered initial snapshots.
-        response = self.api('GET', '/sync', query={'timeout': '0'})
+        # Restrict expensive joined-room payloads, without filtering invite_state.
+        minimal = {'room': {'timeline': {'limit': 0},
+                            'state': {'types': []}, 'ephemeral': {'types': []},
+                            'account_data': {'types': []}}, 'presence': {'types': []}}
+        response = self.api('GET', '/sync', query={'timeout': '0', 'filter': json.dumps(minimal)})
         invites = response.get('rooms', {}).get('invite', {})
         if not isinstance(invites, dict):
             raise ClientError(503, 'Matrix invitations are unavailable. Retry.')
@@ -104,9 +104,9 @@ class Workspace:
         if os.getenv('DIDADI_INVITE_PROBE') == '1':
             # Aggregate-only diagnostics: no account names, room IDs, tokens
             # or invite payloads in public CI logs.
-            print('INVITE_PROBE source=%d registered=%d known_source=%d joined_source=%d visible=%d' %
+            print('INVITE_PROBE source=%d registered=%d known_source=%d joined_total=%d joined_source=%d visible=%d' %
                   (len(invites), len(known), len(set(invites) & known),
-                   len(set(invites) & joined), len(found)), flush=True)
+                   len(joined), len(set(invites) & joined), len(found)), flush=True)
         return sorted(found, key=lambda item: item['room'])
 
     def join_invitation(self, room):
