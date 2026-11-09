@@ -164,9 +164,10 @@ try {
   } catch (error) {
     // These diagnostics are aggregate-only: no bearer token, user ID, room ID,
     // Matrix invite body or browser storage is written to CI logs.
-    const joined = await browserRequest(bob.page, '/matrix/_matrix/client/v3/joined_rooms');
+    const joined = await browserRequest(bob.page, '/matrix/_matrix/client/v3/joined_rooms')
+      .catch(() => ({status: 0, data: {}}));
     console.error('INVITE_DELIVERY_TIMEOUT creator=invite bob_joined_count=' +
-      (joined.status === 200 && Array.isArray(joined.data.joined_rooms)
+      (joined.status === 200 && Array.isArray(joined.data?.joined_rooms)
         ? joined.data.joined_rooms.length : 'unavailable'));
     throw error;
   }
