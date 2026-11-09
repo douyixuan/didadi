@@ -138,9 +138,11 @@ class ClientServerTests(unittest.TestCase):
         joined={'!seed:local'}
         invitation=True
         calls=[]
+        sync_queries=[]
         def matrix(method,path,data=None,query=None):
             calls.append((method,path))
             if path=='/sync':
+                sync_queries.append(query)
                 # Real Synapse's stripped invite_state is decorative: it
                 # need not contain the invitee's m.room.member event.
                 events=[{'type':'m.room.name','content':{'name':'Team DM'}}] if invitation else []
@@ -155,6 +157,9 @@ class ClientServerTests(unittest.TestCase):
             with self.assertRaises(ClientError):
                 self.workspace.allowed(invite)
             self.assertEqual(self.workspace.invitations(),[{'room':invite,'name':'Team DM'}])
+            # A joined-room state filter may suppress invite observation on
+            # Synapse. The actor's unfiltered /sync must remain authoritative.
+            self.assertEqual(sync_queries, [{'timeout':'0'}])
             for other in ('!foreign:local','!missing:local','wrong'):
                 with self.subTest(room=other),self.assertRaises(ClientError) as error:
                     self.workspace.join_invitation(other)
