@@ -74,12 +74,12 @@ class Workspace:
             return []
         with sqlite3.connect(self.metadata) as db:
             known = {row[0] for row in db.execute('SELECT id FROM rooms')}
-        # Restrict expensive joined-room payloads, without filtering invite_state.
-        minimal = {'room': {'timeline': {'limit': 0},
-                            'state': {'types': []}, 'ephemeral': {'types': []},
-                            'account_data': {'types': []}}, 'presence': {'types': []}}
-        response = self.api('GET', '/sync', query={'timeout': '0', 'filter': json.dumps(minimal)})
-        invites = response.get('rooms', {}).get('invite', {})
+        # Do not apply a joined-room state filter to invitation discovery.
+        # Synapse must expose the invite through this actor's actual /sync,
+        # not through a locally registered room or the creator's state.
+        response = self.api('GET', '/sync', query={'timeout': '0'})
+        rooms = response.get('rooms', {})
+        invites = rooms.get('invite', {})
         if not isinstance(invites, dict):
             raise ClientError(503, 'Matrix invitations are unavailable. Retry.')
         joined = set(self.api('GET', '/joined_rooms')['joined_rooms'])
@@ -107,6 +107,12 @@ class Workspace:
             print('INVITE_PROBE source=%d registered=%d known_source=%d joined_total=%d joined_source=%d visible=%d' %
                   (len(invites), len(known), len(set(invites) & known),
                    len(joined), len(set(invites) & joined), len(found)), flush=True)
+            # Distinguish an absent invite from a room already left or joined
+            # without ever logging Matrix IDs, user names or bearer tokens.
+            left = rooms.get('leave', {})
+            if isinstance(left, dict):
+                print('INVITE_MEMBERSHIP_PROBE left_known=%d joined_known=%d' %
+                      (len(set(left) & known), len(joined & known)), flush=True)
         return sorted(found, key=lambda item: item['room'])
 
     def join_invitation(self, room):
