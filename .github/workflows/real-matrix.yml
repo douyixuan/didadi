@@ -231,7 +231,7 @@ jobs:
         if: failure()
         run: |
           # Aggregate counts only; never print cookies, client logs or tokens.
-          grep '^INVITE_PROBE ' .local/real-login-client.log | tail -n 10 || true
+          grep -E '^INVITE_(PROBE|MEMBERSHIP_PROBE) ' .local/real-login-client.log | tail -n 20 || true
           docker compose ps -a
           docker compose logs --no-color --tail=150 synapse postgres appservice
       - name: Cleanup
