@@ -157,9 +157,12 @@ class ClientServerTests(unittest.TestCase):
             with self.assertRaises(ClientError):
                 self.workspace.allowed(invite)
             self.assertEqual(self.workspace.invitations(),[{'room':invite,'name':'Team DM'}])
-            # A joined-room state filter may suppress invite observation on
-            # Synapse. The actor's unfiltered /sync must remain authoritative.
-            self.assertEqual(sync_queries, [{'timeout':'0'}])
+            # Invitation reads must use the actor's own /sync and must not
+            # request a joined-room timeline. Invite presence remains governed
+            # by the authenticated Matrix rooms.invite map.
+            self.assertEqual(len(sync_queries), 1)
+            self.assertEqual(sync_queries[0]['timeout'], '0')
+            self.assertEqual(json.loads(sync_queries[0]['filter'])['room']['timeline'], {'limit': 0})
             for other in ('!foreign:local','!missing:local','wrong'):
                 with self.subTest(room=other),self.assertRaises(ClientError) as error:
                     self.workspace.join_invitation(other)
