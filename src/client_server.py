@@ -74,10 +74,13 @@ class Workspace:
             return []
         with sqlite3.connect(self.metadata) as db:
             known = {row[0] for row in db.execute('SELECT id FROM rooms')}
-        # Do not apply a joined-room state filter to invitation discovery.
-        # Synapse must expose the invite through this actor's actual /sync,
-        # not through a locally registered room or the creator's state.
-        response = self.api('GET', '/sync', query={'timeout': '0'})
+        # Limit joined-room history on the actor's authenticated Matrix sync.
+        # The invite map itself remains authoritative for invitation discovery.
+        minimal = {'room': {'timeline': {'limit': 0},
+                            'state': {'types': []}, 'ephemeral': {'types': []},
+                            'account_data': {'types': []}}, 'presence': {'types': []}}
+        response = self.api('GET', '/sync',
+                            query={'timeout': '0', 'filter': json.dumps(minimal)})
         rooms = response.get('rooms', {})
         invites = rooms.get('invite', {})
         if not isinstance(invites, dict):
