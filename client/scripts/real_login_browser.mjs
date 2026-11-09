@@ -139,11 +139,37 @@ try {
   await expect(aliceDirectButton).toHaveClass(/room-selected/, {timeout: 30000});
   const createdDirect = new URL(alice.page.url()).searchParams.get('room');
   assert.ok(createdDirect?.startsWith('!'), 'Creator must select the real Matrix room ID');
-  const invited = await browserRequest(bob.page, '/api/rooms/invites');
-  assert.equal(invited.status, 200);
-  const pending = invited.data.invites.find(item => item.room === createdDirect);
-  assert.ok(pending, 'Bob must receive the exact invited Matrix room: ' +
-    JSON.stringify({createdDirect, invites: invited.data.invites}));
+  // Prove that the creator's live Synapse state contains the invite event;
+  // local room registration or a successful createRoom response alone is not
+  // proof that Synapse accepted Bob's membership.
+  const creatorState = await browserRequest(alice.page,
+    '/matrix/_matrix/client/v3/rooms/' + encodeURIComponent(createdDirect) + '/state');
+  assert.equal(creatorState.status, 200);
+  assert.equal(creatorState.data.find(event =>
+    event.type === 'm.room.member' && event.state_key === accounts[1][0])?.content?.membership,
+  'invite', 'The creator must observe a genuine Matrix invite for Bob');
+
+  // Room creation and invite delivery are separate asynchronous Matrix events.
+  // A single immediate /sync can race the account stream update. Bound the
+  // retry, keep the exact room-ID assertion, and never fabricate an invitation.
+  let pending = null;
+  try {
+    await expect.poll(async () => {
+      const invited = await browserRequest(bob.page, '/api/rooms/invites');
+      assert.equal(invited.status, 200, 'Invitation discovery needs a real authenticated session');
+      assert.ok(Array.isArray(invited.data.invites));
+      pending = invited.data.invites.find(item => item.room === createdDirect) ?? null;
+      return pending !== null;
+    }, {timeout: 30000, intervals: [250, 500, 1000, 2000]}).toBe(true);
+  } catch (error) {
+    // These diagnostics are aggregate-only: no bearer token, user ID, room ID,
+    // Matrix invite body or browser storage is written to CI logs.
+    const joined = await browserRequest(bob.page, '/matrix/_matrix/client/v3/joined_rooms');
+    console.error('INVITE_DELIVERY_TIMEOUT creator=invite bob_joined_count=' +
+      (joined.status === 200 && Array.isArray(joined.data.joined_rooms)
+        ? joined.data.joined_rooms.length : 'unavailable'));
+    throw error;
+  }
   assert.ok(pending.room.startsWith('!'), 'An invitation needs a real Synapse room ID');
   const unauthorizedBeforeJoin = await browserRequest(bob.page,
     '/matrix/_matrix/client/v3/rooms/' + encodeURIComponent(pending.room) + '/messages?dir=b');
