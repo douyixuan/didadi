@@ -79,12 +79,31 @@ class Workspace:
         minimal = {'room': {'timeline': {'limit': 0},
                             'state': {'types': []}, 'ephemeral': {'types': []},
                             'account_data': {'types': []}}, 'presence': {'types': []}}
-        response = self.api('GET', '/sync',
-                            query={'timeout': '0', 'filter': json.dumps(minimal)})
+        sync_query = {'timeout': '0', 'filter': json.dumps(minimal)}
+        response = self.api('GET', '/sync', query=sync_query)
         rooms = response.get('rooms', {})
-        invites = rooms.get('invite', {})
-        if not isinstance(invites, dict):
+        if not isinstance(rooms, dict) or not isinstance(rooms.get('invite', {}), dict):
             raise ClientError(503, 'Matrix invitations are unavailable. Retry.')
+        invites = dict(rooms.get('invite', {}))
+        # Synapse can cache the *initial* /sync response by account, device
+        # and filter. Repeated no-since reads may consequently hide a newly
+        # delivered invite for several minutes. Read the incremental stream
+        # from that initial response's exact cursor, then reconcile changes.
+        # The baseline supplies older pending invites, while new invites and
+        # joined/left transitions supply the current membership changes.
+        cursor = response.get('next_batch')
+        if isinstance(cursor, str) and cursor:
+            delta = self.api('GET', '/sync', query={**sync_query, 'since': cursor})
+            changes = delta.get('rooms', {})
+            if (not isinstance(changes, dict) or
+                    any(not isinstance(changes.get(kind, {}), dict)
+                        for kind in ('invite', 'join', 'leave'))):
+                raise ClientError(503, 'Matrix invitations are unavailable. Retry.')
+            invites.update(changes.get('invite', {}))
+            for kind in ('join', 'leave'):
+                for room in changes.get(kind, {}):
+                    invites.pop(room, None)
+            rooms = changes
         joined = set(self.api('GET', '/joined_rooms')['joined_rooms'])
         found = []
         for room, invitation in invites.items():
