@@ -174,6 +174,41 @@ class ClientServerTests(unittest.TestCase):
             self.assertEqual(self.workspace.join_invitation(invite),{'room':invite,'joined':True})
             self.assertEqual(sum(path.endswith('/join') for method,path in calls),1)
 
+    def test_p0_invites_refresh_cached_initial_sync_cursor(self):
+        """A cached initial /sync must not hide later genuine Matrix invitations."""
+        invited, revoked = '!fresh:local', '!revoked:local'
+        with sqlite3.connect(self.workspace.metadata) as db:
+            db.execute('INSERT INTO rooms VALUES (?,?)', (invited, 'fresh-room'))
+            db.execute('INSERT INTO rooms VALUES (?,?)', (revoked, 'revoked-room'))
+        self.workspace.live = True
+        queries = []
+        def matrix(method, path, data=None, query=None):
+            if path == '/sync':
+                queries.append(query)
+                if query.get('since') == 's-before-invitation':
+                    return {'next_batch': 's-after-invitation', 'rooms': {
+                        'invite': {invited: {'invite_state': {'events': [
+                            {'type': 'm.room.name', 'content': {'name': 'Fresh invite'}}]}}},
+                        'leave': {revoked: {}}}}
+                # Simulate Synapse's repeated cached initial snapshot: one
+                # stale invitation has since been withdrawn and a new one is
+                # absent until incremental /sync is requested.
+                self.assertNotIn('since', query)
+                return {'next_batch': 's-before-invitation', 'rooms': {
+                    'invite': {revoked: {'invite_state': {'events': []}}}}}
+            if path == '/joined_rooms':
+                return {'joined_rooms': ['!seed:local']}
+            return self.api(method, path, data, query)
+        with patch.object(self.workspace, 'api', side_effect=matrix):
+            self.assertEqual(self.workspace.invitations(),
+                             [{'room': invited, 'name': 'Fresh invite'}])
+            self.assertEqual([q.get('since') for q in queries],
+                             [None, 's-before-invitation'])
+            # Every request reconciles a current incremental stream rather
+            # than keeping a stale invitation or sharing state across users.
+            self.assertEqual(self.workspace.invitations(),
+                             [{'room': invited, 'name': 'Fresh invite'}])
+
     def test_named_document_http_creation_errors_and_room_boundary(self):
         def document_api(method, path, data=None):
             if method=='GET' and '/event/' in path:
