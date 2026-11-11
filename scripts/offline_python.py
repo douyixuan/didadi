@@ -36,6 +36,9 @@ def main():
             'test_platform_matrix_proxy_rejects_document_bodies_before_send',
             'test_quote_and_thread_references_are_validated_before_send',
             'test_only_requester_in_granted_room_can_cancel',
+            'test_p0_invites_are_live_actor_scoped_and_join_is_opt_in',
+            'test_p0_invites_refresh_cached_initial_sync_cursor',
+            'test_p0_invites_poll_advances_session_cursor_and_retains_pending',
             'test_thread_relations_are_room_scoped_and_never_allow_identity_or_limit_overrides',
         ):
             suite.addTests(unittest.defaultTestLoader.loadTestsFromName('test_client_server.ClientServerTests.' + name))

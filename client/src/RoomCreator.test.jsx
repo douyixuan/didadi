@@ -5,3 +5,34 @@ it('requires one human for a direct conversation and removes an earlier Agent ch
 it('locks unknown results and retries identical name, options and operation',async()=>{const api=fixture();api.createRoom.mockRejectedValueOnce(new Error('Response lost'));render(<RoomCreator api={api} onCreated={()=>{}}/>);fireEvent.change(screen.getByLabelText('New local room name'),{target:{value:'Keep request'}});fireEvent.click(screen.getByRole('button',{name:'Create local room'}));await screen.findByRole('alert');expect(screen.getByLabelText('New local room name')).toBeDisabled();expect(screen.getByLabelText('Room type')).toBeDisabled();expect(screen.getByLabelText(/Invite example Agent/)).toBeDisabled();fireEvent.click(screen.getByRole('button',{name:'Create local room'}));await screen.findByText('Private room created.');expect(api.createRoom.mock.calls[1]).toEqual(api.createRoom.mock.calls[0]);});
 it('does not retry room creation if only the room-list callback failed',async()=>{const api=fixture();render(<RoomCreator api={api} onCreated={()=>{throw new Error('list failed')}}/>);fireEvent.change(screen.getByLabelText('New local room name'),{target:{value:'Created'}});fireEvent.click(screen.getByRole('button',{name:'Create local room'}));await screen.findByText('Room created, but its list could not refresh. Refresh the rooms list.');expect(screen.getByLabelText('New local room name')).toHaveValue('');expect(api.createRoom).toHaveBeenCalledOnce();});
 it('acknowledges a created room even when its independent direct label is pending',async()=>{const api=fixture(),created=vi.fn();api.createRoom.mockResolvedValue({room_id:'!new:local',direct_sync:'pending'});render(<RoomCreator api={api} onCreated={created}/>);fireEvent.change(screen.getByLabelText('New local room name'),{target:{value:'Created direct'}});fireEvent.click(screen.getByRole('button',{name:'Create local room'}));await screen.findByText('Private room created. Direct label is pending; use Retry direct label.');expect(api.createRoom).toHaveBeenCalledOnce();expect(created).toHaveBeenCalledOnce();expect(screen.getByLabelText('New local room name')).toHaveValue('');});
+
+it('accepts an existing same-server Matrix ID including homeserver port',async()=>{
+  const api=fixture();
+  api.session.userId='@alice:localhost:8448';
+  api.session.agentId='@agent:localhost:8448';
+  api.session.roomCreation={version:1,contacts:[],allowLocalMembers:true};
+  render(<RoomCreator api={api} onCreated={()=>{}}/>);
+  fireEvent.change(screen.getByLabelText('Room type'),{target:{value:'direct'}});
+  fireEvent.change(screen.getByLabelText('Matrix user ID to invite'),{target:{value:'@bob:localhost:8448'}});
+  fireEvent.click(screen.getByRole('button',{name:'Add person'}));
+  expect(screen.getByRole('button',{name:'Remove @bob:localhost:8448'})).toBeEnabled();
+  fireEvent.change(screen.getByLabelText('New local room name'),{target:{value:'Existing local DM'}});
+  fireEvent.click(screen.getByRole('button',{name:'Create local room'}));
+  await screen.findByText('Private room created.');
+  expect(api.createRoom.mock.calls[0][2]).toEqual({
+    kind:'direct',participants:['@bob:localhost:8448'],invite_agent:false
+  });
+});
+
+
+it('rejects deceptive local-user IDs with an extra homeserver prefix',()=>{
+  const api=fixture();
+  api.session.userId='@alice:localhost:8448';
+  api.session.agentId='@agent:localhost:8448';
+  api.session.roomCreation={version:1,contacts:[],allowLocalMembers:true};
+  render(<RoomCreator api={api} onCreated={()=>{}}/>);
+  fireEvent.change(screen.getByLabelText('Matrix user ID to invite'),{target:{value:'@bob:evil:localhost:8448'}});
+  fireEvent.click(screen.getByRole('button',{name:'Add person'}));
+  expect(screen.queryByRole('button',{name:'Remove @bob:evil:localhost:8448'})).toBeNull();
+  expect(screen.getByRole('alert')).toHaveTextContent('Enter a different existing local Matrix user ID.');
+});

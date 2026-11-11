@@ -128,6 +128,135 @@ class ClientServerTests(unittest.TestCase):
         self.assertEqual(self.workspace.create_room('stable-request-id','Client room')['room_id'],'!created:local')
         self.workspace.allowed('!created:local')
 
+    def test_p0_invites_are_live_actor_scoped_and_join_is_opt_in(self):
+        # Red: an invite is not a joined room and must never grant data reads.
+        from src.matrix_http import segment
+        invite='!invited:local'
+        with sqlite3.connect(self.workspace.metadata) as db:
+            db.execute('INSERT INTO rooms VALUES (?,?)',(invite,'known-private-room'))
+        self.workspace.live=True
+        joined={'!seed:local'}
+        invitation=True
+        calls=[]
+        sync_queries=[]
+        def matrix(method,path,data=None,query=None):
+            calls.append((method,path))
+            if path=='/sync':
+                sync_queries.append(query)
+                # Real Synapse's stripped invite_state is decorative: it
+                # need not contain the invitee's m.room.member event.
+                events=[{'type':'m.room.name','content':{'name':'Team DM'}}] if invitation else []
+                return {'rooms':{'invite':{invite:{'invite_state':{'events':events}},
+                                          '!foreign:local':{'invite_state':{'events':events}}}}}
+            if path=='/joined_rooms':return {'joined_rooms':list(joined)}
+            if path=='/rooms/'+segment(invite)+'/join':
+                joined.add(invite)
+                return {'room_id':invite}
+            return self.api(method,path,data,query)
+        with patch.object(self.workspace,'api',side_effect=matrix):
+            with self.assertRaises(ClientError):
+                self.workspace.allowed(invite)
+            self.assertEqual(self.workspace.invitations(),[{'room':invite,'name':'Team DM'}])
+            # Invitation reads must use the actor's own /sync and must not
+            # request a joined-room timeline. Invite presence remains governed
+            # by the authenticated Matrix rooms.invite map.
+            self.assertEqual(len(sync_queries), 1)
+            self.assertEqual(sync_queries[0]['timeout'], '0')
+            self.assertEqual(json.loads(sync_queries[0]['filter'])['room']['timeline'], {'limit': 0})
+            # Synapse filters invitation stripped-state with room.state too.
+            # Empty state types silently drop genuine invitations from /sync.
+            state_types = json.loads(sync_queries[0]['filter'])['room']['state']['types']
+            self.assertIn('m.room.member', state_types)
+            self.assertIn('m.room.name', state_types)
+            for other in ('!foreign:local','!missing:local','wrong'):
+                with self.subTest(room=other),self.assertRaises(ClientError) as error:
+                    self.workspace.join_invitation(other)
+                self.assertIn(error.exception.status,(400,403))
+            self.assertFalse(any(path.endswith('/join') for method,path in calls))
+            self.assertEqual(self.workspace.join_invitation(invite),{'room':invite,'joined':True})
+            self.workspace.allowed(invite)
+            self.assertEqual(self.workspace.invitations(),[])
+            self.assertEqual(self.workspace.join_invitation(invite),{'room':invite,'joined':True})
+            self.assertEqual(sum(path.endswith('/join') for method,path in calls),1)
+
+    def test_p0_invites_refresh_cached_initial_sync_cursor(self):
+        """A cached initial /sync must not hide later genuine Matrix invitations."""
+        invited, revoked = '!fresh:local', '!revoked:local'
+        with sqlite3.connect(self.workspace.metadata) as db:
+            db.execute('INSERT INTO rooms VALUES (?,?)', (invited, 'fresh-room'))
+            db.execute('INSERT INTO rooms VALUES (?,?)', (revoked, 'revoked-room'))
+        self.workspace.live = True
+        queries = []
+        def matrix(method, path, data=None, query=None):
+            if path == '/sync':
+                queries.append(query)
+                if query.get('since') == 's-after-invitation':
+                    # No new events: the already pending invite persists.
+                    return {'next_batch': 's-after-invitation', 'rooms': {}}
+                if query.get('since') == 's-before-invitation':
+                    return {'next_batch': 's-after-invitation', 'rooms': {
+                        'invite': {invited: {'invite_state': {'events': [
+                            {'type': 'm.room.name', 'content': {'name': 'Fresh invite'}}]}}},
+                        'leave': {revoked: {}}}}
+                # Simulate Synapse's repeated cached initial snapshot: one
+                # stale invitation has since been withdrawn and a new one is
+                # absent until incremental /sync is requested.
+                self.assertNotIn('since', query)
+                return {'next_batch': 's-before-invitation', 'rooms': {
+                    'invite': {revoked: {'invite_state': {'events': []}}}}}
+            if path == '/joined_rooms':
+                return {'joined_rooms': ['!seed:local']}
+            return self.api(method, path, data, query)
+        with patch.object(self.workspace, 'api', side_effect=matrix):
+            self.assertEqual(self.workspace.invitations(),
+                             [{'room': invited, 'name': 'Fresh invite'}])
+            self.assertEqual([q.get('since') for q in queries],
+                             [None, 's-before-invitation'])
+            # A withdrawn invitation needs membership events in incremental
+            # sync; zero-length timeline would hide the leave transition.
+            delta_timeline = json.loads(queries[1]['filter'])['room']['timeline']
+            self.assertEqual(delta_timeline, {'limit': 1, 'types': ['m.room.member']})
+            # Follow the advanced cursor, preserving pending invitations while
+            # processing empty incremental /sync results from this same actor.
+            self.assertEqual(self.workspace.invitations(),
+                             [{'room': invited, 'name': 'Fresh invite'}])
+            self.assertEqual([q.get('since') for q in queries],
+                             [None, 's-before-invitation', 's-after-invitation'])
+
+    def test_p0_invites_poll_advances_session_cursor_and_retains_pending(self):
+        """An invitation arriving after the first cached /sync must be discovered."""
+        room = '!late-invite:local'
+        with sqlite3.connect(self.workspace.metadata) as db:
+            db.execute('INSERT INTO rooms VALUES (?,?)', (room, 'late-private-room'))
+        self.workspace.live = True
+        since_values = []
+        def matrix(method, path, data=None, query=None):
+            if path == '/sync':
+                since = query.get('since')
+                since_values.append(since)
+                if since is None:
+                    return {'next_batch': 's1', 'rooms': {'invite': {}}}
+                if since == 's1':
+                    return {'next_batch': 's2', 'rooms': {'join': {'!seed:local': {}}}}
+                if since == 's2':
+                    return {'next_batch': 's3', 'rooms': {'invite': {
+                        room: {'invite_state': {'events': [
+                            {'type': 'm.room.name', 'content': {'name': 'Late DM'}}]}}}}}
+                if since == 's3':
+                    return {'next_batch': 's3', 'rooms': {}}
+                self.fail('Unexpected Matrix cursor: ' + str(since))
+            if path == '/joined_rooms':
+                return {'joined_rooms': ['!seed:local']}
+            return self.api(method, path, data, query)
+        with patch.object(self.workspace, 'api', side_effect=matrix):
+            # Synapse may cache the first empty snapshot. The server must
+            # advance using each new next_batch, not restart from s1 forever.
+            seen = [self.workspace.invitations() for _ in range(4)]
+        self.assertEqual(seen[-1], [{'room': room, 'name': 'Late DM'}])
+        self.assertIn('s2', since_values)
+        self.assertIn('s3', since_values)
+        self.assertEqual(seen[-2:], [[{'room': room, 'name': 'Late DM'}]] * 2)
+
     def test_named_document_http_creation_errors_and_room_boundary(self):
         def document_api(method, path, data=None):
             if method=='GET' and '/event/' in path:

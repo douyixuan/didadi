@@ -45,6 +45,33 @@ class RoomServiceTests(unittest.TestCase):
     def test_direct_and_explicit_agent_invitation_have_distinct_rosters(self):
         self.service.create({**self.data,'kind':'direct','participants':[self.peer]});self.assertEqual(self.payload['invite'],[self.peer]);self.assertTrue(self.payload['is_direct'])
         self.payload=None;self.service.create({**self.data,'operation':'agent-group','invite_agent':True,'participants':[self.peer]});self.assertEqual(self.payload['invite'],[self.peer,AGENT]);self.assertFalse(self.payload['is_direct'])
+    def test_real_live_user_can_invite_only_verified_local_matrix_identity(self):
+        from src.matrix_http import segment
+        old_api=self.api
+        profiles=[]
+        def profile_api(method,path,data=None):
+            if path.startswith('/profile/'):
+                profiles.append(path)
+            if path=='/profile/'+segment(self.peer):
+                return {'displayname':'Bob'}
+            if path.startswith('/profile/'):
+                raise MatrixError(404,{'errcode':'M_NOT_FOUND'})
+            return old_api(method,path,data)
+        live=RoomService(self.db,profile_api,self.user,allow_local_members=True)
+        direct={**self.data,'kind':'direct','participants':[self.peer]}
+        self.assertEqual(live.create(direct)['participants'],[self.peer])
+        self.assertEqual(profiles, ['/profile/'+segment(self.peer)])
+        for index,candidate in enumerate(('@missing:didadi.localhost',
+                          '@outsider:remote.invalid', self.user,AGENT)):
+            with self.subTest(candidate=candidate),self.assertRaises(RoomError) as failure:
+                live.create({**direct,'operation':'different-'+str(index)+'-request',
+                             'participants':[candidate]})
+            self.assertEqual(failure.exception.status,403)
+        # Opt-in real lookup never widens the synthetic/fixture contact set.
+        with self.assertRaises(RoomError):
+            self.service.create({**direct,'operation':'synthetic-is-restricted',
+                                 'participants':['@new:didadi.localhost']})
+
     def test_unsupported_visibility_contacts_and_direct_options_fail_before_create(self):
         for change in ({'visibility':'public'},{'participants':['@third:external.invalid']},{'kind':'direct'},{'kind':'direct','participants':[self.peer],'invite_agent':True},{'kind':[]},{'invite_agent':'yes'},{'participants':[self.peer,self.peer]}):
             with self.subTest(change=change),self.assertRaises(RoomError):self.service.create({**self.data,**change})

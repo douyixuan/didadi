@@ -124,6 +124,83 @@ try {
   await bob.page.getByRole('button', {name: 'Discussion', exact: true}).click();
   await expect(bob.page.locator('.timeline')).toContainText(message, {timeout: 45000});
 
+  // P0 ROOM-01: real Matrix account A creates an invite-only DM for B.
+  // B cannot fetch its timeline until accepting the actor-scoped Matrix invite.
+  const directName = 'Real DM ' + randomUUID().slice(0, 8);
+  await alice.page.getByLabel('Room type').selectOption('direct');
+  await alice.page.getByLabel('Matrix user ID to invite').fill(accounts[1][0]);
+  await alice.page.getByRole('button', {name: 'Add person'}).click();
+  await alice.page.getByLabel('New local room name').fill(directName);
+  await alice.page.getByRole('button', {name: 'Create local room'}).click();
+  await expect(alice.page.getByText('Private room created.', {exact: true}))
+    .toBeVisible({timeout: 45000});
+  const aliceDirectButton = alice.page.locator('nav[aria-label="Rooms"] button.room')
+    .filter({hasText: directName});
+  await expect(aliceDirectButton).toHaveClass(/room-selected/, {timeout: 30000});
+  const createdDirect = new URL(alice.page.url()).searchParams.get('room');
+  assert.ok(createdDirect?.startsWith('!'), 'Creator must select the real Matrix room ID');
+  // Prove that the creator's live Synapse state contains the invite event;
+  // local room registration or a successful createRoom response alone is not
+  // proof that Synapse accepted Bob's membership.
+  const creatorState = await browserRequest(alice.page,
+    '/matrix/_matrix/client/v3/rooms/' + encodeURIComponent(createdDirect) + '/state');
+  assert.equal(creatorState.status, 200);
+  assert.equal(creatorState.data.find(event =>
+    event.type === 'm.room.member' && event.state_key === accounts[1][0])?.content?.membership,
+  'invite', 'The creator must observe a genuine Matrix invite for Bob');
+
+  // Room creation and invite delivery are separate asynchronous Matrix events.
+  // A single immediate /sync can race the account stream update. Bound the
+  // retry, keep the exact room-ID assertion, and never fabricate an invitation.
+  let pending = null;
+  try {
+    await expect.poll(async () => {
+      const invited = await browserRequest(bob.page, '/api/rooms/invites');
+      assert.equal(invited.status, 200, 'Invitation discovery needs a real authenticated session');
+      assert.ok(Array.isArray(invited.data.invites));
+      pending = invited.data.invites.find(item => item.room === createdDirect) ?? null;
+      return pending !== null;
+    }, {timeout: 30000, intervals: [250, 500, 1000, 2000]}).toBe(true);
+  } catch (error) {
+    // These diagnostics are aggregate-only: no bearer token, user ID, room ID,
+    // Matrix invite body or browser storage is written to CI logs.
+    const joined = await browserRequest(bob.page, '/matrix/_matrix/client/v3/joined_rooms')
+      .catch(() => ({status: 0, data: {}}));
+    console.error('INVITE_DELIVERY_TIMEOUT creator=invite bob_joined_count=' +
+      (joined.status === 200 && Array.isArray(joined.data?.joined_rooms)
+        ? joined.data.joined_rooms.length : 'unavailable'));
+    throw error;
+  }
+  assert.ok(pending.room.startsWith('!'), 'An invitation needs a real Synapse room ID');
+  const unauthorizedBeforeJoin = await browserRequest(bob.page,
+    '/matrix/_matrix/client/v3/rooms/' + encodeURIComponent(pending.room) + '/messages?dir=b');
+  assert.equal(unauthorizedBeforeJoin.status, 403, 'Invite alone cannot read room history');
+  const unrelated = await browserRequest(bob.page, '/api/rooms/join', {room: '!foreign:localhost'});
+  assert.equal(unrelated.status, 403, 'A known Matrix account cannot join an unregistered room');
+  await bob.page.getByRole('button', {name: 'Refresh invitations'}).click();
+  await bob.page.getByRole('button', {name: 'Join invitation ' + pending.name}).click();
+  const joinedDirect = bob.page.locator('nav[aria-label="Rooms"] button.room').filter({hasText: directName});
+  await expect(joinedDirect).toHaveClass(/room-selected/, {timeout: 30000});
+  const directSecret = 'DM after join ' + randomUUID().replaceAll('-', '');
+  const discussionPanel = bob.page.locator('.collaboration-panel');
+  if (await discussionPanel.evaluate(element => element.classList.contains('panel-closed'))) {
+    await bob.page.getByRole('button', {name: 'Discussion', exact: true}).click();
+  }
+  await bob.page.locator('.composer textarea').fill(directSecret);
+  await bob.page.locator('.composer').getByRole('button', {name: /^Send/}).click();
+  await expect(bob.page.locator('.timeline')).toContainText(directSecret, {timeout: 45000});
+  await alice.page.getByRole('button', {name: 'Refresh rooms'}).click();
+  const aliceDirect = alice.page.locator('nav[aria-label="Rooms"] button.room').filter({hasText: directName});
+  await aliceDirect.click();
+  await expect(alice.page.locator('.timeline')).toContainText(directSecret, {timeout: 45000});
+  await bob.page.reload();
+  await expect(bob.page.locator('nav[aria-label="Rooms"] button.room').filter({hasText: directName}))
+    .toBeVisible({timeout: 30000});
+  // Reload closes the collaboration pane; the later private-room composer
+  // must be visibly reopened or the real Chromium test stalls on a hidden input.
+  await bob.page.getByRole('button', {name: 'Discussion', exact: true}).click();
+  console.log('PASS REAL ROOM #70: creator UI, Matrix invitation, before-join denial, joined DM, reload');
+
   // A private Bob-only Matrix room must not be visible to Alice.
   const privateName = 'Browser private ' + randomUUID().slice(0, 8);
   const privateRoom = await browserRequest(bob.page, '/api/rooms', {
