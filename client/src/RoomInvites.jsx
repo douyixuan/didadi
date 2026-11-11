@@ -10,9 +10,10 @@ export function RoomInvites({api, onJoined}) {
   const [loading, setLoading] = useState(false);
   const revision = useRef(0);
 
-  async function refresh() {
+  async function refresh(silent = false) {
     const current = ++revision.current;
-    setLoading(true); setError('');
+    if (!silent) setLoading(true);
+    setError('');
     try {
       const result = await api.invites();
       if (current === revision.current) setInvites(result);
@@ -27,7 +28,11 @@ export function RoomInvites({api, onJoined}) {
     setInvites([]);
     setBusy('');
     refresh();
-    return () => {revision.current += 1;};
+    // Matrix invites are asynchronous: an authenticated invitee should not
+    // have to discover newly delivered invitations with a manual refresh.
+    // The current API is actor-scoped, and cleanup invalidates older replies.
+    const timer = setInterval(() => {void refresh(true);}, 10000);
+    return () => {clearInterval(timer); revision.current += 1;};
   }, [api]);
 
   async function join(room) {
@@ -51,7 +56,7 @@ export function RoomInvites({api, onJoined}) {
 
   return <section className="room-invites" aria-label="Matrix invitations">
     <div className="section-heading"><span>Invitations</span>
-      <button type="button" onClick={refresh} disabled={loading || Boolean(busy)}
+      <button type="button" onClick={() => refresh()} disabled={loading || Boolean(busy)}
         aria-label="Refresh invitations">Refresh</button></div>
     {loading && <p role="status">Checking Matrix invitations…</p>}
     {error && <p role="alert">{error}</p>}
