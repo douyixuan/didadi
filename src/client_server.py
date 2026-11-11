@@ -87,8 +87,13 @@ class Workspace:
             # A since-cursor avoids reusing Synapse's cached initial /sync
             # snapshot after new messages. Store only counts, never bodies.
             minimal = {'room': {'timeline': {'limit': 0},
-                                'state': {'types': []}, 'ephemeral': {'types': []},
-                                'account_data': {'types': []}}, 'presence': {'types': []}}
+                                'state': {'types': []},
+                                # Keep read-marker changes in incremental /sync:
+                                # filtering both categories out can preserve a stale
+                                # unread count forever after /read_markers succeeds.
+                                'ephemeral': {'types': ['m.receipt']},
+                                'account_data': {'types': ['m.fully_read']}},
+                       'presence': {'types': []}}
             query = {'timeout': '0', 'filter': json.dumps(minimal)}
             if self._unread_cursor:
                 query['since'] = self._unread_cursor
