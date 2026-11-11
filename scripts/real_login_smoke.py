@@ -136,6 +136,53 @@ def run(base, credentials, restart_proof=None):
         assert receipt['content']['body'].startswith('Saved ')
     print('PASS REAL GIT two documents, stable versions, denied write and metadata-only receipts')
 
+    # P0 #71 DOC-01/DOC-04 real-service acceptance: move the *second*
+    # document without disturbing the first document or its restart proof.
+    # This runs in the trusted isolated Synapse + Document API + Git job;
+    # unlike the synthetic client smoke, both sessions are real Matrix users.
+    moved_name = 'auth-validation/renamed-' + secrets.token_hex(12) + '.md'
+    move_payload = {'room': room, 'source': second_name, 'name': moved_name,
+                    'base_blob': second['blob'], 'operation': str(uuid.uuid4())}
+    moved, _ = call('/api/documents/move', 'POST', move_payload,
+                    cookie=alice[1], csrf=alice[2]['csrf'])
+    assert moved['status'] == 'saved'
+    assert moved['path'] == moved_name
+    assert moved['blob'] == second['blob'], 'Move rewrote the Markdown blob'
+    assert moved['commit'] != second['commit'], 'Move did not record Git history'
+    retried, _ = call('/api/documents/move', 'POST', move_payload,
+                      cookie=alice[1], csrf=alice[2]['csrf'])
+    assert retried['commit'] == moved['commit'], 'Same operation duplicated Git effects'
+    relocated, _ = call('/api/document?' + urlencode({'room': room, 'path': moved_name}),
+                        cookie=bob[1])
+    assert relocated['content'] == second_body and relocated['blob'] == second['blob']
+    no_longer_current, _ = call('/api/document?' + urlencode({
+        'room': room, 'path': second_name}), cookie=bob[1])
+    assert no_longer_current['blob'] is None, 'Old path still resolves in current Git tree'
+    original_revision, _ = call('/api/document?' + urlencode({
+        'room': room, 'path': second_name, 'commit': second['commit']}), cookie=bob[1])
+    assert original_revision['content'] == second_body
+    assert original_revision['blob'] == second['blob']
+    retained_first, _ = call('/api/document?' + urlencode({'room': room, 'path': name}),
+                             cookie=bob[1])
+    assert retained_first['content'] == body and retained_first['blob'] == created['blob']
+    # The same Matrix membership must not imply write authority.
+    denied(403, '/api/documents/move', 'POST',
+           {'room': room, 'source': moved_name, 'name': 'forbidden.md',
+            'base_blob': moved['blob'], 'operation': str(uuid.uuid4())},
+           cookie=bob[1], csrf=bob[2]['csrf'])
+    denied(400, '/api/documents/move', 'POST',
+           {'room': room, 'source': moved_name, 'name': '../escape.md',
+            'base_blob': moved['blob'], 'operation': str(uuid.uuid4())},
+           cookie=alice[1], csrf=alice[2]['csrf'])
+    assert moved['receipt'] and not moved['receipt_pending']
+    receipt_event, _ = call(path + '/event/' + segment(moved['receipt']['event_id']),
+                            cookie=bob[1])
+    receipt_meta = receipt_event['content']['org.didadi.document.commit']
+    assert receipt_meta['path'] == moved_name and receipt_meta['commit'] == moved['commit']
+    assert receipt_meta['author'] == alice[0]
+    assert second_body not in json.dumps(receipt_event), 'Move leaked document body into Matrix'
+    print('PASS REAL GIT document move: byte-exact, immutable history, idempotent, forbidden write/path, metadata receipt')
+
     # A genuine room created by Bob becomes available only to Bob. The global
     # local room index must never override live Matrix membership checks.
     private, _ = call('/api/rooms', 'POST',
