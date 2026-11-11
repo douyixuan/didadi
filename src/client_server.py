@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import secrets
 import sqlite3
+import threading
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from src.gitdocs import GitDocs, Conflict, InvalidPath, NameCollision
@@ -41,6 +42,10 @@ class Workspace:
         self.matrix_url, self.gateway_url = matrix_url, gateway_url
         self.docs, self.metadata = GitDocs(repo), str(metadata)
         self.csrf = secrets.token_urlsafe(32)
+        # One private Matrix sync stream per authenticated session/workspace.
+        self._invite_lock = threading.Lock()
+        self._invite_cursor = None
+        self._pending_invites = {}
         self.user_id = self.api('GET', '/account/whoami')['user_id']
         self.documents = DocumentService(self.docs, self.api, self.user_id, state['room'])
         self.search = SearchService(self.documents,self.api,self.allowed)
@@ -69,76 +74,74 @@ class Workspace:
             raise ClientError(403, 'You are not joined to this room.')
 
     def invitations(self):
-        """Only current user's live Matrix invites to already registered local rooms."""
+        """Poll this actor's Matrix sync stream; never reuse another session's invites."""
         if not self.live:
             return []
-        with sqlite3.connect(self.metadata) as db:
-            known = {row[0] for row in db.execute('SELECT id FROM rooms')}
-        # Minimize joined-room traffic without discarding invitation state.
-        # Synapse applies the room.state type filter to stripped invite_state;
-        # an empty state filter makes genuinely invited rooms disappear.
-        # Keep member and name events so /sync can report invitations.
-        minimal = {'room': {'timeline': {'limit': 0},
-                            'state': {'types': ['m.room.member', 'm.room.name']},
-                            'ephemeral': {'types': []},
-                            'account_data': {'types': []}}, 'presence': {'types': []}}
-        sync_query = {'timeout': '0', 'filter': json.dumps(minimal)}
-        response = self.api('GET', '/sync', query=sync_query)
-        rooms = response.get('rooms', {})
-        if not isinstance(rooms, dict) or not isinstance(rooms.get('invite', {}), dict):
-            raise ClientError(503, 'Matrix invitations are unavailable. Retry.')
-        invites = dict(rooms.get('invite', {}))
-        # Synapse can cache the *initial* /sync response by account, device
-        # and filter. Repeated no-since reads may consequently hide a newly
-        # delivered invite for several minutes. Read the incremental stream
-        # from that initial response's exact cursor, then reconcile changes.
-        # The baseline supplies older pending invites, while new invites and
-        # joined/left transitions supply the current membership changes.
-        cursor = response.get('next_batch')
-        if isinstance(cursor, str) and cursor:
-            delta = self.api('GET', '/sync', query={**sync_query, 'since': cursor})
-            changes = delta.get('rooms', {})
-            if (not isinstance(changes, dict) or
-                    any(not isinstance(changes.get(kind, {}), dict)
-                        for kind in ('invite', 'join', 'leave'))):
-                raise ClientError(503, 'Matrix invitations are unavailable. Retry.')
-            invites.update(changes.get('invite', {}))
-            for kind in ('join', 'leave'):
-                for room in changes.get(kind, {}):
-                    invites.pop(room, None)
-            rooms = changes
-        joined = set(self.api('GET', '/joined_rooms')['joined_rooms'])
-        found = []
-        for room, invitation in invites.items():
-            if room not in known or room in joined or not isinstance(invitation, dict):
-                continue
-            state = invitation.get('invite_state', {}).get('events', [])
-            if not isinstance(state, list):
-                continue
-            # The authenticated Synapse rooms.invite map is the current
-            # account's authoritative invitation set. invite_state is optional
-            # stripped room decoration, NOT a second membership proof: the
-            # Matrix spec does not require any m.room.member event here.
-            # Joining still requires a fresh invite and confirmation by Synapse.
-            name = next((event.get('content', {}).get('name')
-                         for event in state if isinstance(event, dict) and
-                         event.get('type') == 'm.room.name' and
-                         isinstance(event.get('content'), dict)), None)
-            found.append({'room': room, 'name': name[:60] if isinstance(name, str) and name.strip()
-                          else 'Private room invitation'})
-        if os.getenv('DIDADI_INVITE_PROBE') == '1':
-            # Aggregate-only diagnostics: no account names, room IDs, tokens
-            # or invite payloads in public CI logs.
-            print('INVITE_PROBE source=%d registered=%d known_source=%d joined_total=%d joined_source=%d visible=%d' %
-                  (len(invites), len(known), len(set(invites) & known),
-                   len(joined), len(set(invites) & joined), len(found)), flush=True)
-            # Distinguish an absent invite from a room already left or joined
-            # without ever logging Matrix IDs, user names or bearer tokens.
-            left = rooms.get('leave', {})
-            if isinstance(left, dict):
+        with self._invite_lock:
+            with sqlite3.connect(self.metadata) as db:
+                known = {row[0] for row in db.execute('SELECT id FROM rooms')}
+            # Limit joined-room history, not the invitation's stripped state.
+            minimal = {'room': {'timeline': {'limit': 0},
+                                'state': {'types': ['m.room.member', 'm.room.name']},
+                                'ephemeral': {'types': []},
+                                'account_data': {'types': []}}, 'presence': {'types': []}}
+            query = {'timeout': '1000' if self._invite_cursor else '0',
+                     'filter': json.dumps(minimal)}
+            if self._invite_cursor:
+                query['since'] = self._invite_cursor
+
+            def reconcile(response, initial=False):
+                """Merge incremental invite/join/leave transitions without losing pending invites."""
+                if not isinstance(response, dict) or not isinstance(response.get('rooms', {}), dict):
+                    raise ClientError(503, 'Matrix invitations are unavailable. Retry.')
+                rooms = response.get('rooms', {})
+                if any(not isinstance(rooms.get(kind, {}), dict)
+                       for kind in ('invite', 'join', 'leave')):
+                    raise ClientError(503, 'Matrix invitations are unavailable. Retry.')
+                if initial:
+                    self._pending_invites = {}
+                self._pending_invites.update(rooms.get('invite', {}))
+                for kind in ('join', 'leave'):
+                    for room in rooms.get(kind, {}):
+                        self._pending_invites.pop(room, None)
+                cursor = response.get('next_batch')
+                if isinstance(cursor, str) and cursor:
+                    self._invite_cursor = cursor
+                return rooms
+
+            initial = self._invite_cursor is None
+            rooms = reconcile(self.api('GET', '/sync', query=query), initial=initial)
+            if initial and self._invite_cursor:
+                # First snapshot may be cached by Synapse. Catch events after
+                # its cursor, then keep advancing that cursor on later polls.
+                rooms = reconcile(self.api('GET', '/sync', query={
+                    **query, 'since': self._invite_cursor, 'timeout': '1000'}))
+            joined = set(self.api('GET', '/joined_rooms')['joined_rooms'])
+            found = []
+            for room, invitation in self._pending_invites.items():
+                if room not in known or room in joined or not isinstance(invitation, dict):
+                    continue
+                state = invitation.get('invite_state', {}).get('events', [])
+                if not isinstance(state, list):
+                    continue
+                # Synapse's per-account rooms.invite map is the invitation
+                # source; stripped invite_state is optional room decoration.
+                # Joining still requires a fresh confirmed Matrix join.
+                name = next((event.get('content', {}).get('name')
+                             for event in state if isinstance(event, dict) and
+                             event.get('type') == 'm.room.name' and
+                             isinstance(event.get('content'), dict)), None)
+                found.append({'room': room, 'name': name[:60] if isinstance(name, str) and name.strip()
+                              else 'Private room invitation'})
+            if os.getenv('DIDADI_INVITE_PROBE') == '1':
+                # Aggregate-only diagnostics, never leak identities, tokens or room IDs.
+                print('INVITE_PROBE source=%d registered=%d known_source=%d joined_total=%d joined_source=%d visible=%d' %
+                      (len(self._pending_invites), len(known), len(set(self._pending_invites) & known),
+                       len(joined), len(set(self._pending_invites) & joined), len(found)), flush=True)
+                left = rooms.get('leave', {})
                 print('INVITE_MEMBERSHIP_PROBE left_known=%d joined_known=%d' %
                       (len(set(left) & known), len(joined & known)), flush=True)
-        return sorted(found, key=lambda item: item['room'])
+            return sorted(found, key=lambda item: item['room'])
 
     def join_invitation(self, room):
         if not self.live or not isinstance(room, str) or not room.startswith('!') or len(room) > 512:
