@@ -309,6 +309,12 @@ try {
       .filter({hasText: roomName});
     await aliceRoom.click();
     await expect(alice.page.locator('.timeline')).toContainText(text, {timeout: 45000});
+    // The preceding unread scenario reloads Alice and closes Discussion.
+    // Reopen the panel before asserting that its composer can send replies.
+    const alicePanel = alice.page.locator('.collaboration-panel');
+    if (await alicePanel.evaluate(node => node.classList.contains('panel-closed'))) {
+      await alice.page.getByRole('button', {name: 'Discussion', exact: true}).click();
+    }
     const reply = kind + ' creator reply ' + randomUUID().replaceAll('-', '');
     await alice.page.locator('.composer textarea').fill(reply);
     await alice.page.locator('.composer').getByRole('button', {name: /^Send/}).click();
