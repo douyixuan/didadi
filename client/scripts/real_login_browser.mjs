@@ -282,6 +282,12 @@ try {
   await expect(newPrivate).toBeVisible({timeout: 30000});
   await newPrivate.click();
   await expect(newPrivate).toHaveClass(/room-selected/, {timeout: 30000});
+  // The group/channel reload above closes Bob's discussion panel. Reopen it
+  // before the later departed-room composer check (otherwise this is a hidden UI).
+  const privatePanel = bob.page.locator('.collaboration-panel');
+  if (await privatePanel.evaluate(node => node.classList.contains('panel-closed'))) {
+    await bob.page.getByRole('button', {name: 'Discussion', exact: true}).click();
+  }
   const privateMessage = 'Departed room secret ' + randomUUID().replaceAll('-', '');
   await bob.page.locator('.composer textarea').fill(privateMessage);
   await bob.page.locator('.composer').getByRole('button', {name: /^Send/}).click();
