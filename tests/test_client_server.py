@@ -190,6 +190,9 @@ class ClientServerTests(unittest.TestCase):
         def matrix(method, path, data=None, query=None):
             if path == '/sync':
                 queries.append(query)
+                if query.get('since') == 's-after-invitation':
+                    # No new events: the already pending invite persists.
+                    return {'next_batch': 's-after-invitation', 'rooms': {}}
                 if query.get('since') == 's-before-invitation':
                     return {'next_batch': 's-after-invitation', 'rooms': {
                         'invite': {invited: {'invite_state': {'events': [
@@ -209,10 +212,12 @@ class ClientServerTests(unittest.TestCase):
                              [{'room': invited, 'name': 'Fresh invite'}])
             self.assertEqual([q.get('since') for q in queries],
                              [None, 's-before-invitation'])
-            # Every request reconciles a current incremental stream rather
-            # than keeping a stale invitation or sharing state across users.
+            # Follow the advanced cursor, preserving pending invitations while
+            # processing empty incremental /sync results from this same actor.
             self.assertEqual(self.workspace.invitations(),
                              [{'room': invited, 'name': 'Fresh invite'}])
+            self.assertEqual([q.get('since') for q in queries],
+                             [None, 's-before-invitation', 's-after-invitation'])
 
     def test_p0_invites_poll_advances_session_cursor_and_retains_pending(self):
         """An invitation arriving after the first cached /sync must be discovered."""
