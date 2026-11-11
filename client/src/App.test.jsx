@@ -46,6 +46,27 @@ describe('P0 real Matrix room membership visibility',()=>{
   });
 });
 
+describe('P0 ROOM-03 server-derived unread notifications',()=>{
+  it('shows only real room counts and acknowledges the selected room without reading another',async()=>{
+    const api=fixture();
+    api.session.liveMatrix=true;
+    api.markRoomRead=vi.fn().mockResolvedValue({read:true});
+    api.rooms.mockResolvedValue([
+      {id:'!room',name:'Workspace',agentJoined:true,unread:0},
+      {id:'!other',name:'Other room',agentJoined:false,unread:3},
+    ]);
+    api.timelinePage=vi.fn().mockResolvedValue({
+      events:[{id:'$visible',sender:'@bob:local',time:1,content:{msgtype:'m.text',body:'Read only this room'}}],
+      previousCursor:null,
+    });
+    render(<App connector={async()=>api}/>);
+    expect(await screen.findByLabelText('Unread messages in Other room')).toHaveTextContent('3');
+    expect(screen.queryByLabelText('Unread messages in Workspace')).not.toBeInTheDocument();
+    await waitFor(()=>expect(api.markRoomRead).toHaveBeenCalledWith('!room','$visible'));
+    expect(api.markRoomRead).not.toHaveBeenCalledWith('!other',expect.anything());
+  });
+});
+
 describe('P0 revoked-room race regressions',()=>{
   it('selects a newly joined room after starting with an empty room list',async()=>{
     const api=fixture();
