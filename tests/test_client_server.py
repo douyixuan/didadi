@@ -163,6 +163,11 @@ class ClientServerTests(unittest.TestCase):
             self.assertEqual(len(sync_queries), 1)
             self.assertEqual(sync_queries[0]['timeout'], '0')
             self.assertEqual(json.loads(sync_queries[0]['filter'])['room']['timeline'], {'limit': 0})
+            # Synapse filters invitation stripped-state with room.state too.
+            # Empty state types silently drop genuine invitations from /sync.
+            state_types = json.loads(sync_queries[0]['filter'])['room']['state']['types']
+            self.assertIn('m.room.member', state_types)
+            self.assertIn('m.room.name', state_types)
             for other in ('!foreign:local','!missing:local','wrong'):
                 with self.subTest(room=other),self.assertRaises(ClientError) as error:
                     self.workspace.join_invitation(other)
