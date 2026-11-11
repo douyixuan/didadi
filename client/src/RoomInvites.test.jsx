@@ -58,3 +58,21 @@ it('enables new-session invitations when the previous join returns late',async()
   await act(async()=>finishJoin({room:'!old:local',joined:true}));
   expect(fresh).toBeEnabled();expect(joined).not.toHaveBeenCalled();
 });
+
+it('discovers a new Matrix invitation without requiring the invitee to click refresh',async()=>{
+  vi.useFakeTimers();
+  let view;
+  try {
+    const api={invites:vi.fn().mockResolvedValueOnce([])
+      .mockResolvedValue([{room:'!new:local',name:'Late invitation'}]),joinRoom:vi.fn()};
+    view=render(<RoomInvites api={api} onJoined={vi.fn()}/>);
+    await act(async()=>{await Promise.resolve();});
+    expect(screen.queryByRole('button',{name:'Join invitation Late invitation'})).toBeNull();
+    await act(async()=>{await vi.advanceTimersByTimeAsync(10000);});
+    expect(screen.getByRole('button',{name:'Join invitation Late invitation'})).toBeInTheDocument();
+    expect(api.invites).toHaveBeenCalledTimes(2);
+  } finally {
+    view?.unmount();
+    vi.useRealTimers();
+  }
+});
