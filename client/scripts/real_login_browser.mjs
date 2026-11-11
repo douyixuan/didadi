@@ -215,11 +215,21 @@ try {
   await bob.page.locator('.composer textarea').fill(unreadText);
   await bob.page.locator('.composer').getByRole('button', {name: /^Send/}).click();
   await expect(bob.page.locator('.timeline')).toContainText(unreadText, {timeout: 45000});
-  await expect.poll(async () => {
-    const result = await browserRequest(alice.page, '/api/rooms/unread');
-    assert.equal(result.status, 200, 'Unread snapshot must use Alice real session');
-    return result.data.unread?.[createdDirect] ?? 0;
-  }, {timeout: 30000, intervals: [500, 1000, 2000]}).toBeGreaterThan(0);
+  let unreadProbe = {present: false, count: -1, roomCount: 0};
+  try {
+    await expect.poll(async () => {
+      const result = await browserRequest(alice.page, '/api/rooms/unread');
+      assert.equal(result.status, 200, 'Unread snapshot must use Alice real session');
+      const counts = result.data.unread || {};
+      unreadProbe = {present: Object.prototype.hasOwnProperty.call(counts, createdDirect),
+        count: counts[createdDirect] ?? -1, roomCount: Object.keys(counts).length};
+      return counts[createdDirect] ?? 0;
+    }, {timeout: 30000, intervals: [500, 1000, 2000]}).toBeGreaterThan(0);
+  } catch (error) {
+    // Aggregate-only diagnostics: no room IDs, account names, content or tokens.
+    console.error('UNREAD_MATRIX_DIAGNOSTIC=' + JSON.stringify(unreadProbe));
+    throw error;
+  }
   const unreadDirect = alice.page.locator('nav[aria-label="Rooms"] button.room')
     .filter({hasText: directName});
   await expect(unreadDirect.getByLabel('Unread messages in ' + directName))
