@@ -62,6 +62,7 @@ describe('P0 ROOM-03 server-derived unread notifications',()=>{
     render(<App connector={async()=>api}/>);
     expect(await screen.findByLabelText('Unread messages in Other room')).toHaveTextContent('3');
     expect(screen.queryByLabelText('Unread messages in Workspace')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'Discussion',exact:true}));
     await waitFor(()=>expect(api.markRoomRead).toHaveBeenCalledWith('!room','$visible'));
     expect(api.markRoomRead).not.toHaveBeenCalledWith('!other',expect.anything());
   });
