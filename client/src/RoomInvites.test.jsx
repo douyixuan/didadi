@@ -76,3 +76,45 @@ it('discovers a new Matrix invitation without requiring the invitee to click ref
     vi.useRealTimers();
   }
 });
+
+it('keeps a pending Matrix join valid across background invitation polling',async()=>{
+  vi.useFakeTimers();
+  let finishJoin,view;
+  try {
+    const api={invites:vi.fn().mockResolvedValue([{room:'!pending:local',name:'Work group'}]),
+      joinRoom:vi.fn(()=>new Promise(resolve=>{finishJoin=resolve;}))};
+    const onJoined=vi.fn();
+    view=render(<RoomInvites api={api} onJoined={onJoined}/>);
+    await act(async()=>{await Promise.resolve();});
+    fireEvent.click(screen.getByRole('button',{name:'Join invitation Work group'}));
+    expect(finishJoin).toBeTypeOf('function');
+    await act(async()=>{await vi.advanceTimersByTimeAsync(10000);});
+    expect(api.invites).toHaveBeenCalledTimes(2);
+    await act(async()=>{finishJoin({room:'!pending:local',joined:true});await Promise.resolve();});
+    expect(onJoined).toHaveBeenCalledExactlyOnceWith('!pending:local');
+    expect(screen.queryByRole('button',{name:'Join invitation Work group'})).toBeNull();
+  } finally {view?.unmount();vi.useRealTimers();}
+});
+
+it('preserves a Matrix join denial and pending invitations across a failed silent refresh',async()=>{
+  vi.useFakeTimers();
+  let view;
+  try {
+    const api={invites:vi.fn().mockResolvedValueOnce([{room:'!invite:local',name:'Team'}])
+      .mockRejectedValueOnce(new Error('Matrix temporarily offline'))
+      .mockResolvedValue([{room:'!invite:local',name:'Team'}]),
+      joinRoom:vi.fn().mockRejectedValue(new Error('Not authorized to join'))};
+    view=render(<RoomInvites api={api} onJoined={vi.fn()}/>);
+    await act(async()=>{await Promise.resolve();});
+    fireEvent.click(screen.getByRole('button',{name:'Join invitation Team'}));
+    await act(async()=>{await Promise.resolve();});
+    expect(screen.getByText('Not authorized to join')).toBeInTheDocument();
+    await act(async()=>{await vi.advanceTimersByTimeAsync(10000);});
+    expect(screen.getByText('Matrix temporarily offline')).toBeInTheDocument();
+    expect(screen.getByText('Not authorized to join')).toBeInTheDocument();
+    expect(screen.getByRole('button',{name:'Join invitation Team'})).toBeEnabled();
+    await act(async()=>{await vi.advanceTimersByTimeAsync(10000);});
+    expect(screen.queryByText('Matrix temporarily offline')).toBeNull();
+    expect(screen.getByText('Not authorized to join')).toBeInTheDocument();
+  } finally {view?.unmount();vi.useRealTimers();}
+});
