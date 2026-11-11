@@ -255,6 +255,11 @@ try {
       .filter({hasText: roomName});
     await aliceRoom.click();
     await expect(alice.page.locator('.timeline')).toContainText(text, {timeout: 45000});
+    const reply = kind + ' creator reply ' + randomUUID().replaceAll('-', '');
+    await alice.page.locator('.composer textarea').fill(reply);
+    await alice.page.locator('.composer').getByRole('button', {name: /^Send/}).click();
+    await expect(alice.page.locator('.timeline')).toContainText(reply, {timeout: 45000});
+    await expect(bob.page.locator('.timeline')).toContainText(reply, {timeout: 45000});
     await bob.page.reload();
     await expect(bob.page.locator('nav[aria-label="Rooms"] button.room')
       .filter({hasText: roomName})).toBeVisible({timeout: 30000});
