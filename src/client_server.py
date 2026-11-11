@@ -46,6 +46,9 @@ class Workspace:
         self._invite_lock = threading.Lock()
         self._invite_cursor = None
         self._pending_invites = {}
+        self._unread_lock = threading.Lock()
+        self._unread_cursor = None
+        self._unread_counts = {}
         self.user_id = self.api('GET', '/account/whoami')['user_id']
         self.documents = DocumentService(self.docs, self.api, self.user_id, state['room'])
         self.search = SearchService(self.documents,self.api,self.allowed)
@@ -74,30 +77,45 @@ class Workspace:
             raise ClientError(403, 'You are not joined to this room.')
 
     def unread_rooms(self):
-        """Return only Matrix notification counters for this actor's joined workspace rooms."""
+        """Per-session, Matrix-owned unread counters from a cursored sync stream."""
         if not self.live:
             return {'unread': {}}
-        with sqlite3.connect(self.metadata) as db:
-            known = {row[0] for row in db.execute('SELECT id FROM rooms')}
-        joined = set(self.api('GET', '/joined_rooms')['joined_rooms']) & known
-        # Full snapshot returns each room's server notification count without bodies.
-        minimal = {'room': {'timeline': {'limit': 0},
-                            'state': {'types': []}, 'ephemeral': {'types': []},
-                            'account_data': {'types': []}}, 'presence': {'types': []}}
-        snapshot = self.api('GET', '/sync', query={
-            'timeout': '0', 'filter': json.dumps(minimal)})
-        summaries = snapshot.get('rooms', {}).get('join', {})
-        if not isinstance(summaries, dict):
-            raise ClientError(503, 'Matrix unread counters are unavailable. Retry.')
-        counts = {}
-        for room in joined:
-            summary = summaries.get(room, {})
-            notifications = summary.get('unread_notifications', {}) if isinstance(summary, dict) else {}
-            count = notifications.get('notification_count', 0) if isinstance(notifications, dict) else 0
-            if type(count) is not int or count < 0:
-                raise ClientError(503, 'Matrix unread counters are malformed. Retry.')
-            counts[room] = count
-        return {'unread': counts}
+        with self._unread_lock:
+            with sqlite3.connect(self.metadata) as db:
+                known = {row[0] for row in db.execute('SELECT id FROM rooms')}
+            joined = set(self.api('GET', '/joined_rooms')['joined_rooms']) & known
+            # A since-cursor avoids reusing Synapse's cached initial /sync
+            # snapshot after new messages. Store only counts, never bodies.
+            minimal = {'room': {'timeline': {'limit': 0},
+                                'state': {'types': []}, 'ephemeral': {'types': []},
+                                'account_data': {'types': []}}, 'presence': {'types': []}}
+            query = {'timeout': '0', 'filter': json.dumps(minimal)}
+            if self._unread_cursor:
+                query['since'] = self._unread_cursor
+            snapshot = self.api('GET', '/sync', query=query)
+            rooms = snapshot.get('rooms', {}) if isinstance(snapshot, dict) else None
+            summaries = rooms.get('join', {}) if isinstance(rooms, dict) else None
+            if not isinstance(summaries, dict):
+                raise ClientError(503, 'Matrix unread counters are unavailable. Retry.')
+            for room, summary in summaries.items():
+                if room not in joined:
+                    continue
+                notifications = summary.get('unread_notifications', {}) if isinstance(summary, dict) else {}
+                if not isinstance(notifications, dict):
+                    raise ClientError(503, 'Matrix unread counters are malformed. Retry.')
+                # MSC2654 counts unread messages even when no push rule
+                # generated a notification. Older Synapse used a prefixed key.
+                count = notifications.get('unread_count',
+                        notifications.get('org.matrix.msc2654.unread_count',
+                        notifications.get('notification_count', 0)))
+                if type(count) is not int or count < 0:
+                    raise ClientError(503, 'Matrix unread counters are malformed. Retry.')
+                self._unread_counts[room] = count
+            self._unread_counts = {room: self._unread_counts.get(room, 0) for room in joined}
+            cursor = snapshot.get('next_batch')
+            if isinstance(cursor, str) and cursor:
+                self._unread_cursor = cursor
+            return {'unread': dict(self._unread_counts)}
 
     def mark_room_read(self, room, event_id):
         """Advance only the current Matrix actor's read marker for a verified message."""
