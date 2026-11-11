@@ -212,6 +212,10 @@ class ClientServerTests(unittest.TestCase):
                              [{'room': invited, 'name': 'Fresh invite'}])
             self.assertEqual([q.get('since') for q in queries],
                              [None, 's-before-invitation'])
+            # A withdrawn invitation needs membership events in incremental
+            # sync; zero-length timeline would hide the leave transition.
+            delta_timeline = json.loads(queries[1]['filter'])['room']['timeline']
+            self.assertEqual(delta_timeline, {'limit': 1, 'types': ['m.room.member']})
             # Follow the advanced cursor, preserving pending invitations while
             # processing empty incremental /sync results from this same actor.
             self.assertEqual(self.workspace.invitations(),
