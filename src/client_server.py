@@ -85,8 +85,13 @@ class Workspace:
                                 'state': {'types': ['m.room.member', 'm.room.name']},
                                 'ephemeral': {'types': []},
                                 'account_data': {'types': []}}, 'presence': {'types': []}}
+            # Initial snapshot may omit timelines, but incremental sync must
+            # include membership transitions so a declined or withdrawn invite
+            # can be removed even when Synapse filters the room.leave section.
+            delta_filter = {**minimal, 'room': {**minimal['room'],
+                            'timeline': {'limit': 1, 'types': ['m.room.member']}}}
             query = {'timeout': '1000' if self._invite_cursor else '0',
-                     'filter': json.dumps(minimal)}
+                     'filter': json.dumps(delta_filter if self._invite_cursor else minimal)}
             if self._invite_cursor:
                 query['since'] = self._invite_cursor
 
@@ -115,7 +120,8 @@ class Workspace:
                 # First snapshot may be cached by Synapse. Catch events after
                 # its cursor, then keep advancing that cursor on later polls.
                 rooms = reconcile(self.api('GET', '/sync', query={
-                    **query, 'since': self._invite_cursor, 'timeout': '1000'}))
+                    **query, 'since': self._invite_cursor, 'timeout': '1000',
+                    'filter': json.dumps(delta_filter)}))
             joined = set(self.api('GET', '/joined_rooms')['joined_rooms'])
             found = []
             for room, invitation in self._pending_invites.items():
