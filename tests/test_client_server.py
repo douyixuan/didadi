@@ -214,6 +214,40 @@ class ClientServerTests(unittest.TestCase):
             self.assertEqual(self.workspace.invitations(),
                              [{'room': invited, 'name': 'Fresh invite'}])
 
+    def test_p0_invites_poll_advances_session_cursor_and_retains_pending(self):
+        """An invitation arriving after the first cached /sync must be discovered."""
+        room = '!late-invite:local'
+        with sqlite3.connect(self.workspace.metadata) as db:
+            db.execute('INSERT INTO rooms VALUES (?,?)', (room, 'late-private-room'))
+        self.workspace.live = True
+        since_values = []
+        def matrix(method, path, data=None, query=None):
+            if path == '/sync':
+                since = query.get('since')
+                since_values.append(since)
+                if since is None:
+                    return {'next_batch': 's1', 'rooms': {'invite': {}}}
+                if since == 's1':
+                    return {'next_batch': 's2', 'rooms': {'join': {'!seed:local': {}}}}
+                if since == 's2':
+                    return {'next_batch': 's3', 'rooms': {'invite': {
+                        room: {'invite_state': {'events': [
+                            {'type': 'm.room.name', 'content': {'name': 'Late DM'}}]}}}}}
+                if since == 's3':
+                    return {'next_batch': 's3', 'rooms': {}}
+                self.fail('Unexpected Matrix cursor: ' + str(since))
+            if path == '/joined_rooms':
+                return {'joined_rooms': ['!seed:local']}
+            return self.api(method, path, data, query)
+        with patch.object(self.workspace, 'api', side_effect=matrix):
+            # Synapse may cache the first empty snapshot. The server must
+            # advance using each new next_batch, not restart from s1 forever.
+            seen = [self.workspace.invitations() for _ in range(4)]
+        self.assertEqual(seen[-1], [{'room': room, 'name': 'Late DM'}])
+        self.assertIn('s2', since_values)
+        self.assertIn('s3', since_values)
+        self.assertEqual(seen[-2:], [[{'room': room, 'name': 'Late DM'}]] * 2)
+
     def test_named_document_http_creation_errors_and_room_boundary(self):
         def document_api(method, path, data=None):
             if method=='GET' and '/event/' in path:
