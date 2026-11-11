@@ -1,5 +1,6 @@
 """P0 ROOM-03 Matrix counters and read-marker authorization (injected API, not live E2E)."""
 import json
+import threading
 import sqlite3
 import tempfile
 import unittest
@@ -21,6 +22,9 @@ class MatrixUnreadAuthorization(unittest.TestCase):
         self.workspace = Workspace.__new__(Workspace)
         self.workspace.live = True
         self.workspace.metadata = self.metadata
+        self.workspace._unread_lock = threading.Lock()
+        self.workspace._unread_cursor = None
+        self.workspace._unread_counts = {}
         self.workspace.api = self.matrix
         self.joined = ['!shared:localhost', '!other-users:localhost']
         self.read_writes = []
@@ -30,9 +34,12 @@ class MatrixUnreadAuthorization(unittest.TestCase):
             return {'joined_rooms': list(self.joined)}
         if method == 'GET' and path == '/sync':
             self.assertEqual(query['timeout'], '0')
+            if self.workspace._unread_cursor is not None:
+                self.assertEqual(query.get('since'), self.workspace._unread_cursor)
+
             self.assertEqual(json.loads(query['filter'])['room']['timeline']['limit'], 0)
-            return {'rooms': {'join': {
-                '!shared:localhost': {'unread_notifications': {'notification_count': 3}},
+            return {'next_batch': 'cursor-1', 'rooms': {'join': {
+                '!shared:localhost': {'unread_notifications': {'notification_count': 0, 'unread_count': 3}},
                 '!departed:localhost': {'unread_notifications': {'notification_count': 88}},
                 '!other-users:localhost': {'unread_notifications': {'notification_count': 99}},
             }}}
@@ -48,6 +55,10 @@ class MatrixUnreadAuthorization(unittest.TestCase):
 
     def test_snapshot_is_only_current_joined_registered_room(self):
         self.assertEqual(self.workspace.unread_rooms(), {'unread': {'!shared:localhost': 3}})
+        self.assertEqual(self.workspace._unread_cursor, 'cursor-1')
+        self.assertEqual(self.workspace.unread_rooms(), {'unread': {'!shared:localhost': 3}})
+        self.joined = []
+        self.assertEqual(self.workspace.unread_rooms(), {'unread': {}})
         self.workspace.live = False
         self.assertEqual(self.workspace.unread_rooms(), {'unread': {}})
 
