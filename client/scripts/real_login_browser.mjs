@@ -204,6 +204,50 @@ try {
   await bob.page.getByRole('button', {name: 'Discussion', exact: true}).click();
   console.log('PASS REAL ROOM #70: creator UI, Matrix invitation, before-join denial, joined DM, reload');
 
+  // ROOM-03: unread must be a genuine per-user Matrix notification counter,
+  // not a local UI increment. A message in the unselected DM creates unread
+  // for Alice; viewing the real timeline acknowledges only that room.
+  await alice.page.goto('/?room=' + encodeURIComponent(alice.session.initialRoom));
+  await expect(alice.page.getByRole('button', {name: /Sign out/})).toBeVisible({timeout: 30000});
+  assert.equal(new URL(alice.page.url()).searchParams.get('room'), alice.session.initialRoom,
+    'Alice must leave the DM selected before the unread test');
+  const unreadText = 'Unread DM ' + randomUUID().replaceAll('-', '');
+  await bob.page.locator('.composer textarea').fill(unreadText);
+  await bob.page.locator('.composer').getByRole('button', {name: /^Send/}).click();
+  await expect(bob.page.locator('.timeline')).toContainText(unreadText, {timeout: 45000});
+  await expect.poll(async () => {
+    const result = await browserRequest(alice.page, '/api/rooms/unread');
+    assert.equal(result.status, 200, 'Unread snapshot must use Alice real session');
+    return result.data.unread?.[createdDirect] ?? 0;
+  }, {timeout: 30000, intervals: [500, 1000, 2000]}).toBeGreaterThan(0);
+  const unreadDirect = alice.page.locator('nav[aria-label="Rooms"] button.room')
+    .filter({hasText: directName});
+  await expect(unreadDirect.getByLabel('Unread messages in ' + directName))
+    .toBeVisible({timeout: 30000});
+  await unreadDirect.click();
+  const aliceDiscussion = alice.page.locator('.collaboration-panel');
+  if (await aliceDiscussion.evaluate(node => node.classList.contains('panel-closed'))) {
+    await alice.page.getByRole('button', {name: 'Discussion', exact: true}).click();
+  }
+  await expect(alice.page.locator('.timeline')).toContainText(unreadText, {timeout: 45000});
+  await expect.poll(async () => {
+    const result = await browserRequest(alice.page, '/api/rooms/unread');
+    assert.equal(result.status, 200);
+    return result.data.unread?.[createdDirect] ?? -1;
+  }, {timeout: 30000, intervals: [500, 1000, 2000]}).toBe(0);
+  await alice.page.reload();
+  await expect(alice.page.getByRole('button', {name: /Sign out/})).toBeVisible({timeout: 30000});
+  await expect(alice.page.locator('nav[aria-label="Rooms"] button.room')
+    .filter({hasText: directName}).getByLabel('Unread messages in ' + directName))
+    .toHaveCount(0, {timeout: 30000});
+  // A non-member cannot use read markers to touch a private room.
+  const forbiddenRead = await browserRequest(alice.page, '/api/rooms/read',
+    {room: '!foreign:localhost', event: '$other'});
+  assert.equal(forbiddenRead.status, 403);
+  console.log('PASS REAL ROOM #70: server-derived unread, visible read receipt, refresh and denied foreign read');
+
+
+
 
   // ROOM-01/04: actual group and channel browser creation, invite, authorization
   // and messaging. Existing synthetic room-type tests are not an E2E substitute.
