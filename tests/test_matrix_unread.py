@@ -37,9 +37,15 @@ class MatrixUnreadAuthorization(unittest.TestCase):
             if self.workspace._unread_cursor is not None:
                 self.assertEqual(query.get('since'), self.workspace._unread_cursor)
 
-            self.assertEqual(json.loads(query['filter'])['room']['timeline']['limit'], 0)
-            return {'next_batch': 'cursor-1', 'rooms': {'join': {
-                '!shared:localhost': {'unread_notifications': {'notification_count': 0, 'unread_count': 3}},
+            room_filter = json.loads(query['filter'])['room']
+            self.assertEqual(room_filter['timeline']['limit'], 0)
+            # Incremental sync must surface m.fully_read/m.receipt after the
+            # read_markers write, otherwise the previous count stays cached.
+            self.assertIn('m.fully_read', room_filter['account_data']['types'])
+            self.assertIn('m.receipt', room_filter['ephemeral']['types'])
+            return {'next_batch': 'cursor-2' if self.read_writes else 'cursor-1', 'rooms': {'join': {
+                '!shared:localhost': {'unread_notifications': {'notification_count': 0,
+                    'unread_count': 0 if self.read_writes else 3}},
                 '!departed:localhost': {'unread_notifications': {'notification_count': 88}},
                 '!other-users:localhost': {'unread_notifications': {'notification_count': 99}},
             }}}
@@ -61,6 +67,14 @@ class MatrixUnreadAuthorization(unittest.TestCase):
         self.assertEqual(self.workspace.unread_rooms(), {'unread': {}})
         self.workspace.live = False
         self.assertEqual(self.workspace.unread_rooms(), {'unread': {}})
+
+    def test_read_marker_count_stays_server_authoritative(self):
+        self.assertEqual(self.workspace.unread_rooms()['unread']['!shared:localhost'], 3)
+        self.workspace.mark_room_read('!shared:localhost', '$visible')
+        # The next real Matrix /sync updates the observed count; never fake a
+        # local zero just because the read_markers POST returned success.
+        self.assertEqual(self.workspace.unread_rooms()['unread']['!shared:localhost'], 0)
+        self.assertEqual(self.workspace._unread_cursor, 'cursor-2')
 
     def test_receipt_requires_live_membership_and_a_real_room_message(self):
         self.assertEqual(self.workspace.mark_room_read('!shared:localhost', '$visible'),
