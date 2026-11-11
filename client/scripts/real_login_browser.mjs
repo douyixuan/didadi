@@ -177,7 +177,10 @@ try {
   assert.equal(unauthorizedBeforeJoin.status, 403, 'Invite alone cannot read room history');
   const unrelated = await browserRequest(bob.page, '/api/rooms/join', {room: '!foreign:localhost'});
   assert.equal(unrelated.status, 403, 'A known Matrix account cannot join an unregistered room');
-  await bob.page.getByRole('button', {name: 'Refresh invitations'}).click();
+  // The invitee's actual UI must notice the new server invitation on its own.
+  // Probing the API above is not sufficient browser acceptance.
+  await expect(bob.page.getByRole('button', {name: 'Join invitation ' + pending.name}))
+    .toBeVisible({timeout: 30000});
   await bob.page.getByRole('button', {name: 'Join invitation ' + pending.name}).click();
   const joinedDirect = bob.page.locator('nav[aria-label="Rooms"] button.room').filter({hasText: directName});
   await expect(joinedDirect).toHaveClass(/room-selected/, {timeout: 30000});
@@ -201,6 +204,68 @@ try {
   await bob.page.getByRole('button', {name: 'Discussion', exact: true}).click();
   console.log('PASS REAL ROOM #70: creator UI, Matrix invitation, before-join denial, joined DM, reload');
 
+
+  // ROOM-01/04: actual group and channel browser creation, invite, authorization
+  // and messaging. Existing synthetic room-type tests are not an E2E substitute.
+  for (const kind of ['group', 'channel']) {
+    const roomName = 'Real ' + kind + ' ' + randomUUID().slice(0, 8);
+    await alice.page.getByLabel('Room type').selectOption(kind);
+    await alice.page.getByLabel('Matrix user ID to invite').fill(accounts[1][0]);
+    await alice.page.getByRole('button', {name: 'Add person'}).click();
+    await alice.page.getByLabel('New local room name').fill(roomName);
+    await alice.page.getByRole('button', {name: 'Create local room'}).click();
+    await expect(alice.page.getByText('Private room created.', {exact: true}))
+      .toBeVisible({timeout: 45000});
+    const roomId = new URL(alice.page.url()).searchParams.get('room');
+    assert.ok(roomId?.startsWith('!'), kind + ': room must have a real Matrix ID');
+    const roomState = await browserRequest(alice.page,
+      '/matrix/_matrix/client/v3/rooms/' + encodeURIComponent(roomId) + '/state');
+    assert.equal(roomState.status, 200);
+    assert.equal(roomState.data.find(e => e.type === 'org.didadi.room')?.content?.kind, kind);
+    assert.equal(roomState.data.find(e => e.type === 'm.room.member' &&
+      e.state_key === accounts[1][0])?.content?.membership, 'invite');
+
+    const deniedUntilJoin = await browserRequest(bob.page,
+      '/matrix/_matrix/client/v3/rooms/' + encodeURIComponent(roomId) + '/messages?dir=b');
+    assert.equal(deniedUntilJoin.status, 403, kind + ': invite alone must not grant history');
+    let visibleInvite = null;
+    await expect.poll(async () => {
+      const response = await browserRequest(bob.page, '/api/rooms/invites');
+      assert.equal(response.status, 200);
+      visibleInvite = response.data.invites.find(item => item.room === roomId) ?? null;
+      return visibleInvite !== null;
+    }, {timeout: 30000, intervals: [250, 500, 1000, 2000]}).toBe(true);
+    const join = bob.page.getByRole('button', {name: 'Join invitation ' + visibleInvite.name});
+    await expect(join).toBeVisible({timeout: 30000});
+    await join.click();
+    const bobRoom = bob.page.locator('nav[aria-label="Rooms"] button.room')
+      .filter({hasText: roomName});
+    await expect(bobRoom).toHaveClass(/room-selected/, {timeout: 30000});
+
+    const text = kind + ' shared message ' + randomUUID().replaceAll('-', '');
+    const panel = bob.page.locator('.collaboration-panel');
+    if (await panel.evaluate(node => node.classList.contains('panel-closed'))) {
+      await bob.page.getByRole('button', {name: 'Discussion', exact: true}).click();
+    }
+    await bob.page.locator('.composer textarea').fill(text);
+    await bob.page.locator('.composer').getByRole('button', {name: /^Send/}).click();
+    await expect(bob.page.locator('.timeline')).toContainText(text, {timeout: 45000});
+    await alice.page.getByRole('button', {name: 'Refresh rooms'}).click();
+    const aliceRoom = alice.page.locator('nav[aria-label="Rooms"] button.room')
+      .filter({hasText: roomName});
+    await aliceRoom.click();
+    await expect(alice.page.locator('.timeline')).toContainText(text, {timeout: 45000});
+    const reply = kind + ' creator reply ' + randomUUID().replaceAll('-', '');
+    await alice.page.locator('.composer textarea').fill(reply);
+    await alice.page.locator('.composer').getByRole('button', {name: /^Send/}).click();
+    await expect(alice.page.locator('.timeline')).toContainText(reply, {timeout: 45000});
+    await expect(bob.page.locator('.timeline')).toContainText(reply, {timeout: 45000});
+    await bob.page.reload();
+    await expect(bob.page.locator('nav[aria-label="Rooms"] button.room')
+      .filter({hasText: roomName})).toBeVisible({timeout: 30000});
+  }
+  console.log('PASS REAL ROOM #70: group/channel create, Matrix invite, denial, joined messaging and reload');
+
   // A private Bob-only Matrix room must not be visible to Alice.
   const privateName = 'Browser private ' + randomUUID().slice(0, 8);
   const privateRoom = await browserRequest(bob.page, '/api/rooms', {
@@ -222,6 +287,12 @@ try {
   await expect(newPrivate).toBeVisible({timeout: 30000});
   await newPrivate.click();
   await expect(newPrivate).toHaveClass(/room-selected/, {timeout: 30000});
+  // The group/channel reload above closes Bob's discussion panel. Reopen it
+  // before the later departed-room composer check (otherwise this is a hidden UI).
+  const privatePanel = bob.page.locator('.collaboration-panel');
+  if (await privatePanel.evaluate(node => node.classList.contains('panel-closed'))) {
+    await bob.page.getByRole('button', {name: 'Discussion', exact: true}).click();
+  }
   const privateMessage = 'Departed room secret ' + randomUUID().replaceAll('-', '');
   await bob.page.locator('.composer textarea').fill(privateMessage);
   await bob.page.locator('.composer').getByRole('button', {name: /^Send/}).click();

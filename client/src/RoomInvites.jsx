@@ -6,56 +6,66 @@ import {errorText} from './api';
 export function RoomInvites({api, onJoined}) {
   const [invites, setInvites] = useState([]);
   const [error, setError] = useState('');
+  const [joinError, setJoinError] = useState('');
   const [busy, setBusy] = useState('');
   const [loading, setLoading] = useState(false);
   const revision = useRef(0);
+  // Refresh ordering and authenticated-session validity are independent.
+  const sessionRevision = useRef(0);
 
-  async function refresh() {
+  async function refresh(silent = false) {
     const current = ++revision.current;
-    setLoading(true); setError('');
+    if (!silent) {setLoading(true); setError(''); setJoinError('');}
     try {
       const result = await api.invites();
-      if (current === revision.current) setInvites(result);
+      if (current === revision.current) {setInvites(result); setError('');}
     } catch (err) {
-      if (current === revision.current) {setInvites([]); setError(errorText(err));}
+      if (current === revision.current) {if (!silent) setInvites([]); setError(errorText(err));}
     } finally {
       if (current === revision.current) setLoading(false);
     }
   }
 
   useEffect(() => {
+    sessionRevision.current += 1;
     setInvites([]);
     setBusy('');
+    setJoinError('');
     refresh();
-    return () => {revision.current += 1;};
+    // Matrix invites are asynchronous: an authenticated invitee should not
+    // have to discover newly delivered invitations with a manual refresh.
+    // The current API is actor-scoped, and cleanup invalidates older replies.
+    const timer = setInterval(() => {void refresh(true);}, 10000);
+    return () => {clearInterval(timer); revision.current += 1; sessionRevision.current += 1;};
   }, [api]);
 
   async function join(room) {
     if (busy) return;
-    const current = revision.current;
-    setBusy(room); setError('');
+    const current = sessionRevision.current;
+    setBusy(room); setError(''); setJoinError('');
     try {
       const result = await api.joinRoom(room);
-      if (current !== revision.current) return;
+      if (current !== sessionRevision.current) return;
       if (result?.room !== room || result.joined !== true) {
         throw new Error('The Matrix join has not been confirmed. Refresh invitations and retry.');
       }
       setInvites(previous => previous.filter(item => item.room !== room));
       await onJoined(room);
     } catch (err) {
-      if (current === revision.current) setError(errorText(err));
+      if (current === sessionRevision.current) setJoinError(errorText(err));
     } finally {
-      if (current === revision.current) setBusy('');
+      if (current === sessionRevision.current) setBusy('');
     }
   }
 
   return <section className="room-invites" aria-label="Matrix invitations">
     <div className="section-heading"><span>Invitations</span>
-      <button type="button" onClick={refresh} disabled={loading || Boolean(busy)}
+      <button type="button" onClick={() => refresh()} disabled={loading || Boolean(busy)}
         aria-label="Refresh invitations">Refresh</button></div>
     {loading && <p role="status">Checking Matrix invitations…</p>}
     {error && <p role="alert">{error}</p>}
-    {!loading && !invites.length && !error && <p>No pending invitations</p>}
+    {joinError && <p role="alert">{joinError}</p>}
+    {!loading && !invites.length && !error && !joinError && <p>No pending invitations</p>}
     {invites.map(item => <div key={item.room} className="room-invite">
       <span>{item.name}</span>
       <button type="button" disabled={Boolean(busy) || loading} onClick={() => join(item.room)}
