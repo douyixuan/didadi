@@ -381,7 +381,7 @@ export function App({connector=connect}) {
   useEffect(()=>{if(!api)return;const timer=setInterval(refreshRooms,10000);return()=>clearInterval(timer)},[api]);
   useEffect(()=>{
     // Only a visible discussion acknowledges a room's latest message.
-    if(!api?.markRoomRead||panel!=='discussion'||!room||
+    if(!api?.markRoomRead||panel!=='discussion'||filter||!room||
         !rooms.some(item=>item.id===room)||!events.length)return;
     const latest=events[events.length-1]?.id;
     if(typeof latest!=='string'||!latest.startsWith('$')||lastRead.current.get(room)===latest)return;
@@ -391,7 +391,7 @@ export function App({connector=connect}) {
       .then(()=>{if(!cancelled)refreshRooms();})
       .catch(()=>{if(lastRead.current.get(room)===latest)lastRead.current.delete(room);});
     return()=>{cancelled=true};
-  },[api,room,panel,events,rooms]);
+  },[api,room,panel,filter,events,rooms]);
   useEffect(()=>{if(!api||!tasks.some(t=>!['done','failed','cancelled'].includes(t.status)))return;let cancelled=false,inFlight=false;
     const timer=setInterval(async()=>{if(inFlight)return;inFlight=true;const next=await Promise.all(tasks.map(async t=>{if(['done','failed','cancelled'].includes(t.status))return t;try{const result=await api.task(t.room,t.id);return result.task?{...t,...result.task}:{...t,status:'queued',phase:null};}catch{return {...t,status:'reconnecting'};}}));if(!cancelled)setTasks(next);inFlight=false;},1500);
     return()=>{cancelled=true;clearInterval(timer)};
@@ -429,7 +429,7 @@ export function App({connector=connect}) {
       {documentsError&&<p role="alert">{documentsError}<button onClick={()=>refreshDocuments()}>Refresh documents</button></p>}
     </div>
     <div className="nav-section rooms-section"><div className="section-heading"><span>Rooms</span><button aria-label="Refresh rooms" onClick={refreshRooms}><RefreshCw size={13}/></button></div>
-      <nav aria-label="Rooms">{rooms.filter(r=>r.name.toLowerCase().includes(search.toLowerCase())).map(r=><button className={'room '+(r.id===room?'room-selected':'')} key={r.id} onClick={()=>{setRoom(r.id);setNavOpen(false)}}><MessageSquare size={15}/><span>{r.name}{r.kind&&<small>{r.kind==='direct'?'Private conversation':r.kind==='channel'?'Channel':r.kind==='group'?'Group':'Room'} · {r.joinRule==='invite'?'invite only':r.joinRule||'unknown access'}{r.directForYou?' · Direct for you':''}</small>}</span>{r.unread>0&&<span className="room-unread" aria-label={'Unread messages in '+r.name}>{r.unread}</span>}</button>)}</nav>
+      <nav aria-label="Rooms">{rooms.filter(r=>r.name.toLowerCase().includes(search.toLowerCase())).map(r=><button className={'room '+(r.id===room?'room-selected':'')} key={r.id} onClick={()=>{setRoom(r.id);setNavOpen(false)}}><MessageSquare size={15}/><span>{r.name}{r.kind&&<small>{r.kind==='direct'?'Private conversation':r.kind==='channel'?'Channel':r.kind==='group'?'Group':'Room'} · {r.joinRule==='invite'?'invite only':r.joinRule||'unknown access'}{r.directForYou?' · Direct for you':''}</small>}</span>{api.session.liveMatrix&&r.unread===null&&<span aria-label={'Unread unavailable in '+r.name} title="Unread unavailable. Refresh rooms to retry.">?</span>}{r.unread>0&&<span className="room-unread" aria-label={'Unread messages in '+r.name}>{r.unread}</span>}</button>)}</nav>
       {api.directChats&&<DirectChatPreferences api={api} revision={rooms.length} onRefresh={refreshRooms}/>}
       {api.invites&&<RoomInvites key={api.session.userId} api={api} onJoined={async roomId=>{const earlier=roomsRefreshing.current;if(earlier)await earlier;await refreshRooms();setRoom(roomId);setNavOpen(false);}}/>}
       <RoomCreator api={api} onCreated={async result=>{setRooms(old=>old.some(item=>item.id===result.room_id)?old:[...old,{id:result.room_id,name:result.name,kind:result.kind,joinRule:'invite',agentJoined:false}]);setRoom(result.room_id);await refreshRooms();}}/>

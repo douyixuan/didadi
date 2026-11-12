@@ -847,3 +847,8 @@ it('queues an authoritative post-join room refresh behind an older in-flight sna
   expect(api.rooms.mock.calls.length).toBeGreaterThanOrEqual(3);
   expect(api.joinRoom).toHaveBeenCalledWith('!invited');
 });
+it('does not acknowledge the main timeline while a thread is displayed',async()=>{
+ const api=fixture(),timers=new Map(),original=setInterval;const spy=vi.spyOn(globalThis,'setInterval').mockImplementation((fn,delay,...args)=>{if(delay===2000){timers.set(delay,fn);return 99999;}return original(fn,delay,...args)});
+ const root={id:'$root',sender:'@bob:local',content:{body:'Root'},time:1};api.session.liveMatrix=true;api.markRoomRead=vi.fn(async()=>({read:true}));api.timelinePage=vi.fn().mockResolvedValue({events:[root],previousCursor:null});api.threadPage=vi.fn(async()=>({root,events:[],previousCursor:null}));
+ try{render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Team handbook'});fireEvent.click(screen.getByRole('button',{name:'Discussion',exact:true}));await screen.findByText('Root');await waitFor(()=>expect(api.markRoomRead).toHaveBeenCalled());fireEvent.click(screen.getAllByRole('button',{name:'View thread',exact:true})[0]);await screen.findByText(/Thread history/);api.markRoomRead.mockClear();api.timelinePage.mockResolvedValue({events:[root,{...root,id:'$unseen',content:{body:'Unseen main message'}}],previousCursor:null});await act(async()=>{await timers.get(2000)()});expect(api.markRoomRead).not.toHaveBeenCalled();fireEvent.click(screen.getByRole('button',{name:'All messages'}));await waitFor(()=>expect(api.markRoomRead).toHaveBeenCalledWith('!room','$unseen'));}finally{spy.mockRestore();}
+});

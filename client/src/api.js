@@ -76,7 +76,8 @@ export async function connect() {
     },
     async rooms() {
       const {joined_rooms: ids} = await client.getJoinedRooms();
-      const unread = session.liveMatrix ? (await api('/api/rooms/unread')).unread : null;
+      let unread=null;
+      if(session.liveMatrix){try{unread=(await api('/api/rooms/unread')).unread;}catch{/* Room navigation remains usable; Refresh rooms retries server counts. */}}
       let direct=null;if(session.directChats){try{direct=await api('/api/direct-chats')}catch{/* Preference errors are shown separately; messaging remains available. */}}
       // Membership may change after getJoinedRooms() but before roomState().
       // Drop only rooms Matrix now denies; do not hide unrelated server errors.
@@ -88,7 +89,7 @@ export async function connect() {
           throw error;
         }
         return {id, name:state.find(e=>e.type==='m.room.name')?.content.name || 'Untitled room',
-          unread: Number.isSafeInteger(unread?.[id]) && unread[id] > 0 ? unread[id] : 0,
+          unread: Number.isSafeInteger(unread?.[id]) && unread[id] >= 0 ? unread[id] : null,
           directForYou:Boolean(direct?.mapped[id]?.length),
           encrypted:state.some(e=>e.type==='m.room.encryption'),
           kind:state.find(e=>e.type==='org.didadi.room')?.content.kind||'room',joinRule:state.find(e=>e.type==='m.room.join_rules')?.content.join_rule||'unknown',

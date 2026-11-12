@@ -44,3 +44,8 @@ it('P0 ROOM-02 keeps authorized room navigation when a departed room denies stat
     expect(rooms[0].name).toBe('Safe room');
   }finally{globalThis.fetch=originalFetch;vi.mocked(createClient).mockReset();}
 });
+it('keeps room summaries and retries unknown unread counts after unread service failure',async()=>{
+ const original=globalThis.fetch;const client={getJoinedRooms:vi.fn(async()=>({joined_rooms:['!safe']})),roomState:vi.fn(async()=>[{type:'m.room.name',content:{name:'Safe'}}])};vi.mocked(createClient).mockReturnValue(client);let fail=true;
+ globalThis.fetch=vi.fn(async url=>String(url)==='/api/session'?{ok:true,json:async()=>({csrf:'test',userId:'@a:test',liveMatrix:true})}:fail?{ok:false,status:503,json:async()=>({error:'Unavailable'})}:{ok:true,json:async()=>({unread:{'!safe':3}})});
+ try{const api=await connect();expect((await api.rooms())[0]).toMatchObject({id:'!safe',unread:null});fail=false;expect((await api.rooms())[0].unread).toBe(3);}finally{globalThis.fetch=original;vi.mocked(createClient).mockReset();}
+});

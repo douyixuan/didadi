@@ -95,5 +95,41 @@ class MatrixUnreadAuthorization(unittest.TestCase):
             self.workspace.mark_room_read('!shared:localhost', '$visible')
 
 
+    def test_summary_top_level_count_and_invalid_value(self):
+        original=self.workspace.api
+        def summary(method,path,data=None,query=None):
+            if path=='/sync':return {'next_batch':'n','rooms':{'join':{'!shared:localhost':{'org.matrix.msc2654.unread_count':3,'unread_notifications':{'notification_count':0}}}}}
+            return original(method,path,data,query)
+        self.workspace.api=summary
+        self.assertEqual(self.workspace.unread_rooms()['unread']['!shared:localhost'],3)
+
+    def test_summary_count_fallbacks_and_invalid_values(self):
+        original=self.workspace.api
+        for summary,expected in [
+            ({'org.matrix.msc2654.unread_count':0,'unread_notifications':{'notification_count':9}},0),
+            ({'unread_notifications':{'unread_count':4,'notification_count':1}},4),
+            ({'unread_notifications':{'notification_count':2}},2),
+            ({'org.matrix.msc2654.unread_count':-1},None),
+            ({'org.matrix.msc2654.unread_count':True},None),
+            ({'org.matrix.msc2654.unread_count':'3'},None),
+        ]:
+            def sync(method,path,data=None,query=None):
+                if path=='/sync':return {'next_batch':'n','rooms':{'join':{'!shared:localhost':summary}}}
+                return original(method,path,data,query)
+            self.workspace.api=sync
+            with self.subTest(summary=summary):
+                if expected is None:
+                    with self.assertRaises(ClientError):self.workspace.unread_rooms()
+                else:self.assertEqual(self.workspace.unread_rooms()['unread']['!shared:localhost'],expected)
+
+    def test_foreign_event_room_rejected_without_matrix_write(self):
+        original=self.workspace.api
+        def foreign(method,path,data=None,query=None):
+            if '/event/' in path:return {'event_id':'$visible','room_id':'!foreign:localhost','type':'m.room.message'}
+            return original(method,path,data,query)
+        self.workspace.api=foreign
+        with self.assertRaises(ClientError):self.workspace.mark_room_read('!shared:localhost','$visible')
+        self.assertEqual(self.read_writes,[])
+
 if __name__ == '__main__':
     unittest.main()

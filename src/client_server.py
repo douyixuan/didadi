@@ -110,8 +110,8 @@ class Workspace:
                     raise ClientError(503, 'Matrix unread counters are malformed. Retry.')
                 # MSC2654 counts unread messages even when no push rule
                 # generated a notification. Older Synapse used a prefixed key.
-                count = notifications.get('unread_count',
-                        notifications.get('org.matrix.msc2654.unread_count',
+                count = summary.get('org.matrix.msc2654.unread_count',
+                        notifications.get('unread_count',
                         notifications.get('notification_count', 0)))
                 if type(count) is not int or count < 0:
                     raise ClientError(503, 'Matrix unread counters are malformed. Retry.')
