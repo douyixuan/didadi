@@ -258,7 +258,8 @@ export function App({connector=connect}) {
   const thread=useThread(api,room,filter,()=>{const node=timelineRef.current;if(node)historyScroll.current={height:node.scrollHeight,top:node.scrollTop};});
   useEffect(()=>{const node=timelineRef.current;if(!node)return;if(historyScroll.current){const before=historyScroll.current;historyScroll.current=null;node.scrollTop=before.top+node.scrollHeight-before.height;}else node.scrollTop=node.scrollHeight;},[filter&&api?.threadPage?thread.events.length:events.length,filter,panel]);
   const roomsFailed=useRef(false),roomsRefreshing=useRef(null);
-  const lastRead=useRef(new Map());
+  const lastRead=useRef(new Map()),timelineOwner=useRef(null),markerActor=useRef(null);
+  if(markerActor.current?.api!==api||markerActor.current?.user!==api?.session?.userId)markerActor.current={api,user:api?.session?.userId};
   useEffect(()=>{lastRead.current.clear()},[api]);
   const roomCurrent=useRef(room);roomCurrent.current=room;
   useEffect(()=>{if(room&&location.protocol.startsWith('http')){const url=new URL(location.href);url.searchParams.set('room',room);window.history.replaceState({},'',url);}},[room]);
@@ -355,7 +356,7 @@ export function App({connector=connect}) {
         const gap=initialized&&current.length&&page.events.length&&!current.some(old=>page.events.some(next=>old.id===next.id));
         if(!initialized||gap){current=page.events;cursor=page.previousCursor;initialized=true;if(gap){revision++;setHistoryNotice('Recent messages advanced beyond the loaded page. Load earlier messages again to reconnect history.');}}
         else current=mergeMessages(current,page.events);
-        setEvents(current);setOlderCursor(cursor);setTimelineError('');setOnline(true);if(roomsFailed.current)refreshRooms();
+        timelineOwner.current={api,user:api.session.userId,room,events:current};setEvents(current);setOlderCursor(cursor);setTimelineError('');setOnline(true);if(roomsFailed.current)refreshRooms();
       }
     }catch(e){if(!stopped){
       if(api.session.liveMatrix&&[403,404].includes(e?.status??e?.httpStatus)){
@@ -367,7 +368,7 @@ export function App({connector=connect}) {
     const older=async()=>{if(stopped||olderBusy||!cursor||!api.timelinePage)return;olderBusy=true;setLoadingOlder(true);setHistoryError('');const expected=revision,from=cursor;
       try{const page=await api.timelinePage(room,from);if(stopped||expected!==revision)return;
         const merged=mergeMessages(page.events,current),node=timelineRef.current;if(node&&merged.length!==current.length)historyScroll.current={height:node.scrollHeight,top:node.scrollTop};
-        current=merged;cursor=page.previousCursor===from?null:page.previousCursor;setEvents(current);setOlderCursor(cursor);if(page.events.length)setHistoryNotice('');
+        current=merged;cursor=page.previousCursor===from?null:page.previousCursor;timelineOwner.current={api,user:api.session.userId,room,events:current};setEvents(current);setOlderCursor(cursor);if(page.events.length)setHistoryNotice('');
       }catch(e){if(!stopped&&expected===revision){
         if(api.session.liveMatrix&&[403,404].includes(e?.status??e?.httpStatus)){
           evictInaccessibleRoom();setTimelineError(errorText(e));setOnline(false);
@@ -381,7 +382,8 @@ export function App({connector=connect}) {
   useEffect(()=>{if(!api)return;const timer=setInterval(refreshRooms,10000);return()=>clearInterval(timer)},[api]);
   useEffect(()=>{
     // Only a visible discussion acknowledges a room's latest message.
-    if(!api?.markRoomRead||panel!=='discussion'||filter||!room||
+    const owner=timelineOwner.current,actor=markerActor.current;
+    if(!api?.markRoomRead||panel!=='discussion'||filter||!room||owner?.api!==api||owner?.user!==api.session.userId||owner?.room!==room||owner?.events!==events||
         !rooms.some(item=>item.id===room)||!events.length)return;
     const latest=events[events.length-1]?.id;
     if(typeof latest!=='string'||!latest.startsWith('$')||lastRead.current.get(room)===latest)return;
@@ -389,9 +391,9 @@ export function App({connector=connect}) {
     let cancelled=false;
     api.markRoomRead(room,latest)
       .then(()=>{if(!cancelled)refreshRooms();})
-      .catch(()=>{if(lastRead.current.get(room)===latest)lastRead.current.delete(room);});
+      .catch(()=>{if(markerActor.current===actor&&lastRead.current.get(room)===latest)lastRead.current.delete(room);});
     return()=>{cancelled=true};
-  },[api,room,panel,filter,events,rooms]);
+  },[api,api?.session?.userId,room,panel,filter,events,rooms]);
   useEffect(()=>{if(!api||!tasks.some(t=>!['done','failed','cancelled'].includes(t.status)))return;let cancelled=false,inFlight=false;
     const timer=setInterval(async()=>{if(inFlight)return;inFlight=true;const next=await Promise.all(tasks.map(async t=>{if(['done','failed','cancelled'].includes(t.status))return t;try{const result=await api.task(t.room,t.id);return result.task?{...t,...result.task}:{...t,status:'queued',phase:null};}catch{return {...t,status:'reconnecting'};}}));if(!cancelled)setTasks(next);inFlight=false;},1500);
     return()=>{cancelled=true;clearInterval(timer)};
