@@ -1,0 +1,34 @@
+{
+  "roadmap": "ROADMAP.md",
+  "features": "roadmap",
+  "legacy_checked": {
+    "普通通信/讨论检索/历史分页浏览": {
+      "evidence": "artifact/032-requirements-completion/validation.md",
+      "scope": "保留原有窄范围历史验收；不是新功能或新版本通过"
+    },
+    "文档管理/文档版本通知/Git提交后通知": {
+      "evidence": "artifact/032-requirements-completion/validation.md",
+      "scope": "保留原有窄范围历史验收；不是新功能或新版本通过"
+    },
+    "文档管理/文档版本通知/通知失败重试": {
+      "evidence": "artifact/032-requirements-completion/validation.md",
+      "scope": "保留原有窄范围历史验收；不是新功能或新版本通过"
+    },
+    "长任务管理/任务产物/固定Agent结果回帖": {
+      "evidence": "artifact/032-requirements-completion/validation.md",
+      "scope": "保留原有窄范围历史验收；不是新功能或新版本通过"
+    },
+    "安全权限/访问隔离/指定房间Agent收件": {
+      "evidence": "artifact/032-requirements-completion/validation.md",
+      "scope": "保留原有窄范围历史验收；不是新功能或新版本通过"
+    },
+    "部署生态/自托管使用/单机Compose部署": {
+      "evidence": "artifact/032-requirements-completion/validation.md",
+      "scope": "保留原有窄范围历史验收；不是新功能或新版本通过"
+    },
+    "部署生态/自托管使用/双用户消息互通": {
+      "evidence": "artifact/032-requirements-completion/validation.md",
+      "scope": "保留原有窄范围历史验收；不是新功能或新版本通过"
+    }
+  }
+}

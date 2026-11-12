@@ -72,3 +72,19 @@ Phase0第四模块React+matrix-js-sdk文档/讨论/Agent任务视图已有真实
 - **未通过/不包含**：#70 的真实 DM/群组/频道、成员变更及未读语义；#71 草稿并发冲突、多文档 move/export 完整浏览器路径；#72 独立全新安装及恢复全链验收。物理中文 IME、公共 Demo/生产安全未验证；本地 SQLite 文件包含服务端明文 bearer token（mode 0600），只能用于隔离开发。P0 父项 #85 继续打开；#12 继续暂停，#18/PR #41 由原 owner 处理。
 
 **验收决议**：仅关闭子交付 [#69](https://github.com/douyixuan/didadi/issues/69) 并在 [#85](https://github.com/douyixuan/didadi/issues/85) 勾选其子项；其余 15 项维持未验收，不把源码、离线 CI 或本地体验误当公网发布。
+
+
+## 稳定产品叶验收口径（2026-11-12）
+
+根ROADMAP只记录P0–P3的#69–#84共16个完整产品功能；仅#69已完整接受，当前为1/16。旧7项技术验收勾选保留在历史证据中，不迁移为新的完整产品通过。细项和长期范围保留于[原细化入口](../roadmap/README.md#完整需求与长期范围)，不因进度重组删除。
+
+本轮文档依据父任务提供的最新事实：main ce24dd9a，#95/#98已合并；#99 a86806c真实集成通过但未合并，不能当main交付。#70仍缺kick、跨房间及快速切账号负向完整验收；#71/#72未完成。未在本轮重新执行这些真实检查，也未据此新增勾选。[#69验收状态](https://github.com/douyixuan/didadi/issues/69)、[#70剩余范围](https://github.com/douyixuan/didadi/issues/70)及各关联issue保留原证据入口。
+
+本地细化文档中旧候选/历史leaf路径是历史口径，不可用来判定新的16叶验收；后续本地门禁迁移已将旧5份元数据与7项豁免按内容摘要归档保护，新门禁独立核对16个稳定issue、99项需求保留及#69真实记录，不继承旧豁免。#41/#18所有权与#12暂停不变；未启动服务或发布。
+
+
+## 真实登录既有验收证据
+
+#69引用[2026-11-04已合并验收记录](https://github.com/douyixuan/didadi/issues/69#issuecomment-6624096272)：测试head `4c6caf4f0f8eb62bb71c979b135da87b11f6b32c`，main `271f15a68fbc37356b3cb368943cb1871f9ce30c`，相同Git tree `1122c4489b0dfe2951c689d04bb099b66853a0d3`。[真实CI](https://github.com/douyixuan/didadi/actions/runs/41587178841)验证隔离Synapse/PostgreSQL、双非管理员登录、Chromium、401、会话/CSRF、隔离、刷新、后端重启及退出；[main CI](https://github.com/douyixuan/didadi/actions/runs/41783890475)成功。该评论当时要求等待验收台账合入再计叶；本轮父任务已明确当前稳定验收为仅#69。仅loopback原型范围，SQLite私有文件中的token明文限制保留，公开Beta未批准。本轮只核对已有记录，没有重新运行真实流程。
+
+门禁迁移本地验证：完整检查通过16叶/1项既有验收记录；13项离线回归通过，包含重复/缺失叶、误勾#70、缺失原需求、缺验收记录、错误准确版本和mock冒充真实验收的拒绝。HTTPS链接仅离线格式核对；#69记录已通过授权只读GitHub接口读取，真实CI未在本轮重跑。归档证据如需修改必须显式复核迁移，不能静默改变旧窄范围通过含义。
