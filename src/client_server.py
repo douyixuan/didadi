@@ -46,6 +46,9 @@ class Workspace:
         self._invite_lock = threading.Lock()
         self._invite_cursor = None
         self._pending_invites = {}
+        self._unread_lock = threading.Lock()
+        self._unread_cursor = None
+        self._unread_counts = {}
         self.user_id = self.api('GET', '/account/whoami')['user_id']
         self.documents = DocumentService(self.docs, self.api, self.user_id, state['room'])
         self.search = SearchService(self.documents,self.api,self.allowed)
@@ -72,6 +75,68 @@ class Workspace:
                 raise ClientError(403, 'This room is not part of this workspace.')
         if self.live and room not in self.api('GET', '/joined_rooms')['joined_rooms']:
             raise ClientError(403, 'You are not joined to this room.')
+
+    def unread_rooms(self):
+        """Per-session, Matrix-owned unread counters from a cursored sync stream."""
+        if not self.live:
+            return {'unread': {}}
+        with self._unread_lock:
+            with sqlite3.connect(self.metadata) as db:
+                known = {row[0] for row in db.execute('SELECT id FROM rooms')}
+            joined = set(self.api('GET', '/joined_rooms')['joined_rooms']) & known
+            # A since-cursor avoids reusing Synapse's cached initial /sync
+            # snapshot after new messages. Store only counts, never bodies.
+            minimal = {'room': {'timeline': {'limit': 0},
+                                'state': {'types': []},
+                                # Keep read-marker changes in incremental /sync:
+                                # filtering both categories out can preserve a stale
+                                # unread count forever after /read_markers succeeds.
+                                'ephemeral': {'types': ['m.receipt']},
+                                'account_data': {'types': ['m.fully_read']}},
+                       'presence': {'types': []}}
+            query = {'timeout': '0', 'filter': json.dumps(minimal)}
+            if self._unread_cursor:
+                query['since'] = self._unread_cursor
+            snapshot = self.api('GET', '/sync', query=query)
+            rooms = snapshot.get('rooms', {}) if isinstance(snapshot, dict) else None
+            summaries = rooms.get('join', {}) if isinstance(rooms, dict) else None
+            if not isinstance(summaries, dict):
+                raise ClientError(503, 'Matrix unread counters are unavailable. Retry.')
+            for room, summary in summaries.items():
+                if room not in joined:
+                    continue
+                notifications = summary.get('unread_notifications', {}) if isinstance(summary, dict) else {}
+                if not isinstance(notifications, dict):
+                    raise ClientError(503, 'Matrix unread counters are malformed. Retry.')
+                # MSC2654 counts unread messages even when no push rule
+                # generated a notification. Older Synapse used a prefixed key.
+                count = summary.get('org.matrix.msc2654.unread_count',
+                        notifications.get('unread_count',
+                        notifications.get('notification_count', 0)))
+                if type(count) is not int or count < 0:
+                    raise ClientError(503, 'Matrix unread counters are malformed. Retry.')
+                self._unread_counts[room] = count
+            self._unread_counts = {room: self._unread_counts.get(room, 0) for room in joined}
+            cursor = snapshot.get('next_batch')
+            if isinstance(cursor, str) and cursor:
+                self._unread_cursor = cursor
+            return {'unread': dict(self._unread_counts)}
+
+    def mark_room_read(self, room, event_id):
+        """Advance only the current Matrix actor's read marker for a verified message."""
+        if (not self.live or not isinstance(room, str) or not room.startswith('!') or
+                not isinstance(event_id, str) or not event_id.startswith('$') or
+                len(room) > 512 or len(event_id) > 1000):
+            raise ClientError(400, 'Choose one live room and message to mark read.')
+        self.allowed(room)
+        actual = self.api('GET', '/rooms/' + segment(room) + '/event/' + segment(event_id))
+        if (actual.get('event_id') != event_id or
+                actual.get('type') != 'm.room.message' or
+                actual.get('room_id', room) != room):
+            raise ClientError(403, 'This message is not readable in the selected room.')
+        self.api('POST', '/rooms/' + segment(room) + '/read_markers',
+                 {'m.fully_read': event_id, 'm.read': event_id})
+        return {'room': room, 'read': True}
 
     def invitations(self):
         """Poll this actor's Matrix sync stream; never reuse another session's invites."""
@@ -396,6 +461,13 @@ def handler(workspace, dist, port, sessions=None):
                 elif parsed.path=='/api/direct-chats/retry' and method=='POST':
                     if query or not isinstance(body,dict) or set(body)!={'room'} or not isinstance(body['room'],str):raise ClientError(400,'Use only the existing room for synchronization retry.')
                     result=current_workspace.direct_chats.retry(body['room'])
+                elif parsed.path == '/api/rooms/unread' and method == 'GET':
+                    if query:raise ClientError(400, 'Unread counts belong to the current Matrix account.')
+                    result = current_workspace.unread_rooms()
+                elif parsed.path == '/api/rooms/read' and method == 'POST':
+                    if (query or not isinstance(body, dict) or set(body) != {'room', 'event'}):
+                        raise ClientError(400, 'Choose exactly one room and message to mark read.')
+                    result = current_workspace.mark_room_read(body['room'], body['event'])
                 elif parsed.path == '/api/rooms/invites' and method == 'GET':
                     if query:raise ClientError(400, 'Invitations belong to the current Matrix account.')
                     result = {'invites': current_workspace.invitations()}
