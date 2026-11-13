@@ -8,7 +8,7 @@
 
 ## 今晚执行与证据
 
-沿用原任务与[原计划](../artifact/032-requirements-completion/plan.md)，不重开每日台账。执行者为原任务，独立复审沿用review_progress_candidate；开始下一轮重新核对贡献者与工作树。准确版本、实际通过与未完成逐项见[同一验收记录](../artifact/032-requirements-completion/validation.md#今晚四目标实际对账)。来源、当前候选、main和真实验收分开，已有结果不算本轮新增。
+沿用原任务与[原计划](../artifact/032-requirements-completion/plan.md)，不重开每日台账。执行者为原任务，独立复审沿用review_progress_candidate；开始下一轮重新核对贡献者与工作树。准确版本、实际通过与未完成逐项见[同一验收记录](../artifact/032-requirements-completion/historical-20261022.md#今晚四目标实际对账)。来源、当前候选、main和真实验收分开，已有结果不算本轮新增。
 
 ## 下一步与交付门槛
 
@@ -37,7 +37,7 @@
   "review": {
     "status": "passed",
     "version": "b7f8b28dd089de4b4cc2062c33fb9703f9afacc4",
-    "evidence": "../artifact/032-requirements-completion/validation.md#今晚四目标实际对账"
+    "evidence": "../artifact/032-requirements-completion/historical-20261022.md#今晚四目标实际对账"
   },
   "acceptance": {
     "status": "blocked",
@@ -54,7 +54,7 @@
     "reference": "../artifact/032-requirements-completion/navigation-qa/mobile-01-read.png",
     "status": "partial",
     "version": "b7f8b28dd089de4b4cc2062c33fb9703f9afacc4",
-    "visual_evidence": "../artifact/032-requirements-completion/validation.md#今晚四目标实际对账"
+    "visual_evidence": "../artifact/032-requirements-completion/historical-20261022.md#今晚四目标实际对账"
   },
   "reopened": false,
   "id": "mobile-navigation",

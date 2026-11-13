@@ -213,9 +213,24 @@ def validate_stable(root, config, require=None):
         text = (root / proof['evidence'].split('#')[0]).read_text()
         if not all(proof[key] in text for key in ('version', 'main', 'record', 'real_ci', 'main_ci')):
             raise ValueError('Acceptance fields must match the retained real record')
-    for file in (path, root/'roadmap/README.md', root/'docs/MVP_ACCEPTANCE.md'):
+    archived = root/'artifact/032-requirements-completion/historical-20261022.md'
+    for file in (path, root/'roadmap/README.md', root/'roadmap/_template.md', root/'docs/PRODUCT_WORKFLOW.md', root/'docs/MVP_ACCEPTANCE.md', archived, *sorted((root/'roadmap').glob('*.md'))):
         for ref in re.findall(r'\[[^\]]*\]\(([^)]+)\)', file.read_text()):
             local_link(root, file, ref)
+        if file.name.startswith('_'):  # Template fields are examples, not acceptance records.
+            continue
+        for block in re.findall(r'```product-feature\n(.*?)\n```', file.read_text(), re.S):
+            def evidence_links(value):
+                if isinstance(value, dict):
+                    for key, item in value.items():
+                        if key in {'evidence', 'visual_evidence', 'reference', 'plan'} and item:
+                            local_link(root, file, item)
+                        elif key == 'sources':
+                            for ref in item: local_link(root, file, ref)
+                        else: evidence_links(item)
+                elif isinstance(value, list):
+                    for item in value: evidence_links(item)
+            evidence_links(json.loads(block))
     if require:
         raise ValueError('Historical feature metadata cannot certify a stable product leaf')
     return len(numbers), len(config.get('accepted', {}))

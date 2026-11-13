@@ -18,7 +18,7 @@
 
 ## 今晚执行与结果回链
 
-执行者Didadi原任务；独立复审沿用原审查者。PR41身份/授权设计及Issue12暂停工作不接管。今晚既有候选不重做：49c61bab→1f3c7b2→036eac8→06fd020是兼容叠加链；准确版本与结果在[同一验收记录](../artifact/032-requirements-completion/validation.md#产品流程接入与候选版本)。
+执行者Didadi原任务；独立复审沿用原审查者。PR41身份/授权设计及Issue12暂停工作不接管。今晚既有候选不重做：49c61bab→1f3c7b2→036eac8→06fd020是兼容叠加链；准确版本与结果在[同一验收记录](../artifact/032-requirements-completion/historical-20261022.md#产品流程接入与候选版本)。
 
 | 顺序 | 今晚具体产物 | 实施/核对结果与下一步 |
 | --- | --- | --- |
@@ -33,15 +33,15 @@
 
 已实际查看用户提供IMG_1677.png：格式工具占三行，正文空间被挤压；系统浏览器栏及键盘附件条不归网页。目标遵循用户明确的iOS方向：内容层级清楚、触控可点、主次操作稳定，不能只缩小字。设计稿保留现有Web产品形态，不冒充原生iOS App或Apple合规认证。
 
-新增自验：在新明确合成QA许可内已看手机/桌面截图并发现、修复横屏回桌面布局缺陷。实现c58d3a1，[横屏前后与8项自验](../artifact/032-requirements-completion/validation.md#合成手机横屏布局修复2026-10-22)有准确截图；失败重试与页面重载保留内容通过。仅demo.md合成适配，不是完整多文档/真实Git或iOS真机验收。
+新增自验：在新明确合成QA许可内已看手机/桌面截图并发现、修复横屏回桌面布局缺陷。实现c58d3a1，[横屏前后与8项自验](../artifact/032-requirements-completion/historical-20261022.md#合成手机横屏布局修复2026-10-22)有准确截图；失败重试与页面重载保留内容通过。仅demo.md合成适配，不是完整多文档/真实Git或iOS真机验收。
 
 设计→代码→视觉验收是正式三道门槛：[设计稿](mobile-editor.svg)供查阅；实现为036eac8；未获准的浏览器/设备检查不运行。实际验收必须覆盖窄屏、键盘显隐、更多面板、滚动、长文/代码、横竖屏、中文IME与桌面回归。源码/DOM/viewport合成事件不是视觉通过。
 
 发布前需完整scope审核、准确SHA CI、识别实际安装/线上版本、回滚与草稿兼容。当前没有安装或线上候选版本证据；回退代码不能删Git提交、原消息或用户草稿。未完成门槛写在本页，实际执行证据仍回原验收记录；缺陷重新打开本页与根叶子，不另建平行清单。
 
-今晚补充实际自验：[文档路径结果](../artifact/032-requirements-completion/validation.md#文档管理完整路径合成自验)。6项合成UI观察通过；内存fixture重载不能证明命名仓库持久化，移动前跨路径历史仍未实现，不勾叶子。手机导航拆到同目录mobile-navigation.md，避免重复拥有同一根叶子。
+今晚补充实际自验：[文档路径结果](../artifact/032-requirements-completion/historical-20261022.md#文档管理完整路径合成自验)。6项合成UI观察通过；内存fixture重载不能证明命名仓库持久化，移动前跨路径历史仍未实现，不勾叶子。手机导航拆到同目录mobile-navigation.md，避免重复拥有同一根叶子。
 
-新增前端缺口已修：[选择恢复自验](../artifact/032-requirements-completion/validation.md#文档选择恢复前端修复)。列表确认后恢复身份/文档房间内选择；失效回退保留隔离草稿。跨路径历史和真实后端持久化仍未通过。
+新增前端缺口已修：[选择恢复自验](../artifact/032-requirements-completion/historical-20261022.md#文档选择恢复前端修复)。列表确认后恢复身份/文档房间内选择；失效回退保留隔离草稿。跨路径历史和真实后端持久化仍未通过。
 
 ## 检查元数据
 
@@ -71,7 +71,7 @@
   "review": {
     "status": "passed",
     "version": "777986c37d9d2e07618c9a0ad39e791144ff98eb",
-    "evidence": "../artifact/032-requirements-completion/validation.md#文档选择恢复前端修复"
+    "evidence": "../artifact/032-requirements-completion/historical-20261022.md#文档选择恢复前端修复"
   },
   "acceptance": {
     "status": "blocked",
@@ -94,7 +94,7 @@
     "reference": "../artifact/032-requirements-completion/navigation-qa/mobile-05-edit.png",
     "status": "partial",
     "version": "b7f8b28dd089de4b4cc2062c33fb9703f9afacc4",
-    "visual_evidence": "../artifact/032-requirements-completion/validation.md#合成手机横屏布局修复2026-10-22"
+    "visual_evidence": "../artifact/032-requirements-completion/historical-20261022.md#合成手机横屏布局修复2026-10-22"
   },
   "blockers": [
     "跨移动路径历史和稳定ID仍缺实现",

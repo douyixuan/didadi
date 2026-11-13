@@ -133,6 +133,15 @@ class StableProductGateTests(unittest.TestCase):
         cases.append({'roadmap/_checks.json': json.dumps(bad_version)})
         fake = json.loads(json.dumps(config)); fake['accepted']['69']['kind'] = 'mock'
         cases.append({'roadmap/_checks.json': json.dumps(fake)})
+        # Keep the archive digest valid so this proves anchor checking, not hash checking.
+        import hashlib
+        historical='roadmap/discussion-search.md'
+        broken=original(root/historical).replace('#今晚四目标实际对账','#missing-historical-anchor')
+        archive_config=json.loads(json.dumps(config))
+        archive_config['historical_files'][historical]=hashlib.sha256(broken.encode()).hexdigest()
+        cases.append({historical:broken,'roadmap/_checks.json':json.dumps(archive_config)})
+        archive='artifact/032-requirements-completion/historical-20261022.md'
+        cases.append({archive:original(root/archive).replace('### 今晚四目标实际对账','### Removed historical anchor')})
         for replacements in cases:
             def read(path, *args, **kwargs):
                 relative = str(path.relative_to(root)) if path.is_relative_to(root) else ''

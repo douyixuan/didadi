@@ -22,7 +22,7 @@
 
 沿用[原执行计划](../artifact/032-requirements-completion/plan.md)，不取消今天八点及后续有效计划。当前执行者为Didadi原任务，独立复审由review_progress_candidate完成；PR41身份设计与暂停Issue12不在本范围。开始下一轮必须刷新贡献者/PR/工作树，不能把此认领当永久锁。
 
-今天既有结果：3080c8f为旧未读候选；49c61bab基于main 1f371893完成房间类型/成员/命名草稿整合；其上1f3c7b2任务、036eac8移动布局、06fd020讨论身份隔离均为未发布叠加候选。不是新提交都算新增功能。准确SHA、离线测试和未运行项见[原验收记录](../artifact/032-requirements-completion/validation.md#产品流程接入与候选版本)。
+今天既有结果：3080c8f为旧未读候选；49c61bab基于main 1f371893完成房间类型/成员/命名草稿整合；其上1f3c7b2任务、036eac8移动布局、06fd020讨论身份隔离均为未发布叠加候选。不是新提交都算新增功能。准确SHA、离线测试和未运行项见[原验收记录](../artifact/032-requirements-completion/historical-20261022.md#产品流程接入与候选版本)。
 
 剩余顺序：先审查选定业务候选与当前main差异并取得对应发布/真实验收范围；再用隔离数据运行上表实际流程；修缺陷并复审；按允许目标发布并核对main/实际运行版本；最后回写证据并勾根叶子。任一部分获准不自动授权认证、截图或部署。后续已获准的合成前端自验见下方回链；真实服务限制保持。
 
@@ -45,7 +45,7 @@ main为1f371893，未读候选49c61bab；当前组合候选06fd020。设备安�
   "plan": "../artifact/032-requirements-completion/plan.md",
   "versions": {"main": "1f371893baa0cf504a7c63d8df39170680336e40", "candidate": "777986c37d9d2e07618c9a0ad39e791144ff98eb", "installed": null, "online": null},
   "target": "local",
-  "review": {"status": "passed", "version": "49c61babd067359934149e3f6a3d665b222973b7", "evidence": "../artifact/032-requirements-completion/validation.md#产品流程接入与候选版本"},
+  "review": {"status": "passed", "version": "49c61babd067359934149e3f6a3d665b222973b7", "evidence": "../artifact/032-requirements-completion/historical-20261022.md#产品流程接入与候选版本"},
   "acceptance": {"status": "blocked", "version": null, "evidence": null, "environment": null, "data": null, "actor": null, "date": null, "steps": null, "observed": null},
   "delivery": {"status": "not-released", "version": null, "evidence": null},
   "design": {"required": true, "reference": "mobile-editor.svg", "status": "partial", "version": "49c61babd067359934149e3f6a3d665b222973b7", "visual_evidence": null},

@@ -1,0 +1,31 @@
+{
+  "source": "777986c37d9d2e07618c9a0ad39e791144ff98eb",
+  "proof": [
+    {
+      "name": "narrow editor primary actions are reachable",
+      "passed": true
+    },
+    {
+      "name": "narrow search error retry and close are reachable",
+      "passed": true
+    },
+    {
+      "name": "landscape artifact error retry remains reachable",
+      "passed": true
+    },
+    {
+      "name": "search unread and pinned artifact preserve the original unsaved draft",
+      "passed": true
+    },
+    {
+      "name": "narrow search empty state leaves search and close reachable",
+      "passed": true
+    }
+  ],
+  "limits": [
+    "existing deterministic frontend adapter only",
+    "no backend or real identity/authorization",
+    "Chromium 390x844 and 844x390; not actual iOS keyboard",
+    "no deployment"
+  ]
+}

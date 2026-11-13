@@ -1,0 +1,46 @@
+{
+  "source": "c58d3a157ea039403b28a550fb78ab4fa268c3c3",
+  "adapter": "createDemo plus one deterministic save failure",
+  "origin": "http://127.0.0.1:50702",
+  "profile": "temporary isolated; removed after run",
+  "proof": [
+    {
+      "name": "synthetic adapter only",
+      "passed": true
+    },
+    {
+      "name": "mobile compact editing",
+      "passed": true
+    },
+    {
+      "name": "format menu visible",
+      "passed": true
+    },
+    {
+      "name": "uncertain save freezes edit exit",
+      "passed": true
+    },
+    {
+      "name": "save persists through normal page restart",
+      "passed": true
+    },
+    {
+      "name": "short viewport retains stable actions",
+      "passed": true
+    },
+    {
+      "name": "landscape uses compact tools and keeps document space",
+      "passed": true
+    },
+    {
+      "name": "desktop navigation and original toolbar remain visible",
+      "passed": true
+    }
+  ],
+  "limits": [
+    "synthetic adapter; no Matrix/Git/runtime",
+    "headless Chromium; no real iOS keyboard",
+    "short viewport is not keyboard proof",
+    "no physical IME or touch selection acceptance"
+  ]
+}
