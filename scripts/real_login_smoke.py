@@ -18,6 +18,18 @@ from src.matrix_http import segment
 from src.runtime_socket import loopback_url
 
 
+def assert_metadata_only(value, body):
+    if isinstance(value, str):
+        assert body not in value, 'Document body leaked into decoded receipt string'
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            assert_metadata_only(key, body)
+            assert_metadata_only(item, body)
+    elif isinstance(value, list):
+        for item in value:
+            assert_metadata_only(item, body)
+
+
 def run(base, credentials, restart_proof=None):
     loopback_url(base, 'http')
     if not isinstance(credentials, dict) or len(credentials) != 2:
@@ -132,7 +144,7 @@ def run(base, credentials, restart_proof=None):
         metadata = receipt['content']['org.didadi.document.commit']
         assert metadata['path'] == saved['path'] and metadata['commit'] == saved['commit']
         assert metadata['author'] == alice[0]
-        assert secret_body not in json.dumps(receipt)
+        assert_metadata_only(receipt, secret_body)
         assert receipt['content']['body'].startswith('Saved ')
     print('PASS REAL GIT two documents, stable versions, denied write and metadata-only receipts')
 
@@ -149,9 +161,25 @@ def run(base, credentials, restart_proof=None):
     assert moved['path'] == moved_name
     assert moved['blob'] == second['blob'], 'Move rewrote the Markdown blob'
     assert moved['commit'] != second['commit'], 'Move did not record Git history'
+    def move_state():
+        # HTTP-observed canonical HEAD, file bytes and bounded history window.
+        # Direct bare-repository verification remains the workflow's responsibility.
+        snapshots = {}
+        for document_name in (name, second_name, moved_name, 'forbidden.md'):
+            query = urlencode({'room': room, 'path': document_name})
+            document, _ = call('/api/document?' + query, cookie=alice[1])
+            history, _ = call('/api/history?' + query, cookie=alice[1])
+            snapshots[document_name] = {key: document[key] for key in ('commit','blob','content')}
+            snapshots[document_name]['history'] = history['commits']
+        listing, _ = call('/api/documents?' + urlencode({'room':room}), cookie=alice[1])
+        snapshots['paths'] = sorted(item['name'] for item in listing['documents'])
+        return snapshots
+    before_retry = move_state()
+    assert before_retry[moved_name]['commit'] == moved['commit'], 'Current HEAD disagrees with move result'
     retried, _ = call('/api/documents/move', 'POST', move_payload,
                       cookie=alice[1], csrf=alice[2]['csrf'])
     assert retried['commit'] == moved['commit'], 'Same operation duplicated Git effects'
+    assert move_state() == before_retry, 'Retry changed canonical HEAD, paths, contents or history'
     relocated, _ = call('/api/document?' + urlencode({'room': room, 'path': moved_name}),
                         cookie=bob[1])
     assert relocated['content'] == second_body and relocated['blob'] == second['blob']
@@ -166,21 +194,24 @@ def run(base, credentials, restart_proof=None):
                              cookie=bob[1])
     assert retained_first['content'] == body and retained_first['blob'] == created['blob']
     # The same Matrix membership must not imply write authority.
+    before_denial = move_state()
     denied(403, '/api/documents/move', 'POST',
            {'room': room, 'source': moved_name, 'name': 'forbidden.md',
             'base_blob': moved['blob'], 'operation': str(uuid.uuid4())},
            cookie=bob[1], csrf=bob[2]['csrf'])
+    assert move_state() == before_denial, 'Forbidden move mutated document state'
     denied(400, '/api/documents/move', 'POST',
            {'room': room, 'source': moved_name, 'name': '../escape.md',
             'base_blob': moved['blob'], 'operation': str(uuid.uuid4())},
            cookie=alice[1], csrf=alice[2]['csrf'])
+    assert move_state() == before_denial, 'Rejected path mutated document state'
     assert moved['receipt'] and not moved['receipt_pending']
     receipt_event, _ = call(path + '/event/' + segment(moved['receipt']['event_id']),
                             cookie=bob[1])
     receipt_meta = receipt_event['content']['org.didadi.document.commit']
     assert receipt_meta['path'] == moved_name and receipt_meta['commit'] == moved['commit']
     assert receipt_meta['author'] == alice[0]
-    assert second_body not in json.dumps(receipt_event), 'Move leaked document body into Matrix'
+    assert_metadata_only(receipt_event, second_body)
     print('PASS REAL GIT document move: byte-exact, immutable history, idempotent, forbidden write/path, metadata receipt')
 
     # A genuine room created by Bob becomes available only to Bob. The global
