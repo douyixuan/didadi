@@ -176,6 +176,44 @@ def validate(root, require=None, baseline=None):
     return len(leaves), len(records)
 
 
+def requirement_trace(text, requirements, legal_leaves):
+    """Scope trace only: a mapped requirement is never acceptance evidence."""
+    section = text.split('## 原需求逐项追踪\n', 1)
+    if len(section) != 2:
+        raise ValueError('Missing original requirement trace')
+    section = section[1].split('## 完整需求与长期范围', 1)[0]
+    records = {}
+    for line in section.splitlines():
+        if not line.startswith('| R'):
+            continue
+        columns = [part.strip() for part in line.strip('|').split('|')]
+        if len(columns) != 6:
+            raise ValueError('Requirement trace needs six columns')
+        identifier, original, status, leaves, evidence, boundary = columns
+        if not re.fullmatch(r'R\d{3}', identifier) or identifier in records:
+            raise ValueError('Requirement trace IDs must be unique')
+        index = int(identifier[1:]) - 1
+        if not 0 <= index < len(requirements) or original != requirements[index]:
+            raise ValueError('Requirement trace must retain stable ID and original wording')
+        if status not in {'已映射', '部分覆盖', '未映射', '待决'} or not boundary:
+            raise ValueError('Requirement trace needs explicit scope and boundary')
+        if leaves == '—':
+            if status not in {'未映射', '待决'}:
+                raise ValueError('Mapped scope must cite a product leaf')
+        else:
+            refs = leaves.split(', ')
+            if (status == '未映射' or len(refs) != len(set(refs)) or
+                    any(not re.fullmatch(r'#\d+', ref) or int(ref[1:]) not in legal_leaves for ref in refs)):
+                raise ValueError('Requirement trace contains an invalid product leaf')
+        sources = re.findall(r'\[#(\d+)\]\(https://github.com/douyixuan/didadi/issues/(\d+)\)', evidence)
+        if not sources or any(a != b or int(a) not in legal_leaves for a, b in sources):
+            raise ValueError('Requirement trace needs valid issue scope evidence')
+        records[identifier] = status
+    if set(records) != {f'R{i:03}' for i in range(1, len(requirements)+1)}:
+        raise ValueError('Every original requirement needs exactly one trace record')
+    return records
+
+
 def validate_stable(root, config, require=None):
     path = root / config['roadmap']
     leaves = tree(path)
@@ -194,6 +232,7 @@ def validate_stable(root, config, require=None):
     labels = re.findall(r'^- (.+)$', inventory, re.M)
     if len(config['requirements']) != 99 or sorted(labels) != sorted(config['requirements']):
         raise ValueError('Original 99 requirements must be retained exactly')
+    requirement_trace((root / 'roadmap/README.md').read_text(), config['requirements'], set(numbers))
     for file, digest in config['historical_files'].items():
         if hashlib.sha256((root / file).read_bytes()).hexdigest() != digest:
             raise ValueError('Historical narrow evidence changed; review archive migration explicitly')

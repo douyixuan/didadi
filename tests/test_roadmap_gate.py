@@ -148,3 +148,26 @@ class StableProductGateTests(unittest.TestCase):
                 return replacements[relative] if relative in replacements else original(path, *args, **kwargs)
             with self.subTest(case=list(replacements)), patch.object(Path, 'read_text', read):
                 with self.assertRaises(ValueError): validate(root)
+
+    def test_requirement_trace_rejects_missing_duplicate_and_illegal_leaf(self):
+        from unittest.mock import patch
+        root = Path(__file__).resolve().parents[1]
+        original = Path.read_text
+        path = root/'roadmap/README.md'
+        text = original(path)
+        row = next(line for line in text.splitlines() if line.startswith('| R001 |'))
+        cases = {
+            'missing': text.replace(row+'\n', ''),
+            'duplicate': text.replace(row, row+'\n'+row),
+            'illegal_leaf': text.replace(row, row.replace('| #69 |', '| #168 |')),
+            'wrong_original': text.replace(row, row.replace('真实登录（待接入）', 'invented requirement')),
+            'unknown_status': text.replace(row, row.replace('| 已映射 |', '| 已完成 |')),
+            'unmapped_with_leaf': text.replace(row, row.replace('| 已映射 |', '| 未映射 |')),
+            'mapped_without_leaf': text.replace(row, row.replace('| #69 |', '| — |')),
+            'missing_evidence': text.replace(row, row.replace('[#69](https://github.com/douyixuan/didadi/issues/69)', '—')),
+        }
+        for name, changed in cases.items():
+            def read(file, *args, **kwargs):
+                return changed if file == path else original(file, *args, **kwargs)
+            with self.subTest(case=name), patch.object(Path, 'read_text', read):
+                with self.assertRaises(ValueError): validate(root)
