@@ -142,6 +142,14 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     const collaboration=bob.page.locator('.collaboration-panel');const panelWasOpen=await collaboration.evaluate(node=>!node.classList.contains('panel-closed'));
     if(panelWasOpen)await bob.page.getByRole('button',{name:'Discussion',exact:true}).click();
     await bob.page.setViewportSize({width:390,height:844});
+    // Enter from the compact header itself, not by opening on desktop and
+    // merely shrinking the viewport after the action is already complete.
+    await historyPanel.getByRole('button',{name:'Close history',exact:true}).click();await expect(historyPanel).toHaveCount(0);
+    const mobileMore=bob.page.getByRole('button',{name:'More workspace actions',exact:true});await expect(mobileMore).toBeInViewport({ratio:1});await mobileMore.click();
+    const secondary=bob.page.getByRole('group',{name:'Workspace actions'});await expect(secondary.getByRole('button',{name:'People',exact:true})).toBeVisible();
+    await bob.page.screenshot({path:evidenceDir+'/p071-mobile-secondary-actions.png',fullPage:true});await bob.page.keyboard.press('Escape');await expect(secondary).toHaveCount(0);
+    const mobileHistory=bob.page.getByRole('button',{name:'Version history',exact:true});await expect(mobileHistory).toBeInViewport({ratio:1});const entry=await mobileHistory.boundingBox();assert.ok(entry&&entry.width>=44&&entry.height>=44);await mobileHistory.click();
+    await originalRow.scrollIntoViewIfNeeded();await expect(historyPanel.getByRole('button',{name:'Close history',exact:true})).toBeInViewport({ratio:1});
     const returnAction=historyPanel.getByRole('button',{name:'Back to latest',exact:true});const target=await returnAction.boundingBox();assert.ok(target&&target.height>=44&&target.x>=0&&target.x+target.width<=390&&target.y>=0&&target.y+target.height<=844);await expect(returnAction).toBeInViewport({ratio:1});
     await bob.page.screenshot({path:evidenceDir+'/p071-pre-move-paged-history-mobile.png',fullPage:true});
     await returnAction.click();await expect(historyPanel).toHaveCount(0);await expect(bob.page.locator('.markdown-body')).toContainText('History checkpoint 8',{timeout:30000});

@@ -2,7 +2,7 @@ import React from 'react';
 import {act,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
 import {describe,it,expect,vi} from 'vitest';
 vi.mock('./api',()=>({connect:vi.fn(),errorText:error=>error.message}));
-vi.mock('./BlockEditor',()=>({BlockEditor:React.forwardRef(function TestEditor({value,onChange,disabled},ref){React.useImperativeHandle(ref,()=>({markdown:()=>value}));return <textarea aria-label="Markdown document" disabled={disabled} value={value} onChange={e=>onChange(e.target.value)}/>})}));
+vi.mock('./BlockEditor',()=>({BlockEditor:React.forwardRef(function TestEditor({value,onChange,disabled,onComposingChange},ref){React.useImperativeHandle(ref,()=>({markdown:()=>value}));return <textarea aria-label="Markdown document" onCompositionStart={()=>onComposingChange?.(true)} onCompositionEnd={()=>onComposingChange?.(false)} disabled={disabled} value={value} onChange={e=>onChange(e.target.value)}/>})}));
 vi.mock('./downloadMarkdown',()=>({downloadMarkdown:vi.fn()}));
 import {downloadMarkdown} from './downloadMarkdown';
 import {App,Composer,Documents,PreservedDraft} from './App';
@@ -1067,4 +1067,51 @@ it('does not restore an earlier history response after the document read denies 
  await waitFor(()=>expect(unavailable).toHaveBeenCalledWith('Private.md',403));
  await act(async()=>finish({versions:[{commit:doc.commit,path:'Private old name.md'}],next_cursor:'stale'}));
  expect(document.querySelectorAll('.history-row')).toHaveLength(0);expect(screen.queryByText('At Private old name.md')).not.toBeInTheDocument();
+});
+
+describe('compact document navigation',()=>{
+ it('keeps document actions primary and reveals secondary workspace actions on demand',async()=>{
+  const previous=window.matchMedia;window.matchMedia=query=>({matches:query==='(max-width: 600px)',addEventListener(){},removeEventListener(){}});
+  try{const api=fixture(),path='Very/long/workspace/directory/B.md';api.documents=vi.fn().mockResolvedValue({documents:[{name:path}]});api.document.mockResolvedValue({...doc,name:path});api.members=vi.fn();api.readSource=vi.fn();
+   render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Team handbook'});
+   const header=document.querySelector('.workspace-header');expect(header.querySelector('.breadcrumbs strong')).toHaveTextContent('B.md');expect(header.querySelector('.breadcrumbs strong')).toHaveAttribute('title',path);
+   expect(within(header).getByRole('button',{name:'Edit',exact:true})).toBeInTheDocument();expect(within(header).queryByRole('button',{name:'Read',exact:true})).not.toBeInTheDocument();
+   expect(within(header).getByRole('button',{name:'Version history',exact:true})).toBeInTheDocument();expect(within(header).queryByRole('button',{name:'People',exact:true})).not.toBeInTheDocument();
+   fireEvent.click(within(header).getByRole('button',{name:'More workspace actions',exact:true}));
+   const tools=screen.getByRole('group',{name:'Workspace actions'});expect(within(tools).getByRole('button',{name:'People',exact:true})).toBeInTheDocument();expect(within(tools).getByRole('button',{name:'Git source',exact:true})).toBeInTheDocument();
+   fireEvent.click(within(tools).getByRole('button',{name:'Agent',exact:true}));expect(screen.queryByRole('group',{name:'Workspace actions'})).not.toBeInTheDocument();expect(await screen.findByRole('heading',{name:'Example Agent',exact:true})).toBeInTheDocument();
+  }finally{window.matchMedia=previous;}
+ });
+ it('dismisses secondary navigation without losing an unsaved document draft',async()=>{
+  const previous=window.matchMedia;window.matchMedia=query=>({matches:query==='(max-width: 600px)',addEventListener(){},removeEventListener(){}});
+  try{const api=fixture();render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Team handbook'});
+   fireEvent.click(screen.getByRole('button',{name:'Edit',exact:true}));fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# Keep the mobile draft'}});
+   const more=screen.getByRole('button',{name:'More workspace actions',exact:true});fireEvent.click(more);fireEvent.keyDown(document,{key:'Escape'});
+   expect(screen.queryByRole('group',{name:'Workspace actions'})).not.toBeInTheDocument();expect(more).toHaveFocus();expect(screen.getByLabelText('Markdown document')).toHaveValue('# Keep the mobile draft');
+   fireEvent.click(screen.getByRole('button',{name:'Read',exact:true}));fireEvent.click(screen.getByRole('button',{name:'Edit',exact:true}));expect(screen.getByLabelText('Markdown document')).toHaveValue('# Keep the mobile draft');
+  }finally{window.matchMedia=previous;}
+ });
+});
+
+it('keeps a compact navigation choice from being replaced by a late source result',async()=>{
+ const previous=window.matchMedia;window.matchMedia=query=>({matches:query==='(max-width: 600px)',addEventListener(){},removeEventListener(){}});
+ try{const api=fixture();let finish;api.document.mockResolvedValue({...doc,content:'# Source document\n\n[Open source message](https://matrix.to/#/!room/%24source)'});api.message=vi.fn(()=>new Promise(resolve=>{finish=resolve}));
+  render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Source document'});fireEvent.click(screen.getByRole('link',{name:'Open source message'}));await waitFor(()=>expect(finish).toBeTypeOf('function'));
+  fireEvent.click(screen.getByRole('button',{name:'More workspace actions'}));await act(async()=>finish({id:'$source',content:{msgtype:'m.text',body:'Source'}}));
+  expect(screen.getByRole('group',{name:'Workspace actions'})).toBeInTheDocument();expect(screen.queryByRole('button',{name:'All messages',exact:true})).not.toBeInTheDocument();
+ }finally{window.matchMedia=previous;}
+});
+it('keeps editing mounted during IME composition in compact navigation',async()=>{
+ const previous=window.matchMedia;window.matchMedia=query=>({matches:query==='(max-width: 600px)',addEventListener(){},removeEventListener(){}});
+ try{const api=fixture();render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Team handbook'});fireEvent.click(screen.getByRole('button',{name:'Edit',exact:true}));
+  const editor=screen.getByLabelText('Markdown document');fireEvent.compositionStart(editor);fireEvent.change(editor,{target:{value:'# 输入仍在组合'}});
+  await waitFor(()=>expect(screen.getByRole('button',{name:'Read',exact:true})).toBeDisabled());expect(screen.getByRole('button',{name:'Version history'})).toBeDisabled();expect(screen.getByRole('button',{name:'More workspace actions'})).toBeDisabled();
+  fireEvent.click(screen.getByRole('button',{name:'Read',exact:true}));expect(editor).toBeInTheDocument();expect(editor).toHaveValue('# 输入仍在组合');
+  fireEvent.compositionEnd(editor);await waitFor(()=>expect(screen.getByRole('button',{name:'Read',exact:true})).toBeEnabled());
+ }finally{window.matchMedia=previous;}
+});
+it('uses the named file as a presentation fallback without rewriting its Markdown',async()=>{
+ const api=fixture(),body='Plain body without a heading.';api.document.mockResolvedValue({...doc,name:'Archive/B.md',content:body});
+ const view=render(<Documents api={api} room="!room" name="Archive/B.md"/>);await screen.findByRole('heading',{name:'B.md'});fireEvent.click(screen.getByRole('button',{name:'Export Markdown'}));expect(downloadMarkdown).toHaveBeenLastCalledWith(body,'B.md');view.unmount();
+ const other=fixture();other.document.mockResolvedValue({...doc,name:'Archive/B.md',content:'# Untitled document\n\nLiteral authored title.'});render(<Documents api={other} room="!room" name="Archive/B.md"/>);await screen.findByRole('heading',{name:'Untitled document'});
 });

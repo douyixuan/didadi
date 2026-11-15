@@ -10,7 +10,7 @@ function plainText(node){
   return (node.children||[]).map(plainText).join('');
 }
 // Presentation only: do not round-trip or rewrite the saved Markdown.
-export function readMarkdown(source){
+export function readMarkdown(source,fallbackTitle='Untitled document'){
   const properties=frontMatter(source);
   const content=source.slice(properties.length);
   const nodes=parser.parse(content).children;
@@ -18,5 +18,5 @@ export function readMarkdown(source){
   const hidden=nodes.filter(node=>node===heading||node.type==='html'&&node.value==='<!-- didadi:empty-paragraph -->');
   let body=content;
   for(const node of hidden.reverse())body=body.slice(0,node.position.start.offset)+body.slice(node.position.end.offset);
-  return {title:heading?plainText(heading):'Untitled document',properties,body};
+  return {title:heading?plainText(heading):fallbackTitle,properties,body};
 }
