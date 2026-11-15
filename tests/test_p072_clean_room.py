@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from scripts.p072_clean_room import CleanRoom, Failure, gate_result, docs_only, volume_script
+from scripts.p072_clean_room import CleanRoom, Failure, gate_result, docs_only, volume_script, failure_hint
 
 
 class CleanRoomTests(unittest.TestCase):
@@ -33,6 +33,13 @@ class CleanRoomTests(unittest.TestCase):
             self.assertEqual(report['stages'][0]['name'],'browser')
             self.assertNotIn(secret,str(report))
             self.assertFalse(report['accepted'])
+
+    def test_diagnostics_export_positions_not_private_error_values(self):
+        secret=b'Bearer synthetic-private-cookie\nAssertionError: synthetic-private-cookie\n at file:///private/client/scripts/p072_restore_browser.mjs:42:7\npermission denied'
+        result=failure_hint(secret)
+        self.assertEqual(result,{'locations':['p072_restore_browser.mjs:42'],'categories':['permission-denied']})
+        self.assertNotIn('synthetic-private-cookie',str(result))
+        self.assertNotIn('/private',str(result))
 
     def test_volume_restore_rejects_links_and_escaping_paths(self):
         # Actual safe extraction runs in the isolated volume helper in real CI.

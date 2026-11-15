@@ -37,6 +37,15 @@ def gate_result(scope,exempt,matrix,clean):
     raise Failure()
 
 
+def failure_hint(output):
+    # Export source positions and fixed categories, never exception values or logs.
+    text=output[-65536:].decode(errors='replace')
+    names=r'(?:real_login_browser|document_recovery_acceptance|cross_user_receipt_browser|p072_restore_browser)\.mjs|(?:real_login_smoke|client_server|gitdocs|document_service|matrix_sessions)\.py'
+    locations=re.findall('('+names+r')(?::|", line )(\d+)',text)
+    categories=[label for pattern,label in (('permission denied','permission-denied'),('no space left on device','storage-full'),('port is already allocated','port-in-use'),('unhealthy','service-unhealthy'),('no module named','missing-module')) if pattern in text.lower()]
+    return {'locations':sorted({name+':'+line for name,line in locations}),'categories':categories}
+
+
 def volume_script(action,name):
     if action not in {'backup','restore'} or name not in VOLUMES:raise ValueError('Invalid volume action')
     common="import tarfile, hashlib\nfrom pathlib import Path, PurePosixPath\n"
@@ -63,7 +72,7 @@ class CleanRoom:
         self.root=Path(root).resolve();self.version=version;self.local=self.root/'.local'
         self.source='didadi-p072-'+secrets.token_hex(8);self.restored=self.source+'-restore'
         self.owned=[];self.client=None;self.stages=[];self.passed=False;self.stage_name='preflight'
-        self.created=False;self.backup=None
+        self.created=False;self.backup=None;self.tracing=False
         self.env={**os.environ,'MATRIX_HTTP_PORT':'8008','GATEWAY_HTTP_PORT':'9000','PYTHONUNBUFFERED':'1'}
 
     def check_fresh(self):
@@ -82,15 +91,21 @@ class CleanRoom:
             with log.open('ab') as output:
                 output.write(('COMMAND '+json.dumps(args)+'\n').encode());output.flush()
                 result=subprocess.run(args,cwd=self.root,env=self.env,stdout=output,stderr=subprocess.STDOUT,timeout=timeout)
-        if result.returncode:raise Failure(result.returncode,'Command failed; read private local diagnostics')
+        if result.returncode:
+            output=(result.stdout or b'')+(result.stderr or b'') if capture else log.read_bytes()
+            if self.stages:self.stages[-1]['diagnostic']=failure_hint(output)
+            raise Failure(result.returncode,'Command failed; read private local diagnostics')
         return result.stdout.decode() if capture else ''
 
     def stage(self,name,action):
+        if self.tracing:print('P072 STAGE '+name,flush=True)
         self.stage_name=name;entry={'name':name,'exit_code':None};self.stages.append(entry);start=time.monotonic()
         try:action();entry['exit_code']=0
         except Failure as error:entry['exit_code']=error.code;entry['reason']=error.reason;raise
         except Exception as error:entry['exit_code']=1;raise Failure(1,type(error).__name__) from None
-        finally:entry['seconds']=round(time.monotonic()-start,2)
+        finally:
+            entry['seconds']=round(time.monotonic()-start,2)
+            if self.tracing:print('P072 RESULT '+name+' exit='+str(entry['exit_code']),flush=True)
 
     def public_report(self):
         return {'schema':1,'version':self.version,'passed':self.passed,'accepted':False,'environment':'ephemeral-loopback-real',
@@ -193,21 +208,26 @@ class CleanRoom:
         self.backup=Path(tempfile.mkdtemp(prefix='didadi-p072-private-'))
         os.chmod(self.backup,0o700)
         for volume in VOLUMES:
+            self.stages[-1]['volume']=volume;self.stages[-1]['operation']='backup-owned-stopped-volume'
             original=self.source+'_'+volume;target=self.restored+'_'+volume
             labels=json.loads(self.command(['docker','volume','inspect',original],capture=True))[0]['Labels']
             if labels.get('com.docker.compose.project')!=self.source or labels.get('com.docker.compose.volume')!=volume:raise Failure(2,'Refusing an unowned volume')
             mounts=['--mount','type=bind,src='+str(self.backup)+',dst=/backup']
             self.command(['docker','run','--rm','--network','none','--mount','type=volume,src='+original+',dst=/volume,readonly',*mounts,'python:3.13-slim','python','-c',volume_script('backup',volume)])
+            self.stages[-1]['operation']='restore-into-independent-volume'
             self.command(['docker','volume','create','--label','com.docker.compose.project='+self.restored,'--label','com.docker.compose.volume='+volume,target])
             if self.restored not in self.owned:self.owned.append(self.restored)
             self.command(['docker','run','--rm','--network','none','--mount','type=volume,src='+target+',dst=/volume',*mounts,'python:3.13-slim','python','-c',volume_script('restore',volume)])
+        self.stages[-1].pop('volume',None);self.stages[-1]['operation']='restore-independent-host-copy'
         # Keep source files intact and inaccessible from the restored canonical path.
         if any(path.is_symlink() for path in self.local.rglob('*')):raise Failure(2,'Refusing an unowned volume')
         shutil.copytree(self.local,self.backup/'host-copy')
         shutil.move(str(self.local),str(self.backup/'source-host'))
         shutil.copytree(self.backup/'host-copy',self.local)
         if os.path.samefile(self.local/'documents.git',self.backup/'source-host/documents.git'):raise Failure()
+        self.stages[-1]['operation']='start-independent-restored-stack'
         self.compose(self.restored,'up','-d','--wait','--wait-timeout','240')
+        self.stages[-1]['operation']='verify-original-device-cookies-and-data'
         self.start_client();self.browser('p072_restore_browser.mjs','--phase','verify')
 
     def cleanup(self):
@@ -217,6 +237,7 @@ class CleanRoom:
         if self.backup:shutil.rmtree(self.backup);self.backup=None
 
     def execute(self):
+        self.tracing=True
         try:
             self.stage('preflight',self.prepare)
             self.stage('clean-start-and-real-users',self.bootstrap)
