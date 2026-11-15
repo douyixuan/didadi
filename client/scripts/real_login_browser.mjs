@@ -134,7 +134,10 @@ try {
   await alice.page.getByLabel('Matrix user ID to invite').fill(accounts[1][0]);
   await alice.page.getByRole('button', {name: 'Add person'}).click();
   await alice.page.getByLabel('New local room name').fill(directName);
+  const directCreation=alice.page.waitForResponse(response=>new URL(response.url()).pathname==='/api/rooms'&&response.request().method()==='POST'&&response.request().postDataJSON()?.name===directName);
   await alice.page.getByRole('button', {name: 'Create local room'}).click();
+  const directCreated=await directCreation;assert.equal(directCreated.status(),200);assert.equal(directCreated.request().postDataJSON().kind,'direct');const directResult=await directCreated.json();assert.equal(directResult.kind,'direct');assert.ok(directResult.room_id?.startsWith('!'));
+  await expect.poll(()=>new URL(alice.page.url()).searchParams.get('room'),{timeout:30000}).toBe(directResult.room_id);
   await expect(alice.page.getByText('Private room created.', {exact: true}))
     .toBeVisible({timeout: 45000});
   const aliceDirectButton = alice.page.locator('nav[aria-label="Rooms"] button.room')
@@ -270,11 +273,17 @@ try {
     await alice.page.getByLabel('Matrix user ID to invite').fill(accounts[1][0]);
     await alice.page.getByRole('button', {name: 'Add person'}).click();
     await alice.page.getByLabel('New local room name').fill(roomName);
+    const creation=alice.page.waitForResponse(response=>new URL(response.url()).pathname==='/api/rooms'&&response.request().method()==='POST'&&response.request().postDataJSON()?.name===roomName);
     await alice.page.getByRole('button', {name: 'Create local room'}).click();
+    const created=await creation;assert.equal(created.status(),200);assert.equal(created.request().postDataJSON().kind,kind);const createdRoom=await created.json();assert.equal(createdRoom.kind,kind);assert.ok(createdRoom.room_id?.startsWith('!'));
+    // The creation acknowledgement is not the navigation effect. Wait for this
+    // exact response's room, never query the previously selected DM by accident.
+    await expect.poll(()=>new URL(alice.page.url()).searchParams.get('room'),{timeout:30000}).toBe(createdRoom.room_id);
+    await expect(alice.page.locator('nav[aria-label="Rooms"] button.room').filter({hasText:roomName})).toHaveClass(/room-selected/,{timeout:30000});
     await expect(alice.page.getByText('Private room created.', {exact: true}))
       .toBeVisible({timeout: 45000});
     const roomId = new URL(alice.page.url()).searchParams.get('room');
-    assert.ok(roomId?.startsWith('!'), kind + ': room must have a real Matrix ID');
+    assert.equal(roomId,createdRoom.room_id,kind+': state must belong to this actual creation response');
     const roomState = await browserRequest(alice.page,
       '/matrix/_matrix/client/v3/rooms/' + encodeURIComponent(roomId) + '/state');
     assert.equal(roomState.status, 200);
