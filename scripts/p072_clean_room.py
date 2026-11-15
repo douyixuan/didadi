@@ -104,7 +104,7 @@ class CleanRoom:
         # Read-only checks precede all state changes and dependency installation.
         for tool in ('git','docker','node','npm'):
             if not shutil.which(tool):raise Failure(2,'Missing documented prerequisite')
-        dirty=subprocess.check_output(['git','status','--porcelain'],cwd=self.root,text=True)
+        dirty=subprocess.check_output(['git','-c','core.fsmonitor=false','-c','core.hooksPath=/dev/null','status','--porcelain'],cwd=self.root,text=True)
         if dirty:raise Failure(2,'Tracked or untracked source changes require a separate fresh checkout')
         endpoint=json.loads(subprocess.check_output(['docker','context','inspect'],text=True))[0]['Endpoints']['docker']['Host']
         if os.environ.get('DOCKER_HOST') or not endpoint.startswith('unix://'):raise Failure(2,'Only a local Docker context is supported')

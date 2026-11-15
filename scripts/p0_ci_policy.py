@@ -13,7 +13,7 @@ def changed_paths(base,head,root=None):
     # --no-renames checks both removed code paths and newly added documentation.
     try:
         return subprocess.check_output(['git','-C',str(root or Path(__file__).resolve().parents[1]),
-            'diff','--name-only','--no-renames','-z',base,head],stderr=subprocess.DEVNULL).decode().rstrip('\0').split('\0')
+            'diff','--no-ext-diff','--no-textconv','--name-only','--no-renames','-z',base,head],stderr=subprocess.DEVNULL).decode().rstrip('\0').split('\0')
     except subprocess.CalledProcessError:return None
 
 

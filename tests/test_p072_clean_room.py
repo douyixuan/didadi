@@ -64,7 +64,7 @@ class CleanRoomTests(unittest.TestCase):
         from scripts.p0_ci_policy import changed_paths
         with tempfile.TemporaryDirectory() as temporary:
             root=Path(temporary)
-            def git(*args):return subprocess.check_output(['git','-C',str(root),*args],stderr=subprocess.DEVNULL,text=True).strip()
+            def git(*args):return subprocess.check_output(['git','-C',str(root),'-c','core.hooksPath=/dev/null','-c','core.fsmonitor=false',*args],stderr=subprocess.DEVNULL,text=True).strip()
             git('init');git('config','user.name','Synthetic');git('config','user.email','test@example.invalid')
             (root/'src').mkdir();(root/'src/code.py').write_text('synthetic')
             git('add','.');git('commit','-m','before');base=git('rev-parse','HEAD')
