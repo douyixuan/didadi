@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {expect} from '@playwright/test';
+import {loginCooldown} from './login_cooldown.mjs';
 
 export async function verifyRoomIsolation({alice,bob,accounts,request,evidenceDir,matrix='http://127.0.0.1:8008'}) {
   alice.page.setDefaultTimeout(30000);bob.page.setDefaultTimeout(30000);
@@ -83,13 +84,14 @@ export async function verifyRoomIsolation({alice,bob,accounts,request,evidenceDi
     await expect(page.getByRole('main',{name:'Matrix sign in'})).toBeVisible({timeout:30000});
     await page.getByLabel('Matrix user ID',{exact:true}).fill(account[0]);
     // Rate limiting is not an authentication or isolation failure. Retry only a real 429.
+    const started=Date.now();
     for(let attempt=0;attempt<4;attempt++){
       await page.getByLabel('Password',{exact:true}).fill(account[1]);
       const response=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/auth/login'&&r.request().method()==='POST');
       await page.getByRole('button',{name:'Sign in',exact:true}).click();const result=await response;
       if(result.status()!==429){assert.equal(result.status(),200,'Account switch login failed');break;}
       assert.ok(attempt<3,'Login limiter did not recover');
-      const data=await result.json();await page.waitForTimeout(Math.min(45000,Math.max(1500,Number(data.retry_after_ms)||12000)+500));
+      const data=await result.json();await page.waitForTimeout(loginCooldown(data,Date.now()-started));
     }
     await expect(page.getByRole('button',{name:/Sign out/})).toBeVisible({timeout:45000});
     assert.equal((await request(page,'/api/session')).data.userId,account[0]);
@@ -134,12 +136,12 @@ export async function verifyRoomIsolation({alice,bob,accounts,request,evidenceDi
   await select(bob.page,title);
   await expect.poll(async()=>{const result=await request(bob.page,'/api/search/messages',{room,query:secret,next_batch:null});return result.data.events?.length||0;},{timeout:45000}).toBeGreaterThan(0);
   // Authenticate the existing creator device before holding requests, so login throttling cannot time out the race probes.
-  let token;
+  let token;const creatorLoginStarted=Date.now();
   try{
     for(let attempt=0;attempt<4;attempt++){
       const response=await fetch(matrix+'/_matrix/client/v3/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:'m.login.password',identifier:{type:'m.id.user',user:accounts[0][0]},password:accounts[0][1]})});
       const data=await response.json();
-      if(response.status===429){assert.ok(attempt<3);await new Promise(r=>setTimeout(r,Math.min(45000,Math.max(1500,Number(data.retry_after_ms)||12000)+500)));continue;}
+      if(response.status===429){assert.ok(attempt<3);await new Promise(r=>setTimeout(r,loginCooldown(data,Date.now()-creatorLoginStarted)));continue;}
       assert.equal(response.status,200,'Isolated creator device login failed');token=data.access_token;break;
     }
     assert.ok(token);
