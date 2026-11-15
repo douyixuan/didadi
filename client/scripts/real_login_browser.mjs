@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import {readFile, mkdir, writeFile} from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
 import {chromium, expect} from '@playwright/test';
+import {verifyRoomIsolation} from './room_isolation_acceptance.mjs';
 
 function option(name, fallback = null) {
   const index = process.argv.indexOf(name);
@@ -371,6 +372,8 @@ try {
     {room: privateRoom.data.room_id});
   assert.equal(departedAgain.status, 403, 'Repeated leave cannot reacquire membership');
   console.log('PASS REAL ROOM #70: browser room leave, message eviction, non-member denial, denied stale reads');
+
+  await verifyRoomIsolation({alice,bob,accounts,request:browserRequest,evidenceDir});
 
   // Wrong passwords are genuinely rejected; current-device logout must not
   // invalidate another browser's real Matrix session or shared Git document.
