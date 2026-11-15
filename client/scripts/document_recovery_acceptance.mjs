@@ -121,9 +121,11 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     await bob.page.getByRole('button',{name:/Previous version/}).first().click();
     await expect(bob.page.getByText('You’re viewing an earlier version.',{exact:false})).toBeVisible();
     await expect(bob.page.locator('.markdown-body')).toContainText(winner);
-    await bob.page.getByRole('button',{name:'Back to latest',exact:true}).click();
+    await bob.page.screenshot({path:evidenceDir+'/p071-history-return-control.png',fullPage:true});
+    await bob.page.getByRole('complementary',{name:'Version history'}).getByRole('button',{name:'Back to latest',exact:true}).click();
     await expect(bob.page.locator('.markdown-body')).toContainText(resolved);
-    await bob.page.getByRole('button',{name:'Close history',exact:true}).click();
+    await expect(bob.page.getByRole('complementary',{name:'Version history'})).toHaveCount(0);
+    await bob.page.screenshot({path:evidenceDir+'/p071-history-return-accessible.png',fullPage:true});
     // Actual selected message -> Git document with a native source permalink.
     await bob.page.goto('/?room='+encodeURIComponent(room));
     const panel=bob.page.locator('.collaboration-panel');

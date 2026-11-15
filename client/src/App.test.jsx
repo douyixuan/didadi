@@ -866,3 +866,16 @@ it('reopens the confirmed selected document after a frontend remount',async()=>{
  const first=render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Team handbook'});fireEvent.click(screen.getByRole('button',{name:'Notes.md',exact:true}));await screen.findByRole('heading',{name:'Named notes'});first.unmount();api.document.mockClear();
  render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Named notes'});expect(api.document.mock.calls.every(call=>call[2]==='Notes.md')).toBe(true);
 });
+
+it('keeps return-to-latest inside the open history panel and closes it on return',async()=>{
+ const api=fixture();api.document.mockImplementation(async(_room,commit)=>({...doc,content:commit?'# Earlier version':doc.content}));
+ render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Team handbook'});
+ fireEvent.click(screen.getByRole('button',{name:'Version history',exact:true}));
+ fireEvent.click(await screen.findByRole('button',{name:/Previous version/}));
+ await screen.findByRole('heading',{name:'Earlier version'});
+ const history=screen.getByRole('complementary',{name:'Version history'});
+ const back=screen.getByRole('button',{name:'Back to latest',exact:true});expect(history).toContainElement(back);
+ fireEvent.click(back);
+ await waitFor(()=>expect(screen.queryByRole('complementary',{name:'Version history'})).not.toBeInTheDocument());
+ await screen.findByRole('heading',{name:'Team handbook'});
+});
