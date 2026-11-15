@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {execFileSync} from 'node:child_process';
-import {randomUUID} from 'node:crypto';
+import {randomUUID,randomBytes} from 'node:crypto';
 import {chromium,expect} from '@playwright/test';
 function option(key){const i=process.argv.indexOf(key);if(i<0||i+1>=process.argv.length)throw new Error('Missing '+key);return process.argv[i+1];}
 const base=option('--url'),phase=option('--phase'),evidence=option('--evidence-dir');
@@ -59,6 +59,10 @@ try{
     // The copied live cookies succeeded without any /api/auth/login request.
     const stranger=await browser.newContext({baseURL:base});contexts.push(stranger);
     const response=await stranger.request.get('/api/session');assert.equal(response.status(),401);
+    const unknownHandle=randomBytes(32).toString('base64url');assert.match(unknownHandle,/^[a-zA-Z0-9_-]{43}$/);
+    assert.ok(!prior.cookies.flat().some(cookie=>cookie.name==='didadi_session'&&cookie.value===unknownHandle));
+    await stranger.addCookies([{name:'didadi_session',value:unknownHandle,url:base,httpOnly:true,sameSite:'Strict'}]);
+    const unknown=await stranger.request.get('/api/session');assert.equal(unknown.status(),401);
     await alice.page.screenshot({path:evidence+'/p072-restored-alice.png',fullPage:true});
     await bob.page.screenshot({path:evidence+'/p072-restored-bob.png',fullPage:true});
     console.log('PASS REAL P072 independent restore: two original device cookies, immutable A/B, original message, private-room denial and unknown-session denial');

@@ -1,6 +1,6 @@
 # P0 TDD 与 CI 验收契约（#85）
 
-> 2026-11-04 核验基线：`main` `53ec637ae39134b04df613571be9bc116a255a5a`；P0 [#85](https://github.com/douyixuan/didadi/issues/85) 当前 **1/4**（[#69](https://github.com/douyixuan/didadi/issues/69) 已验收、[#70](https://github.com/douyixuan/didadi/issues/70)–[#72](https://github.com/douyixuan/didadi/issues/72) 未验收）。以下定义的是测试与交付规则，不是对尚未实现的功能作成功声明。
+> 历史核验基线（2026-11-04）：`main` `53ec637ae39134b04df613571be9bc116a255a5a`；P0 [#85](https://github.com/douyixuan/didadi/issues/85) 当前 **1/4**（[#69](https://github.com/douyixuan/didadi/issues/69) 已验收、[#70](https://github.com/douyixuan/didadi/issues/70)–[#72](https://github.com/douyixuan/didadi/issues/72) 未验收）。以下定义的是测试与交付规则，不是对尚未实现的功能作成功声明。
 
 ## 现有能力与缺口
 
@@ -33,7 +33,7 @@
 | **#72 RELEASE-02** | 后端/Synapse/存储重启后会话和文档不能丢失 | 保留卷重启，对照 Matrix 身份、权限、任务/Git 版本与浏览器刷新；恢复从独立备份需另有真实记录 | 真实 Docker lifecycle + backup/restore 检查 |
 | **#72 RELEASE-03** | E2E 失败不能只留下绿色离线 CI，不能上传明文凭据 | PR head / main 两侧真实集成状态、失败截图、日志、独立 Git SHA、无密码 token 的可下载证据 | GitHub Actions status + allowlisted artifacts |
 
-### CI 三道门（本规划 PR 生效后）
+### 历史 CI 三道门（当前规则见末节）
 
 1. **Fast / 每次 PR、push**：`Test / git-docs-spike`（隔离 Python tests、注入 HTTP、compileall）；`Test / react-client`（受网络守卫的 Vitest、脚本语法、实际 Vite production build）。任何失败阻止本次验收；**这些不是现实 E2E**。
 2. **Real / 可信同仓库代码 PR + 相关 main push**：`Real Matrix integration / matrix-smoke`，使用 GitHub ephemeral Docker Compose + 真 Synapse/PG + 浏览器 + Git。针对 fork PR 不自动跑敏感的实集成工作流；需经信任/授权后在维护者分支执行。触发路径为 client/src/scripts/tests/deploy/compose/运行依赖与 workflow 变更；非功能文档变动不触发。**#70/#71 的真实测试新增后必须加入此 job 并实际运行**；目前只覆盖已有 #69 端到端和旧兼容 smoke。
@@ -48,7 +48,7 @@
 
 ### ddd 每日执行
 
-每日从 #85 第一个未通过的子任务（目前 **#70**）读取需求；先添加一条失败测试并记录 Red，做最小修改到 Green，再核验 offline + real + main。#71 和 #72 同理。将测试 ID 对应到 PR 与子 Issue；更新 #85 的勾选与叶子数只在完整验收后进行。不为测试计划本身增加叶子。
+每日从 #85 第一个未通过的子任务读取需求，当前为 **#72**。#69–#71 已有完整主线验收，不重复实现。先记录可复现 Red，最小修复到 Green，再核验 offline + real + main。测试 ID 对应原 PR/Issue，完整验收后才勾叶，不为计划本身增加叶子。
 
 
 ## #72 clean-room 与门禁候选
