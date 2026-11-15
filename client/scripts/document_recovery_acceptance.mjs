@@ -36,10 +36,11 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     await editor(page).fill(text);
     await expect(page.getByText('Unsaved draft kept on this browser only.',{exact:false})).toBeVisible({timeout:30000});
   }
-  async function save(page,status=200){
+  async function save(page,status=200,expectedBase){
     const response=page.waitForResponse(r=>new URL(r.url()).pathname.startsWith('/api/documents/')&&r.request().method()==='PUT');
     await page.getByRole('button',{name:'Save changes',exact:true}).click();
     const result=await response;assert.equal(result.status(),status);
+    if(expectedBase)assert.equal(result.request().postDataJSON().base_blob,expectedBase);
     if(status===200)await expect(page.locator('.document-statusbar')).toContainText('All changes saved',{timeout:30000});
     return result.json();
   }
@@ -62,11 +63,11 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     await bob.page.reload();await open(alice.page,a);await open(bob.page,a);
     const common=(await read(bob.page,a)).data;
     await edit(alice.page,winner);await edit(bob.page,loser);
-    await save(alice.page);
+    await save(alice.page,200,common.blob);
     const winnerDoc=(await read(alice.page,a)).data;
     const beforeConflict=await history(alice.page,a);
     assert.notEqual(common.blob,winnerDoc.blob);
-    const failed=await save(bob.page,409);assert.equal(failed.status,'conflict');
+    const failed=await save(bob.page,409,common.blob);assert.equal(failed.status,'conflict');
     await expect(bob.page.getByText('This document has a newer version',{exact:true})).toBeVisible();
     await expect(editor(bob.page)).toContainText(loser);
     assert.deepEqual((await read(alice.page,a)).data,winnerDoc);
@@ -114,6 +115,36 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     const file=await download,stream=await file.createReadStream();const chunks=[];for await(const chunk of stream)chunks.push(chunk);
     assert.equal(Buffer.concat(chunks).toString('utf8'),final.content);
     await bob.page.screenshot({path:evidenceDir+'/p071-moved-reopened-exported.png',fullPage:true});
+    // Existing fixed-version UI remains usable for A without changing B.
+    await open(bob.page,a);
+    await bob.page.getByRole('button',{name:'Version history',exact:true}).click();
+    await bob.page.getByRole('button',{name:/Previous version/}).first().click();
+    await expect(bob.page.getByText('You’re viewing an earlier version.',{exact:false})).toBeVisible();
+    await expect(bob.page.locator('.markdown-body')).toContainText(winner);
+    await bob.page.getByRole('button',{name:'Back to latest',exact:true}).click();
+    await expect(bob.page.locator('.markdown-body')).toContainText(resolved);
+    await bob.page.getByRole('button',{name:'Close history',exact:true}).click();
+    // Actual selected message -> Git document with a native source permalink.
+    await bob.page.goto('/?room='+encodeURIComponent(room));
+    const panel=bob.page.locator('.collaboration-panel');
+    if(await panel.evaluate(node=>node.classList.contains('panel-closed')))await bob.page.getByRole('button',{name:'Discussion',exact:true}).click();
+    const sourceText='P071 source message '+stamp;
+    const sent=bob.page.waitForResponse(r=>new URL(r.url()).pathname.includes('/send/m.room.message/')&&r.request().method()==='PUT');
+    await bob.page.locator('.composer textarea').fill(sourceText);
+    await bob.page.locator('.composer').getByRole('button',{name:/^Send/}).click();
+    const sentResponse=await sent;assert.equal(sentResponse.status(),200);const event=(await sentResponse.json()).event_id;
+    await bob.page.getByLabel('Select message '+event,{exact:true}).check();
+    const copied='p071/'+stamp+'/From-message.md';
+    await bob.page.getByLabel('Document path from messages').fill(copied);
+    await bob.page.getByRole('button',{name:'Create document from messages',exact:true}).click();
+    await expect(bob.page.locator('.page-eyebrow')).toContainText(copied,{timeout:30000});
+    const source=(await read(bob.page,copied)).data;
+    assert.ok(source.content.includes(sourceText));
+    const sourceLink=bob.page.locator('.markdown-body').getByRole('link',{name:'Open source message',exact:true});
+    assert.equal(decodeURIComponent(await sourceLink.getAttribute('href')),'https://matrix.to/#/'+room+'/'+event);
+    const original=await request(bob.page,'/matrix/_matrix/client/v3/rooms/'+encodeURIComponent(room)+'/event/'+encodeURIComponent(event));
+    assert.equal(original.status,200);assert.equal(original.data.content.body,sourceText);
+    await bob.page.screenshot({path:evidenceDir+'/p071-message-document-source.png',fullPage:true});
     const proofs=[{path:a,commit:resolvedA.commit,blob:resolvedA.blob,marker:resolved},{path:moved,commit:final.commit,blob:final.blob,marker:retryB}];
     const receipts=await request(bob.page,'/matrix/_matrix/client/v3/rooms/'+encodeURIComponent(room)+'/messages?dir=b');
     assert.equal(receipts.status,200);
