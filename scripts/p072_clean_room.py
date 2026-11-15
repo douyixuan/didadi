@@ -1,5 +1,6 @@
 """Explicit, ephemeral P0 acceptance. Importing this module starts no services."""
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -230,6 +231,22 @@ class CleanRoom:
         self.stages[-1]['operation']='verify-original-device-cookies-and-data'
         self.start_client();self.browser('p072_restore_browser.mjs','--phase','verify')
 
+    def verify_reuse_refusal(self):
+        self.stop_client()
+        def fingerprint():
+            refs=self.command(['git','--git-dir=.local/documents.git','for-each-ref'],capture=True).encode()
+            return hashlib.sha256(refs+(self.local/'p072-session-private.json').read_bytes()+(self.local/'p072-owner.json').read_bytes()).digest()
+        before=fingerprint()
+        result=subprocess.run([sys.executable,'-m','scripts.p072_clean_room','--allow-real-matrix',
+            '--approval-reference','negative-reuse-check'],cwd=self.root,env=self.env,capture_output=True,timeout=30)
+        if result.returncode!=1:raise Failure(1,'Acceptance failed')
+        try:refusal=json.loads(result.stdout.decode().splitlines()[-1])
+        except (ValueError,IndexError):raise Failure() from None
+        if refusal.get('reason')!='Use a fresh checkout without .local, node_modules or dist' or refusal.get('exit_code')!=2 or refusal.get('passed') is not False or refusal.get('version')!=self.version or fingerprint()!=before:
+            raise Failure()
+        self.stages[-1]['negative_command_exit']=1
+        self.stages[-1]['state_unchanged']=True
+
     def cleanup(self):
         self.stop_client()
         # All names are random, checked absent before creating, and owned by this run.
@@ -244,6 +261,7 @@ class CleanRoom:
             self.stage('retained-volume-restart',self.retained_restart)
             self.stage('real-http-and-two-browser-documents',self.real_flow)
             self.stage('independent-four-volume-and-host-restore',self.backup_restore)
+            self.stage('reject-state-reuse-without-side-effects',self.verify_reuse_refusal)
             self.passed=True
         finally:
             if self.created:

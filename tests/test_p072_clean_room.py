@@ -41,6 +41,20 @@ class CleanRoomTests(unittest.TestCase):
         self.assertNotIn('synthetic-private-cookie',str(result))
         self.assertNotIn('/private',str(result))
 
+    def test_real_refusal_verifier_requires_failure_and_unchanged_owned_state(self):
+        import json
+        import subprocess
+        with tempfile.TemporaryDirectory() as temporary:
+            runner=CleanRoom(Path(temporary),'a'*40);runner.local.mkdir()
+            for name in ('p072-session-private.json','p072-owner.json'):(runner.local/name).write_text('synthetic private fixture')
+            report={'reason':'Use a fresh checkout without .local, node_modules or dist','exit_code':2,'passed':False,'version':'a'*40}
+            result=subprocess.CompletedProcess([],1,stdout=(json.dumps(report)+'\n').encode(),stderr=b'')
+            with patch.object(runner,'command',return_value='fixed refs'),patch('subprocess.run',return_value=result):
+                runner.stage('refusal',runner.verify_reuse_refusal)
+            self.assertTrue(runner.stages[-1]['state_unchanged'])
+            with patch.object(runner,'command',return_value='fixed refs'),patch('subprocess.run',return_value=subprocess.CompletedProcess([],0,stdout=b'',stderr=b'')):
+                with self.assertRaises(Failure):runner.stage('refusal',runner.verify_reuse_refusal)
+
     def test_volume_restore_rejects_links_and_escaping_paths(self):
         # Actual safe extraction runs in the isolated volume helper in real CI.
         script=volume_script('restore','config')
