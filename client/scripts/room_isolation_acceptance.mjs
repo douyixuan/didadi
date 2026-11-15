@@ -4,6 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {expect} from '@playwright/test';
 
 export async function verifyRoomIsolation({alice,bob,accounts,request,evidenceDir,matrix='http://127.0.0.1:8008'}) {
+  alice.page.setDefaultTimeout(30000);bob.page.setDefaultTimeout(30000);
   assert.match(matrix,/^http:\/\/(127\.0\.0\.1|localhost):\d+$/,'Only isolated loopback Matrix is allowed');
   const stamp=randomUUID().replaceAll('-',''),secret='P070private'+stamp,forbiddenBodies=[secret];
   const v3=room=>'/matrix/_matrix/client/v3/rooms/'+encodeURIComponent(room);
@@ -74,7 +75,7 @@ export async function verifyRoomIsolation({alice,bob,accounts,request,evidenceDi
     assert.ok(forbiddenBodies.every(body=>!JSON.stringify(result.data).includes(body)),'Denial exposed old content');
   }
   async function search(page,term) {
-    await page.getByRole('button',{name:'Search messages and documents',exact:true}).click();
+    await page.getByRole('button',{name:'Open full-text search',exact:true}).click();
     await page.getByRole('textbox',{name:'Search body text',exact:true}).fill(term);
     await page.getByRole('button',{name:'Search',exact:true}).click();
   }
