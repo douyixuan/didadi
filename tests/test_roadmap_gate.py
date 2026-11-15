@@ -124,6 +124,8 @@ class StableProductGateTests(unittest.TestCase):
             {'ROADMAP.md': roadmap.replace('- [ ] [多人文档协作]', '- [x] [多人文档协作]')},
             {'roadmap/README.md': original(root/'roadmap/README.md').replace('- 真实登录（待接入）', '')},
         ]
+        legacy_active=json.loads(json.dumps(config));legacy_active['features']={'fake':{'review':{'status':'passed','version':'not-a-sha'}}}
+        cases.append({'roadmap/_checks.json':json.dumps(legacy_active)})
         no_proof = json.loads(json.dumps(config)); no_proof['accepted'] = {}
         cases.append({'roadmap/_checks.json': json.dumps(no_proof)})
         bad_version = json.loads(json.dumps(config)); bad_version['accepted']['69']['version'] = 'a'*40

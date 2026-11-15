@@ -231,6 +231,8 @@ def scoped_evidence(root, reference):
 
 
 def validate_stable(root, config, require=None):
+    if 'features' in config:
+        raise ValueError('Stable products use accepted records; legacy feature metadata must remain archived')
     path = root / config['roadmap']
     leaves = tree(path)
     for line in path.read_text().splitlines():
