@@ -103,14 +103,20 @@ export async function verifyRoomIsolation({alice,bob,accounts,request,evidenceDi
   // Seed more than the 50-event page using the actor's normal room-authorized API.
   for(let n=0;n<53;n++)await text(alice.page,room,secret+' history '+n);
   const root=await text(alice.page,room,secret+' root');
-  await text(alice.page,room,secret+' reply',{'rel_type':'m.thread','event_id':root,'m.in_reply_to':{'event_id':root}});
+  const reply=await text(alice.page,room,secret+' reply',{'rel_type':'m.thread','event_id':root,'m.in_reply_to':{'event_id':root}});
   await select(alice.page,title);const filename='p070-'+stamp.slice(0,8)+'.txt';
   const file=await attachment(alice.page,filename);
   await select(bob.page,title);await expect(article(bob.page,root)).toBeVisible({timeout:30000});
+  await expect(article(bob.page,reply).getByLabel('Quoted message')).toContainText(secret,{timeout:30000});
+  await bob.page.getByRole('button',{name:'People',exact:true}).click();
+  const people=bob.page.getByRole('dialog',{name:'Room people'});
+  for(const [user] of accounts)await expect(people.locator('ul code').filter({hasText:user})).toBeVisible({timeout:30000});
+  await people.getByRole('button',{name:'Close people',exact:true}).click();
   const download=bob.page.waitForEvent('download');
   await bob.page.getByRole('button',{name:'Download '+filename,exact:true}).click();
   const stream=await (await download).createReadStream(),chunks=[];for await(const chunk of stream)chunks.push(chunk);
   assert.equal(Buffer.concat(chunks).toString(),'P070 synthetic attachment\n');
+  await bob.page.screenshot({path:evidenceDir+'/p070-authorized-room.png',fullPage:true});
   const safe=bob.session.initialRoom;
   const safeState=await request(bob.page,v3(safe)+'/state');
   assert.equal(safeState.status,200);
@@ -123,6 +129,11 @@ export async function verifyRoomIsolation({alice,bob,accounts,request,evidenceDi
   await chooseSafe();assert.equal(await older(),'delivered');
   await expect(bob.page.locator('.timeline')).not.toContainText(secret);
   await select(bob.page,title);
+  // Positive native pagination is verified as well as discarding a late old page.
+  await bob.page.getByRole('button',{name:'Load earlier messages',exact:true}).click();
+  await expect.poll(()=>bob.page.locator('.timeline article').count(),{timeout:30000}).toBeGreaterThan(50);
+  const ids=await bob.page.locator('.timeline article').evaluateAll(nodes=>nodes.map(node=>node.dataset.eventId));
+  assert.equal(new Set(ids).size,ids.length,'Native history pagination duplicated an event');
   const thread=await hold(bob.page,url=>decodeURIComponent(url.pathname)===decodeURIComponent(v1(room,root)),async()=>{
     await article(bob.page,root).getByRole('button',{name:'View thread',exact:true}).click();
   });
@@ -135,6 +146,11 @@ export async function verifyRoomIsolation({alice,bob,accounts,request,evidenceDi
   await denied(bob.page,'/api/attachments/download?'+new URLSearchParams({room:safe,event:file}));
   await select(bob.page,title);
   await expect.poll(async()=>{const result=await request(bob.page,'/api/search/messages',{room,query:secret,next_batch:null});return result.data.events?.length||0;},{timeout:45000}).toBeGreaterThan(0);
+  await search(bob.page,secret);
+  await expect(bob.page.locator('.search-results')).toContainText(secret,{timeout:30000});
+  await bob.page.screenshot({path:evidenceDir+'/p070-authorized-search.png',fullPage:true});
+  console.log('PASS REAL ROOM #70: genuine people/quote, byte-exact attachment, unique native pagination and visible search');
+  await bob.page.getByRole('button',{name:'Close search',exact:true}).click();
   // Authenticate the existing creator device before holding requests, so login throttling cannot time out the race probes.
   let token;const creatorLoginStarted=Date.now();
   try{
