@@ -113,7 +113,7 @@ export async function verifyRoomIsolation({alice,bob,accounts,request,evidenceDi
   const safeName=safeState.data.find(event=>event.type==='m.room.name')?.content.name;
   assert.ok(safeName,'A distinct authorized destination room is required');
   const chooseSafe=async()=>{await bob.page.locator('nav[aria-label="Rooms"] button.room').filter({hasText:safeName}).click();};
-  const older=await hold(bob.page,url=>decodeURIComponent(url.pathname)===decodeURIComponent(v3(room)+'/messages')&&url.searchParams.has('from'),async()=>{
+  const older=await hold(bob.page,url=>decodeURIComponent(url.pathname)===decodeURIComponent(v3(room)+'/messages')&&Boolean(url.searchParams.get('from')),async()=>{
     await bob.page.getByRole('button',{name:'Load earlier messages',exact:true}).click();
   });
   await chooseSafe();assert.equal(await older(),'delivered');
@@ -131,15 +131,7 @@ export async function verifyRoomIsolation({alice,bob,accounts,request,evidenceDi
   await denied(bob.page,'/api/attachments/download?'+new URLSearchParams({room:safe,event:file}));
   await select(bob.page,title);
   await expect.poll(async()=>{const result=await request(bob.page,'/api/search/messages',{room,query:secret,next_batch:null});return result.data.events?.length||0;},{timeout:45000}).toBeGreaterThan(0);
-  await article(bob.page,root).getByRole('button',{name:'Quote',exact:true}).click();
-  const kickedOlder=await hold(bob.page,url=>decodeURIComponent(url.pathname)===decodeURIComponent(v3(room)+'/messages')&&url.searchParams.has('from'),async()=>{
-    await bob.page.getByRole('button',{name:'Load earlier messages',exact:true}).click();
-  });
-  const kickedThread=await hold(bob.page,url=>decodeURIComponent(url.pathname)===decodeURIComponent(v1(room,root)),async()=>{
-    await article(bob.page,root).getByRole('button',{name:'View thread',exact:true}).click();
-  });
-  const oldSearch=await hold(bob.page,url=>url.pathname==='/api/search/messages',()=>search(bob.page,secret));
-  // Native Synapse kick with an extra ephemeral *device* for the existing creator; no new user.
+  // Authenticate the existing creator device before holding requests, so login throttling cannot time out the race probes.
   let token;
   try{
     for(let attempt=0;attempt<4;attempt++){
@@ -149,13 +141,18 @@ export async function verifyRoomIsolation({alice,bob,accounts,request,evidenceDi
       assert.equal(response.status,200,'Isolated creator device login failed');token=data.access_token;break;
     }
     assert.ok(token);
+  await article(bob.page,root).getByRole('button',{name:'Quote',exact:true}).click();
+  const kickedOlder=await hold(bob.page,url=>decodeURIComponent(url.pathname)===decodeURIComponent(v3(room)+'/messages')&&Boolean(url.searchParams.get('from')),async()=>{
+    await bob.page.getByRole('button',{name:'Load earlier messages',exact:true}).click();
+  });
+  const kickedThread=await hold(bob.page,url=>decodeURIComponent(url.pathname)===decodeURIComponent(v1(room,root)),async()=>{
+    await article(bob.page,root).getByRole('button',{name:'View thread',exact:true}).click();
+  });
+  const oldSearch=await hold(bob.page,url=>url.pathname==='/api/search/messages',()=>search(bob.page,secret));
     const response=await fetch(matrix+'/_matrix/client/v3/rooms/'+encodeURIComponent(room)+'/kick',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify({user_id:accounts[1][0],reason:'Isolated P070 acceptance'})});
     assert.equal(response.status,200,'Real Synapse creator kick failed');
     const membership=await fetch(matrix+'/_matrix/client/v3/rooms/'+encodeURIComponent(room)+'/state/m.room.member/'+encodeURIComponent(accounts[1][0]),{headers:{'Authorization':'Bearer '+token}});
     assert.equal(membership.status,200);assert.equal((await membership.json()).membership,'leave');
-  }finally{
-    if(token)await fetch(matrix+'/_matrix/client/v3/logout',{method:'POST',headers:{'Authorization':'Bearer '+token},body:'{}'});
-  }
   await expect(bob.page.locator('nav[aria-label="Rooms"] button.room').filter({hasText:title})).toHaveCount(0,{timeout:30000});
   assert.equal(await kickedOlder(),'delivered');assert.equal(await kickedThread(),'delivered');await oldSearch();await expect(bob.page.getByRole('dialog',{name:'Search messages and document text'})).toHaveCount(0);
   await expect(bob.page.locator('body')).not.toContainText(secret);
@@ -165,6 +162,10 @@ export async function verifyRoomIsolation({alice,bob,accounts,request,evidenceDi
   await denied(bob.page,v3(room)+'/send/m.room.message/'+randomUUID(),{msgtype:'m.text',body:'denied after kick','m.relates_to':{'m.in_reply_to':{'event_id':root}}},'PUT');
   await bob.page.screenshot({path:evidenceDir+'/p070-real-kick-eviction.png',fullPage:true});
   console.log('PASS REAL ROOM #70: actual kick, stale search eviction, denied history/thread/quote/file/search');
+
+  }finally{
+    if(token){const logout=await fetch(matrix+'/_matrix/client/v3/logout',{method:'POST',headers:{'Authorization':'Bearer '+token},body:'{}'});assert.equal(logout.status,200,'Creator test device logout failed');}
+  }
 
   // Same page/profile switches Bob -> Alice -> Bob. An old successful search is held across logout.
   const privateTitle='P070 identity '+stamp.slice(0,8),privateRoom=await create(bob.page,privateTitle);
