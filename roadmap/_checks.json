@@ -130,6 +130,16 @@
       "real_ci": "https://github.com/douyixuan/didadi/actions/runs/43685215402",
       "main_ci": "https://github.com/douyixuan/didadi/actions/runs/43686279507",
       "scope": "loopback-only synthetic accounts with real Synapse/API/Git/Chromium; no public Beta"
+    },
+    "71": {
+      "version": "b9d13cd5067b022bd5ce179620b1e5d82e2d5e83",
+      "main": "8f9923b6810e63c0561c266bb6141fdecdf26ae5",
+      "kind": "actual-user-flow",
+      "evidence": "docs/MVP_ACCEPTANCE.md#多人文档协作真实验收",
+      "record": "https://github.com/douyixuan/didadi/issues/71#issuecomment-6894570132",
+      "real_ci": "https://github.com/douyixuan/didadi/actions/runs/43713648426",
+      "main_ci": "https://github.com/douyixuan/didadi/actions/runs/43714823601",
+      "scope": "loopback-only synthetic accounts with real Synapse/API/Git/Chromium and 390px browser QA; no physical iOS or public backend"
     }
   }
 }

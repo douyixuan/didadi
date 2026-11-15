@@ -261,7 +261,7 @@ def validate_stable(root, config, require=None):
         if not checked:
             continue
         proof = config.get('accepted', {}).get(str(number))
-        if number not in {69, 70} or not proof:
+        if number not in {69, 70, 71} or not proof:
             raise ValueError('No verified stable product acceptance for this checked issue')
         if proof.get('kind') != 'actual-user-flow' or not proof.get('scope'):
             raise ValueError('Real user-flow acceptance and bounded scope required')
