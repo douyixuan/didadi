@@ -186,6 +186,12 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     const newerNote='P071 newer source version '+stamp;await editor(bob.page).pressSequentially(newerNote);
     await expect(bob.page.getByText('Unsaved draft kept on this browser only.',{exact:false})).toBeVisible({timeout:30000});await save(bob.page);
     await bob.page.getByRole('button',{name:'Read',exact:true}).click();await expect(sourceLinks).toHaveCount(2);
+    const newerSource=(await read(bob.page,copied)).data;
+    assert.ok(newerSource.content.includes(newerNote));assert.notEqual(newerSource.blob,source.blob);
+    // Crepe inserted this text in the first heading; Read renders that heading
+    // as the document title, outside markdown-body. Check the actual saved text
+    // and its matching UI region rather than mistaking title layout for loss.
+    await expect(bob.page.locator('.document-title')).toContainText(newerNote);
     await bob.page.getByRole('button',{name:'Version history',exact:true}).click();
     let ready,release,finished,entered=false;const held=new Promise(resolve=>{ready=resolve}),gate=new Promise(resolve=>{release=resolve}),done=new Promise(resolve=>{finished=resolve});
     const versionPattern=url=>url.pathname==='/api/document'&&url.searchParams.get('path')===copied&&url.searchParams.get('commit')===source.commit;
@@ -206,7 +212,8 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     }catch(error){primaryFailure=error;throw error;}
     finally{release();const failure=entered?await done:null;await bob.page.unroute(versionPattern);if(failure&&!primaryFailure)throw failure;}
     await bob.page.getByRole('complementary',{name:'Version history'}).getByRole('button',{name:'Back to latest',exact:true}).click();
-    await expect(bob.page.locator('.markdown-body')).toContainText(newerNote,{timeout:30000});
+    await expect(bob.page.locator('.document-title')).toContainText(newerNote,{timeout:30000});
+    const latestSource=(await read(bob.page,copied)).data;assert.equal(latestSource.blob,newerSource.blob);assert.equal(latestSource.content,newerSource.content);
     // Normal clicks stay in this app. Block the portable external fallback so
     // a regression never contacts matrix.to. Root and reply return to context.
     const joined=await request(bob.page,'/matrix/_matrix/client/v3/joined_rooms');assert.equal(joined.status,200);
