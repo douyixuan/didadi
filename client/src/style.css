@@ -72,3 +72,14 @@ button:focus-visible,summary:focus-visible{outline:2px solid #41485f;outline-off
 
 /* Keep the historical return action in front of the open history pane. */
 .history-return-latest{width:100%;min-height:44px;margin-bottom:12px}
+
+/* History paths remain readable inside the narrow drawer. */
+.history-row>div{min-width:0;flex:1}.history-row small{display:block;margin-top:5px;font-size:12px;line-height:1.4;color:#596175;overflow-wrap:anywhere}.history-page-action{width:100%;min-height:44px;margin-top:8px;border:1px solid #e0e2e9;font-size:14px}
+
+/* Keep navigation available while only the version list scrolls. */
+.history-panel{display:flex;flex-direction:column;overflow:hidden}.history-panel header{flex-shrink:0}.history-panel header>button{width:44px;height:44px;flex-shrink:0;color:#596175}.history-panel>p{flex-shrink:0;margin-bottom:12px}.history-return-latest{flex-shrink:0;font-size:14px}.history-versions{min-height:0;flex:1;overflow:auto;overscroll-behavior:contain}
+
+/* Compact navigation prioritizes the document; secondary tools are disclosed. */
+.breadcrumbs{min-width:0;flex:1}.breadcrumbs strong{min-width:0;overflow:hidden;text-overflow:ellipsis}.header-actions{flex-shrink:0}.mobile-workspace-tools{position:relative}.mobile-tools-popover{position:absolute;top:calc(100% + 8px);right:0;z-index:80;width:224px;max-width:90vw;padding:8px;border:1px solid #dddfe8;border-radius:12px;background:white;box-shadow:0 8px 30px #25273924}.mobile-tools-popover>button{display:flex;justify-content:flex-start;width:100%;min-height:44px;padding:8px 12px;font-size:14px}.header-compact{padding:0 8px;gap:4px}.header-compact .breadcrumbs{margin:0;font-size:14px;gap:3px}.header-compact .breadcrumbs strong{font-size:14px}.header-compact .header-actions{gap:0}.header-compact .header-actions>button,.header-compact .mobile-workspace-tools>button,.header-compact .mobile-nav{min-width:44px;min-height:44px;padding:6px}.header-compact .mode-switch{padding:0;background:transparent}.header-compact .mode-switch>button{min-width:44px;min-height:44px;font-size:14px;padding:6px}
+
+@media(max-width:600px){.document-bottom{gap:8px;font-size:12px}.document-bottom>span{flex-basis:100%;min-width:0;overflow-wrap:anywhere;font-size:12px}.document-bottom>button{min-height:44px;min-width:44px;padding:8px 12px;font-size:14px;border:1px solid #e0e2e9}}

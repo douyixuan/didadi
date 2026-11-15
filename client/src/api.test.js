@@ -49,3 +49,13 @@ it('keeps room summaries and retries unknown unread counts after unread service 
  globalThis.fetch=vi.fn(async url=>String(url)==='/api/session'?{ok:true,json:async()=>({csrf:'test',userId:'@a:test',liveMatrix:true})}:fail?{ok:false,status:503,json:async()=>({error:'Unavailable'})}:{ok:true,json:async()=>({unread:{'!safe':3}})});
  try{const api=await connect();expect((await api.rooms())[0]).toMatchObject({id:'!safe',unread:null});fail=false;expect((await api.rooms())[0].unread).toBe(3);}finally{globalThis.fetch=original;vi.mocked(createClient).mockReset();}
 });
+
+it('requests human history pages with encoded path and cursor using the current session',async()=>{
+ const previous=globalThis.fetch;vi.mocked(createClient).mockReturnValue({});
+ const page={head:'a'.repeat(40),versions:[{commit:'b'.repeat(40),path:'Old/A.md'}],next_cursor:null};
+ globalThis.fetch=vi.fn(async url=>({ok:true,json:async()=>String(url)==='/api/session'?{csrf:'test',userId:'@a:test',liveMatrix:true}:page}));
+ try{const api=await connect();expect(await api.historyPage('!room:test','设计/A.md','cursor&not-a-grant')).toEqual(page);
+  const url=new URL(globalThis.fetch.mock.calls.at(-1)[0],'http://localhost');
+  expect(url.pathname).toBe('/api/history');expect(Object.fromEntries(url.searchParams)).toEqual({room:'!room:test',path:'设计/A.md',versions:'1',cursor:'cursor&not-a-grant'});
+ }finally{globalThis.fetch=previous;vi.mocked(createClient).mockReset();}
+});

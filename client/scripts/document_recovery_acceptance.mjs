@@ -104,6 +104,9 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     await expect(bob.page.locator('body')).not.toContainText(loser);
     await save(bob.page);
     await bob.page.screenshot({path:evidenceDir+'/p071-recovered-network-draft.png',fullPage:true});
+    // Genuine UI versions exceed one bounded history page. Keep the recovered
+    // content marker so restart/export checks still refer to this document.
+    for(let index=0;index<9;index++){await edit(bob.page,retryB+'\n\nHistory checkpoint '+index);await save(bob.page);}
     // Confirmed move updates selection; reload must reopen the new path.
     await bob.page.getByRole('button',{name:'Read',exact:true}).click();
     await bob.page.getByLabel('Move document to path').fill(moved);
@@ -117,6 +120,46 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     const file=await download,stream=await file.createReadStream();const chunks=[];for await(const chunk of stream)chunks.push(chunk);
     assert.equal(Buffer.concat(chunks).toString('utf8'),final.content);
     await bob.page.screenshot({path:evidenceDir+'/p071-moved-reopened-exported.png',fullPage:true});
+    // Follow pre-move versions from the new document. A failed page keeps the
+    // current content; retry uses the same non-authorizing opaque position.
+    const originalBCommit=bHistory.data.commits[0];
+    await bob.page.getByRole('button',{name:'Version history',exact:true}).click();
+    const historyPanel=bob.page.getByRole('complementary',{name:'Version history'});
+    await expect(historyPanel.locator('.history-row')).toHaveCount(8,{timeout:30000});
+    const pagePattern=url=>url.pathname==='/api/history'&&url.searchParams.get('path')===moved&&url.searchParams.has('cursor');
+    let failedCursor;await bob.page.route(pagePattern,route=>{failedCursor=new URL(route.request().url()).searchParams.get('cursor');return route.abort('failed');});
+    await historyPanel.getByRole('button',{name:'Load earlier versions',exact:true}).click();
+    await expect(historyPanel.getByRole('alert')).toBeVisible();await expect(bob.page.locator('.markdown-body')).toContainText(retryB);
+    await bob.page.unroute(pagePattern);
+    const retriedPage=bob.page.waitForResponse(response=>pagePattern(new URL(response.url())));
+    await historyPanel.getByRole('button',{name:'Retry earlier versions',exact:true}).click();
+    const pageResponse=await retriedPage;assert.equal(pageResponse.status(),200);assert.equal(new URL(pageResponse.url()).searchParams.get('cursor'),failedCursor);
+    const older=(await pageResponse.json()).versions;assert.ok(older.some(item=>item.commit===originalBCommit&&item.path===b));assert.ok(older.every(item=>item.path!==a));
+    const originalRow=historyPanel.locator('.history-row').filter({hasText:originalBCommit.slice(0,10)});await expect(originalRow).toHaveCount(1);
+    await expect(originalRow).toContainText('At '+b);await originalRow.click();
+    await expect(bob.page.locator('.markdown-body')).toContainText(stableB,{timeout:30000});await expect(bob.page.locator('.page-eyebrow')).toContainText(moved);
+    await bob.page.screenshot({path:evidenceDir+'/p071-pre-move-paged-history.png',fullPage:true});
+    const collaboration=bob.page.locator('.collaboration-panel');const panelWasOpen=await collaboration.evaluate(node=>!node.classList.contains('panel-closed'));
+    if(panelWasOpen)await bob.page.getByRole('button',{name:'Discussion',exact:true}).click();
+    await bob.page.setViewportSize({width:390,height:844});
+    // Enter from the compact header itself, not by opening on desktop and
+    // merely shrinking the viewport after the action is already complete.
+    await historyPanel.getByRole('button',{name:'Close history',exact:true}).click();await expect(historyPanel).toHaveCount(0);
+    const mobileMore=bob.page.getByRole('button',{name:'More workspace actions',exact:true});await expect(mobileMore).toBeInViewport({ratio:1});await mobileMore.click();
+    const secondary=bob.page.getByRole('group',{name:'Workspace actions'});await expect(secondary.getByRole('button',{name:'People',exact:true})).toBeVisible();
+    await bob.page.screenshot({path:evidenceDir+'/p071-mobile-secondary-actions.png',fullPage:true});await bob.page.keyboard.press('Escape');await expect(secondary).toHaveCount(0);
+    const mobileHistory=bob.page.getByRole('button',{name:'Version history',exact:true});await expect(mobileHistory).toBeInViewport({ratio:1});const entry=await mobileHistory.boundingBox();assert.ok(entry&&entry.width>=44&&entry.height>=44);await mobileHistory.click();
+    await originalRow.scrollIntoViewIfNeeded();await expect(historyPanel.getByRole('button',{name:'Close history',exact:true})).toBeInViewport({ratio:1});
+    const returnAction=historyPanel.getByRole('button',{name:'Back to latest',exact:true});const target=await returnAction.boundingBox();assert.ok(target&&target.height>=44&&target.x>=0&&target.x+target.width<=390&&target.y>=0&&target.y+target.height<=844);await expect(returnAction).toBeInViewport({ratio:1});
+    await bob.page.screenshot({path:evidenceDir+'/p071-pre-move-paged-history-mobile.png',fullPage:true});
+    await returnAction.click();await expect(historyPanel).toHaveCount(0);await expect(bob.page.locator('.markdown-body')).toContainText('History checkpoint 8',{timeout:30000});
+    const mobileExport=bob.page.getByRole('button',{name:'Export Markdown',exact:true});await mobileExport.scrollIntoViewIfNeeded();const exportTarget=await mobileExport.boundingBox();assert.ok(exportTarget&&exportTarget.height>=44&&exportTarget.width>=44);
+    const mobileDownload=bob.page.waitForEvent('download');await mobileExport.click();const mobileFile=await mobileDownload,mobileStream=await mobileFile.createReadStream(),mobileChunks=[];for await(const chunk of mobileStream)mobileChunks.push(chunk);assert.equal(Buffer.concat(mobileChunks).toString('utf8'),final.content);
+    await bob.page.screenshot({path:evidenceDir+'/p071-history-mobile-returned-latest.png',fullPage:true});
+    await bob.page.setViewportSize({width:1280,height:720});if(panelWasOpen)await bob.page.getByRole('button',{name:'Discussion',exact:true}).click();
+    await expect(bob.page.getByRole('button',{name:moved+', current document',exact:true}).locator('small')).toHaveText(moved.slice(0,moved.lastIndexOf('/')));
+    assert.equal((await read(bob.page,moved)).data.blob,final.blob);assert.equal((await read(bob.page,a)).data.blob,resolvedA.blob);
+    console.log('PASS REAL DOCUMENT #71: bounded pre-move history, genuine failed-page retry, original-path read, current target preserved');
     // Existing fixed-version UI remains usable for A without changing B.
     await open(bob.page,a);
     await bob.page.getByRole('button',{name:'Version history',exact:true}).click();
@@ -128,6 +171,28 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     await expect(bob.page.locator('.markdown-body')).toContainText(resolved);
     await expect(bob.page.getByRole('complementary',{name:'Version history'})).toHaveCount(0);
     await bob.page.screenshot({path:evidenceDir+'/p071-history-return-accessible.png',fullPage:true});
+    // Search opens a fixed-version document on a new component. History must
+    // initialize on that entry path, not only after a latest-version read.
+    await bob.page.getByRole('button',{name:'Open full-text search',exact:true}).click();
+    const searchDialog=bob.page.getByRole('dialog');await searchDialog.getByRole('textbox',{name:'Search body text',exact:true}).fill(retryB);
+    const searchResponse=bob.page.waitForResponse(response=>new URL(response.url()).pathname==='/api/search/documents'&&response.request().postDataJSON()?.query===retryB);
+    await searchDialog.getByRole('button',{name:'Documents',exact:true}).click();const found=await searchResponse;assert.equal(found.status(),200);
+    let searchPage=await found.json();const searchCommit=searchPage.commit,seenSearchPages=new Set();
+    let matched=searchPage.results.find(item=>item.name===moved&&item.excerpt.includes(retryB));
+    while(!matched&&searchPage.next_path){
+      const after=searchPage.next_path;assert.ok(!seenSearchPages.has(after),'Search pagination must advance');seenSearchPages.add(after);assert.ok(seenSearchPages.size<=100,'Isolated acceptance fixture must stay bounded');
+      const nextSearch=bob.page.waitForResponse(response=>new URL(response.url()).pathname==='/api/search/documents'&&response.request().postDataJSON()?.query===retryB&&response.request().postDataJSON()?.after===after);
+      await searchDialog.getByRole('button',{name:'Load more results',exact:true}).click();const response=await nextSearch;assert.equal(response.status(),200);assert.equal(response.request().postDataJSON().commit,searchCommit);searchPage=await response.json();assert.equal(searchPage.commit,searchCommit);
+      matched=searchPage.results.find(item=>item.name===moved&&item.excerpt.includes(retryB));
+    }
+    assert.ok(matched,'Moved document must be found across the complete fixed-snapshot search');
+    await searchDialog.getByRole('button',{name:moved+' · line '+matched.line,exact:true}).click();await expect(searchDialog).toHaveCount(0);await expect(bob.page.locator('.page-eyebrow')).toContainText(moved,{timeout:30000});
+    await bob.page.getByRole('button',{name:'Version history',exact:true}).click();await expect(historyPanel.locator('.history-row')).toHaveCount(8,{timeout:30000});
+    await historyPanel.getByRole('button',{name:'Load earlier versions',exact:true}).click();await expect(originalRow).toHaveCount(1,{timeout:30000});await originalRow.scrollIntoViewIfNeeded();
+    await bob.page.screenshot({path:evidenceDir+'/p071-search-fixed-version-history.png',fullPage:true});
+    await historyPanel.getByRole('button',{name:'Back to latest',exact:true}).click();await expect(bob.page.locator('.markdown-body')).toContainText('History checkpoint 8',{timeout:30000});
+    assert.equal((await read(bob.page,moved)).data.blob,final.blob);
+    console.log('PASS REAL DOCUMENT #71: genuine body search fixed-version entry initializes paged pre-move history');
     // Actual selected message -> Git document with a native source permalink.
     await bob.page.goto('/?room='+encodeURIComponent(room));
     const panel=bob.page.locator('.collaboration-panel');
@@ -177,6 +242,23 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     const original=await request(bob.page,'/matrix/_matrix/client/v3/rooms/'+encodeURIComponent(room)+'/event/'+encodeURIComponent(event));
     assert.equal(original.status,200);assert.equal(original.data.content.body,sourceText);
     await bob.page.screenshot({path:evidenceDir+'/p071-message-document-source.png',fullPage:true});
+    // Existing non-overlap merge is part of the human collaboration review,
+    // not a newly implemented product feature. Edit distinct real block headings
+    // from the same immutable base in the two actual browser sessions.
+    await alice.page.reload();await open(alice.page,copied);
+    await alice.page.getByRole('button',{name:'Edit',exact:true}).click();
+    await bob.page.getByRole('button',{name:'Edit',exact:true}).click();
+    await editor(alice.page).locator('h2').filter({hasText:/^Message 1$/}).fill('Message 1 — Alice reviewed');
+    await editor(bob.page).locator('h2').filter({hasText:/^Message 2$/}).fill('Message 2 — Bob reviewed');
+    await expect(alice.page.getByText('Unsaved draft kept on this browser only.',{exact:false})).toBeVisible();
+    await expect(bob.page.getByText('Unsaved draft kept on this browser only.',{exact:false})).toBeVisible();
+    await save(alice.page,200,source.blob);const cleanMerge=await save(bob.page,200,source.blob);assert.equal(cleanMerge.merged,true);
+    const versionBase=(await read(bob.page,copied)).data;
+    assert.ok(versionBase.content.includes('Message 1 — Alice reviewed')&&versionBase.content.includes('Message 2 — Bob reviewed'));
+    assert.ok(versionBase.content.includes(sourceText)&&versionBase.content.includes(replyText));
+    await bob.page.getByRole('button',{name:'Read',exact:true}).click();await expect(sourceLinks).toHaveCount(2);
+    await bob.page.screenshot({path:evidenceDir+'/p071-clean-nonoverlap-merge.png',fullPage:true});
+    console.log('PASS REAL DOCUMENT #71: distinct block edits from one base preserve both users through actual non-overlap Git merge');
     // Keep source links in a second real Git version, then hold the older
     // authorized snapshot while clicking the still-visible old page's link.
     await bob.page.route('https://matrix.to/**',route=>route.abort());
@@ -187,16 +269,16 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     await expect(bob.page.getByText('Unsaved draft kept on this browser only.',{exact:false})).toBeVisible({timeout:30000});await save(bob.page);
     await bob.page.getByRole('button',{name:'Read',exact:true}).click();await expect(sourceLinks).toHaveCount(2);
     const newerSource=(await read(bob.page,copied)).data;
-    assert.ok(newerSource.content.includes(newerNote));assert.notEqual(newerSource.blob,source.blob);
+    assert.ok(newerSource.content.includes(newerNote));assert.notEqual(newerSource.blob,versionBase.blob);
     // The rich editor may insert at the heading or a body block depending on
     // its active selection. Both belong to the read surface. Verify canonical
     // Git text plus that entire surface, independent of presentation placement.
     await expect(bob.page.locator('.document-surface')).toContainText(newerNote);
     await bob.page.getByRole('button',{name:'Version history',exact:true}).click();
     let ready,release,finished,entered=false;const held=new Promise(resolve=>{ready=resolve}),gate=new Promise(resolve=>{release=resolve}),done=new Promise(resolve=>{finished=resolve});
-    const versionPattern=url=>url.pathname==='/api/document'&&url.searchParams.get('path')===copied&&url.searchParams.get('commit')===source.commit;
+    const versionPattern=url=>url.pathname==='/api/document'&&url.searchParams.get('path')===copied&&url.searchParams.get('commit')===versionBase.commit;
     await bob.page.route(versionPattern,async route=>{entered=true;let failure;
-      try{const response=await route.fetch();assert.equal(response.status(),200);const data=await response.json();assert.equal(data.commit,source.commit);assert.ok(data.content.includes(sourceText));ready(null);await gate;await route.fulfill({response});}
+      try{const response=await route.fetch();assert.equal(response.status(),200);const data=await response.json();assert.equal(data.commit,versionBase.commit);assert.ok(data.content.includes(sourceText));ready(null);await gate;await route.fulfill({response});}
       catch(error){failure=error;ready(error);await route.abort().catch(()=>{});}finally{finished(failure);}
     });
     let primaryFailure;

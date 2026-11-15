@@ -114,6 +114,7 @@ export async function connect() {
     moveDocument:(room,request)=>api('/api/documents/move',{room,...request}),
     createDocument:(room,name,operation)=>api('/api/documents',{room,name,operation,content:''}),
     document:(room, commit,name='demo.md')=>api('/api/document?room='+encodeURIComponent(room)+(commit?'&commit='+encodeURIComponent(commit):'')+'&path='+encodeURIComponent(name)),
+    historyPage:(room,name='demo.md',cursor=null)=>api('/api/history?'+new URLSearchParams({room,path:name,versions:'1',...(cursor?{cursor}:{})})),
     history:(room,name='demo.md')=>api('/api/history?room='+encodeURIComponent(room)+'&path='+encodeURIComponent(name)),
     task:(room,id)=>api('/api/task?room='+encodeURIComponent(room)+'&id='+encodeURIComponent(id)),
     cancel:(room,id)=>api('/api/task/cancel',{room,id}),

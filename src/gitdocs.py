@@ -51,6 +51,7 @@ class GitDocs:
 
     def __init__(self, root, remote=None):
         self.root = Path(root).absolute()
+        self._history_cursors = {}  # Bounded, disposable Git-derived paging positions; not grants.
         if self.root.is_symlink():
             raise InvalidPath('repository root is a symlink')
         self.root.mkdir(parents=True, exist_ok=True)
@@ -231,6 +232,71 @@ class GitDocs:
                 return []
             return self._git('log', '-' + str(min(max(int(limit), 1), 20)), '--format=%H',
                              self.branch, '--', name).splitlines()
+
+    def history_page(self, name, cursor=None, limit=8):
+        """Human workspace history. Git supplies each immutable path, not an alias grant.
+
+        Follow byte-identical renames made by move(), stop at this incarnation's
+        creation, and pin pagination to a canonical head. Legacy/agent history
+        and snapshot authorization semantics remain unchanged.
+        """
+        self._name(name)
+        if type(limit) is not int or not 1 <= limit <= 20:
+            raise ValueError('history page size must be between 1 and 20')
+        with self._locked():
+            if cursor is None:
+                self._sync()
+            current = self._ref(self.branch)
+            head, start, path, creation = current, current, name, None
+            if cursor is not None:
+                if not isinstance(cursor, str) or not re.fullmatch('[0-9a-f]{48}', cursor):
+                    raise ValueError('invalid or expired document history cursor')
+                position = self._history_cursors.get(cursor)
+                if not position or position['name'] != name:
+                    raise ValueError('invalid or expired document history cursor')
+                head, start, path, creation = (position[key] for key in ('head', 'start', 'path', 'creation'))
+                if not current or self._git('merge-base', head, current, check=False).strip() != head:
+                    raise ValueError('invalid or expired document history cursor')
+            if not head or not self._version(path, start):
+                return {'head': head, 'versions': [], 'next_cursor': None}
+            # A reused pathname starts a new document; never walk past its latest
+            # addition into a different file that previously used the same path.
+            if creation is None:
+                creation = self._git('log', '--follow', '--find-renames=100%', '--diff-filter=A',
+                                     '-1', '--format=%H', head, '--', name).strip()
+            if not re.fullmatch('[0-9a-f]{40}', creation):
+                raise ValueError('document creation history is unavailable')
+            parent = self._ref(creation + '^')
+            revision = parent + '..' + start if parent else start
+            raw = self._git('log', '--follow', '--find-renames=100%', '-' + str(limit + 1),
+                            '--format=%x1e%H%x00', '--name-status', '-z',
+                            revision, '--', path)
+            records = []
+            for entry in raw.split('\x1e'):
+                if not entry:
+                    continue
+                commit, _, changes = entry.partition('\0')
+                fields = [value for value in changes.strip('\0\n').split('\0') if value]
+                status = fields[0].lstrip('\n') if fields else ''
+                path = fields[2] if status == 'R100' and len(fields) == 3 else fields[1] if status in {'A', 'M'} and len(fields) == 2 else None
+                if not re.fullmatch('[0-9a-f]{40}', commit) or path is None:
+                    raise ValueError('unsupported document history entry')
+                self._name(path)
+                if not self._version(path, commit):
+                    raise ValueError('document history snapshot is unavailable')
+                records.append({'commit': commit, 'path': path})
+            more = len(records) > limit
+            next_cursor = None
+            if more:
+                # Git --skip drops rename traversal state. Resume from the next
+                # actual commit/path instead, kept only in this bounded cache.
+                # Every HTTP page still reauthorizes the human's workspace room.
+                next_cursor = os.urandom(24).hex()
+                self._history_cursors[next_cursor] = {'name': name, 'head': head,
+                    'start': records[limit]['commit'], 'path': records[limit]['path'], 'creation': creation}
+                while len(self._history_cursors) > 128:
+                    del self._history_cursors[next(iter(self._history_cursors))]
+            return {'head': head, 'versions': records[:limit], 'next_cursor': next_cursor}
 
     def read(self, name, commit=None):
         return self.snapshot(name, commit)['content']

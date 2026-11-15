@@ -49,6 +49,13 @@ class DocumentService:
         except RemoteDiverged as error:
             raise DocumentError(503, str(error), status='remote_diverged', recovery=error.recovery) from None
 
+    def history(self, room, name='demo.md', cursor=None):
+        self.authorize(room)
+        try:
+            return self.store.history_page(name, cursor)
+        except RemoteDiverged as error:
+            raise DocumentError(503, str(error), status='remote_diverged', recovery=error.recovery) from None
+
     def create(self, data):
         if not isinstance(data, dict) or set(data) != {'room', 'operation', 'content', 'name'}:
             raise DocumentError(400, 'Expected room, operation, content and name.')

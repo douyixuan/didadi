@@ -2,7 +2,7 @@ import React from 'react';
 import {act,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
 import {describe,it,expect,vi} from 'vitest';
 vi.mock('./api',()=>({connect:vi.fn(),errorText:error=>error.message}));
-vi.mock('./BlockEditor',()=>({BlockEditor:React.forwardRef(function TestEditor({value,onChange,disabled},ref){React.useImperativeHandle(ref,()=>({markdown:()=>value}));return <textarea aria-label="Markdown document" disabled={disabled} value={value} onChange={e=>onChange(e.target.value)}/>})}));
+vi.mock('./BlockEditor',()=>({BlockEditor:React.forwardRef(function TestEditor({value,onChange,disabled,onComposingChange},ref){React.useImperativeHandle(ref,()=>({markdown:()=>value}));return <textarea aria-label="Markdown document" onCompositionStart={()=>onComposingChange?.(true)} onCompositionEnd={()=>onComposingChange?.(false)} disabled={disabled} value={value} onChange={e=>onChange(e.target.value)}/>})}));
 vi.mock('./downloadMarkdown',()=>({downloadMarkdown:vi.fn()}));
 import {downloadMarkdown} from './downloadMarkdown';
 import {App,Composer,Documents,PreservedDraft} from './App';
@@ -818,8 +818,10 @@ it('keeps a reply cursor when an initially empty thread receives a full new page
 });
 
 it('opens a document body search result at its matched Git version',async()=>{
- const api=fixture(),commit='c'.repeat(40);api.searchMessages=vi.fn().mockResolvedValue({events:[],next_batch:null});api.searchDocuments=vi.fn().mockResolvedValue({results:[{name:'Plain.md',line:3,excerpt:'unique needle in body',commit,blob:doc.blob}],commit,next_path:null});api.documents=vi.fn(async()=>({documents:[{name:'demo.md'},{name:'Plain.md'}]}));api.document.mockImplementation(async(_room,version,name='demo.md')=>({...doc,name,content:name==='Plain.md'?(version===commit?'# Matched historical body':'# Newer current body'):doc.content}));
+ const fixedHistory=vi.fn(async(_room,path)=>({versions:[{commit:doc.commit,path},{commit:'c'.repeat(40),path}],next_cursor:'more-versions'}));
+ const api=fixture(),commit='c'.repeat(40);api.historyPage=fixedHistory;api.searchMessages=vi.fn().mockResolvedValue({events:[],next_batch:null});api.searchDocuments=vi.fn().mockResolvedValue({results:[{name:'Plain.md',line:3,excerpt:'unique needle in body',commit,blob:doc.blob}],commit,next_path:null});api.documents=vi.fn(async()=>({documents:[{name:'demo.md'},{name:'Plain.md'}]}));api.document.mockImplementation(async(_room,version,name='demo.md')=>({...doc,name,commit:version||doc.commit,content:name==='Plain.md'?(version===commit?'# Matched historical body':'# Newer current body'):doc.content}));
  render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Team handbook'});fireEvent.click(screen.getByRole('button',{name:'Open full-text search'}));fireEvent.change(screen.getByRole('textbox',{name:'Search body text'}),{target:{value:'needle'}});fireEvent.click(screen.getByRole('button',{name:'Documents',exact:true}));await screen.findByText('unique needle in body');await waitFor(()=>expect(screen.getByRole('button',{name:'Plain.md · line 3'})).toBeEnabled());fireEvent.click(screen.getByRole('button',{name:'Plain.md · line 3'}));await screen.findByRole('heading',{name:'Matched historical body'});expect(api.document).toHaveBeenCalledWith('!room',commit,'Plain.md');expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+ fireEvent.click(screen.getByRole('button',{name:'Version history',exact:true}));await screen.findByRole('button',{name:'Load earlier versions',exact:true});expect(fixedHistory).toHaveBeenCalledWith('!room','Plain.md',null);expect(document.querySelectorAll('.history-row')).toHaveLength(2);
 });
 
 it('sends a quote relation without copying the source body or adding mentions',async()=>{const send=vi.fn().mockRejectedValueOnce(new Error('Lost response')).mockResolvedValue({event_id:'$reply'}),clear=vi.fn();render(<Composer onSend={send} busyRoom="!room" agentId="@agent" clearReply={idle} onSent={idle} quote={{id:'$source',sender:'@someone',content:{body:'private original'}}} clearQuote={clear} defaultMention={false}/>);fireEvent.change(screen.getByLabelText('Message'),{target:{value:'my response'}});fireEvent.click(screen.getByRole('button',{name:'Send'}));await screen.findByRole('alert');fireEvent.click(screen.getByRole('button',{name:'Send'}));await waitFor(()=>expect(clear).toHaveBeenCalled());expect(send.mock.calls[0][0]).toEqual({msgtype:'m.text',body:'my response','m.mentions':{user_ids:[]},'m.relates_to':{'m.in_reply_to':{event_id:'$source'}}});expect(send.mock.calls[0][1]).toBe(send.mock.calls[1][1]);});
@@ -990,4 +992,141 @@ it('ignores the old visible source link while another history version is loading
  render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Source document'});fireEvent.click(screen.getByRole('button',{name:'Version history',exact:true}));fireEvent.click(await screen.findByRole('button',{name:/Previous version/}));await waitFor(()=>expect(finishVersion).toBeTypeOf('function'));
  fireEvent.click(screen.getByRole('link',{name:'Open source message',exact:true}));await act(async()=>finishVersion({...doc,content:'# Loaded history version'}));
  expect(api.message).not.toHaveBeenCalled();expect(screen.getByRole('heading',{name:'Loaded history version'})).toBeInTheDocument();expect(screen.queryByRole('button',{name:'All messages',exact:true})).not.toBeInTheDocument();
+});
+
+describe('Git document history across moves',()=>{
+ it('reads an old version at its Git path but saves edits to the current document name',async()=>{
+  const api=fixture(),current='Archive/A.md',old='Notes/A.md',version='c'.repeat(40);
+  api.historyPage=vi.fn().mockResolvedValue({versions:[{commit:doc.commit,path:current},{commit:version,path:old}],next_cursor:null});
+  api.document.mockImplementation(async(_room,commit,name)=>({...doc,name,content:commit===version?'# Earlier A':'# Current A',blob:commit===version?'d'.repeat(40):doc.blob,commit:commit||doc.commit}));
+  api.saveDocument=vi.fn().mockResolvedValue({status:'saved',path:current,commit:doc.commit,blob:doc.blob});
+  render(<Documents api={api} room="!room" name={current} mode="edit" historyOpen/>);
+  await waitFor(()=>expect(screen.getByLabelText('Markdown document')).toHaveValue('# Current A'));
+  fireEvent.click(await screen.findByRole('button',{name:/Previous version/}));
+  await waitFor(()=>expect(api.document).toHaveBeenCalledWith('!room',version,old));
+  await waitFor(()=>expect(screen.getByLabelText('Markdown document')).toHaveValue('# Earlier A'));
+  fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# Explicitly restored A'}});
+  fireEvent.click(screen.getByRole('button',{name:'Save changes',exact:true}));
+  await waitFor(()=>expect(api.saveDocument).toHaveBeenCalledWith('!room','# Explicitly restored A','d'.repeat(40),expect.any(String),current));
+  expect(api.saveDocument.mock.calls.every(call=>call[4]===current)).toBe(true);
+ });
+ it('retains the document on paging failure and retries without duplicate versions',async()=>{
+  const api=fixture(),current='Archive/A.md',version='c'.repeat(40);
+  api.document.mockResolvedValue({...doc,name:current});
+  api.historyPage=vi.fn().mockResolvedValueOnce({versions:[{commit:doc.commit,path:current}],next_cursor:'page-two'})
+   .mockRejectedValueOnce(new Error('History temporarily unavailable'))
+   .mockResolvedValueOnce({versions:[{commit:doc.commit,path:current},{commit:version,path:'Notes/A.md'}],next_cursor:null});
+  render(<Documents api={api} room="!room" name={current} historyOpen/>);
+  await screen.findByRole('heading',{name:'Team handbook'});
+  fireEvent.click(await screen.findByRole('button',{name:'Load earlier versions',exact:true}));
+  expect(await screen.findByRole('alert')).toHaveTextContent('History temporarily unavailable');
+  expect(screen.getByRole('heading',{name:'Team handbook'})).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'Retry earlier versions',exact:true}));
+  await screen.findByRole('button',{name:/Previous version/});
+  expect(document.querySelectorAll('.history-row')).toHaveLength(2);
+  expect(api.historyPage).toHaveBeenLastCalledWith('!room',current,'page-two');
+ });
+ it('keeps a successfully loaded document readable when history alone is unavailable',async()=>{
+  const api=fixture();api.historyPage=vi.fn().mockRejectedValueOnce(new Error('History is offline')).mockResolvedValue({versions:[{commit:doc.commit,path:'demo.md'}],next_cursor:null});
+  render(<Documents api={api} room="!room" historyOpen/>);
+  await screen.findByRole('heading',{name:'Team handbook'});
+  expect(await screen.findByRole('alert')).toHaveTextContent('History is offline');expect(screen.queryByText('Your first save creates the first version.')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'Restart history',exact:true}));
+  await waitFor(()=>expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+  expect(screen.getByRole('heading',{name:'Team handbook'})).toBeInTheDocument();
+ });
+});
+
+it('ignores an earlier document history page after switching document and account',async()=>{
+ const api=fixture(),other=fixture();other.session={...other.session,userId:'@other:local'};
+ let finish;api.document.mockResolvedValue({...doc,name:'A.md'});
+ api.historyPage=vi.fn().mockResolvedValueOnce({versions:[{commit:doc.commit,path:'A.md'}],next_cursor:'older'}).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve}));
+ other.document.mockResolvedValue({...doc,name:'B.md',content:'# Independent B'});
+ other.historyPage=vi.fn().mockResolvedValue({versions:[{commit:'e'.repeat(40),path:'B.md'}],next_cursor:null});
+ const view=render(<Documents api={api} room="!room" name="A.md" historyOpen/>);
+ await screen.findByRole('heading',{name:'Team handbook'});fireEvent.click(await screen.findByRole('button',{name:'Load earlier versions',exact:true}));
+ await waitFor(()=>expect(finish).toBeTypeOf('function'));
+ view.rerender(<Documents api={other} room="!other" name="B.md" historyOpen/>);
+ await screen.findByRole('heading',{name:'Independent B'});
+ await act(async()=>finish({versions:[{commit:'f'.repeat(40),path:'Private old A.md'}],next_cursor:null}));
+ expect(document.querySelectorAll('.history-row')).toHaveLength(1);expect(screen.queryByText('At Private old A.md')).not.toBeInTheDocument();
+ expect(screen.getByRole('heading',{name:'Independent B'})).toBeInTheDocument();
+});
+
+it('does not restore an earlier document response after history reauthorization denies access',async()=>{
+ const api=fixture();let finish,rejectPage;const denied=Object.assign(new Error('Room access revoked'),{status:403});const unavailable=vi.fn();
+ api.document.mockResolvedValueOnce({...doc,name:'Private.md',content:'# Prior authorized document'}).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve}));
+ api.historyPage=vi.fn().mockResolvedValueOnce({versions:[{commit:doc.commit,path:'Private.md'}],next_cursor:'older'}).mockImplementationOnce(()=>new Promise((_resolve,reject)=>{rejectPage=reject}));
+ render(<Documents api={api} room="!room" name="Private.md" mode="edit" historyOpen onUnavailable={unavailable}/>);
+ await waitFor(()=>expect(screen.getByLabelText('Markdown document')).toHaveValue('# Prior authorized document'));
+ fireEvent.click(await screen.findByRole('button',{name:'Load earlier versions',exact:true}));await waitFor(()=>expect(rejectPage).toBeTypeOf('function'));
+ fireEvent.click(screen.getByRole('button',{name:'Load latest',exact:true}));await waitFor(()=>expect(finish).toBeTypeOf('function'));
+ await act(async()=>rejectPage(denied));await waitFor(()=>expect(unavailable).toHaveBeenCalledWith('Private.md',403));
+ await act(async()=>finish({...doc,name:'Private.md',content:'# Revoked document must not reappear'}));
+ expect(screen.getByLabelText('Markdown document')).toHaveValue('# Prior authorized document');expect(document.querySelectorAll('.history-row')).toHaveLength(0);
+});
+it('does not restore an earlier history response after the document read denies access',async()=>{
+ const api=fixture();let finish;const unavailable=vi.fn();
+ api.document.mockResolvedValueOnce({...doc,name:'Private.md',content:'# Prior authorized document'}).mockRejectedValueOnce(Object.assign(new Error('Room access revoked'),{status:403}));
+ api.historyPage=vi.fn(()=>new Promise(resolve=>{finish=resolve}));
+ render(<Documents api={api} room="!room" name="Private.md" mode="edit" historyOpen onUnavailable={unavailable}/>);
+ await waitFor(()=>expect(finish).toBeTypeOf('function'));fireEvent.click(screen.getByRole('button',{name:'Load latest',exact:true}));
+ await waitFor(()=>expect(unavailable).toHaveBeenCalledWith('Private.md',403));
+ await act(async()=>finish({versions:[{commit:doc.commit,path:'Private old name.md'}],next_cursor:'stale'}));
+ expect(document.querySelectorAll('.history-row')).toHaveLength(0);expect(screen.queryByText('At Private old name.md')).not.toBeInTheDocument();
+});
+
+describe('compact document navigation',()=>{
+ it('keeps document actions primary and reveals secondary workspace actions on demand',async()=>{
+  const previous=window.matchMedia;window.matchMedia=query=>({matches:query==='(max-width: 600px)',addEventListener(){},removeEventListener(){}});
+  try{const api=fixture(),path='Very/long/workspace/directory/B.md';api.documents=vi.fn().mockResolvedValue({documents:[{name:path}]});api.document.mockResolvedValue({...doc,name:path});api.members=vi.fn();api.readSource=vi.fn();
+   render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Team handbook'});
+   const header=document.querySelector('.workspace-header');expect(header.querySelector('.breadcrumbs strong')).toHaveTextContent('B.md');expect(header.querySelector('.breadcrumbs strong')).toHaveAttribute('title',path);
+   expect(within(header).getByRole('button',{name:'Edit',exact:true})).toBeInTheDocument();expect(within(header).queryByRole('button',{name:'Read',exact:true})).not.toBeInTheDocument();
+   expect(within(header).getByRole('button',{name:'Version history',exact:true})).toBeInTheDocument();expect(within(header).queryByRole('button',{name:'People',exact:true})).not.toBeInTheDocument();
+   fireEvent.click(within(header).getByRole('button',{name:'More workspace actions',exact:true}));
+   const tools=screen.getByRole('group',{name:'Workspace actions'});expect(within(tools).getByRole('button',{name:'People',exact:true})).toBeInTheDocument();expect(within(tools).getByRole('button',{name:'Git source',exact:true})).toBeInTheDocument();
+   fireEvent.click(within(tools).getByRole('button',{name:'Agent',exact:true}));expect(screen.queryByRole('group',{name:'Workspace actions'})).not.toBeInTheDocument();expect(await screen.findByRole('heading',{name:'Example Agent',exact:true})).toBeInTheDocument();
+  }finally{window.matchMedia=previous;}
+ });
+ it('dismisses secondary navigation without losing an unsaved document draft',async()=>{
+  const previous=window.matchMedia;window.matchMedia=query=>({matches:query==='(max-width: 600px)',addEventListener(){},removeEventListener(){}});
+  try{const api=fixture();render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Team handbook'});
+   fireEvent.click(screen.getByRole('button',{name:'Edit',exact:true}));fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# Keep the mobile draft'}});
+   const more=screen.getByRole('button',{name:'More workspace actions',exact:true});fireEvent.click(more);fireEvent.keyDown(document,{key:'Escape'});
+   expect(screen.queryByRole('group',{name:'Workspace actions'})).not.toBeInTheDocument();expect(more).toHaveFocus();expect(screen.getByLabelText('Markdown document')).toHaveValue('# Keep the mobile draft');
+   fireEvent.click(screen.getByRole('button',{name:'Read',exact:true}));fireEvent.click(screen.getByRole('button',{name:'Edit',exact:true}));expect(screen.getByLabelText('Markdown document')).toHaveValue('# Keep the mobile draft');
+  }finally{window.matchMedia=previous;}
+ });
+});
+
+it('keeps a compact navigation choice from being replaced by a late source result',async()=>{
+ const previous=window.matchMedia;window.matchMedia=query=>({matches:query==='(max-width: 600px)',addEventListener(){},removeEventListener(){}});
+ try{const api=fixture();let finish;api.document.mockResolvedValue({...doc,content:'# Source document\n\n[Open source message](https://matrix.to/#/!room/%24source)'});api.message=vi.fn(()=>new Promise(resolve=>{finish=resolve}));
+  render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Source document'});fireEvent.click(screen.getByRole('link',{name:'Open source message'}));await waitFor(()=>expect(finish).toBeTypeOf('function'));
+  fireEvent.click(screen.getByRole('button',{name:'More workspace actions'}));await act(async()=>finish({id:'$source',content:{msgtype:'m.text',body:'Source'}}));
+  expect(screen.getByRole('group',{name:'Workspace actions'})).toBeInTheDocument();expect(screen.queryByRole('button',{name:'All messages',exact:true})).not.toBeInTheDocument();
+ }finally{window.matchMedia=previous;}
+});
+it('keeps editing mounted during IME composition in compact navigation',async()=>{
+ const previous=window.matchMedia;window.matchMedia=query=>({matches:query==='(max-width: 600px)',addEventListener(){},removeEventListener(){}});
+ try{const api=fixture();render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Team handbook'});fireEvent.click(screen.getByRole('button',{name:'Edit',exact:true}));
+  const editor=screen.getByLabelText('Markdown document');fireEvent.compositionStart(editor);fireEvent.change(editor,{target:{value:'# 输入仍在组合'}});
+  await waitFor(()=>expect(screen.getByRole('button',{name:'Read',exact:true})).toBeDisabled());expect(screen.getByRole('button',{name:'Version history'})).toBeDisabled();expect(screen.getByRole('button',{name:'More workspace actions'})).toBeDisabled();
+  fireEvent.click(screen.getByRole('button',{name:'Read',exact:true}));expect(editor).toBeInTheDocument();expect(editor).toHaveValue('# 输入仍在组合');
+  fireEvent.compositionEnd(editor);await waitFor(()=>expect(screen.getByRole('button',{name:'Read',exact:true})).toBeEnabled());
+ }finally{window.matchMedia=previous;}
+});
+it('uses the named file as a presentation fallback without rewriting its Markdown',async()=>{
+ const api=fixture(),body='Plain body without a heading.';api.documents=vi.fn().mockResolvedValue({documents:[{name:'Archive/B.md'}]});api.document.mockResolvedValue({...doc,name:'Archive/B.md',content:body});
+ const view=render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'B.md'});await waitFor(()=>expect(screen.getByRole('button',{name:'Archive/B.md, current document',exact:true}).querySelector('small')).toHaveTextContent(/^Archive$/));expect(screen.queryByRole('button',{name:'Ask example Agent to read'})).not.toBeInTheDocument();fireEvent.click(screen.getByRole('button',{name:'Export Markdown'}));expect(downloadMarkdown).toHaveBeenLastCalledWith(body,'B.md');view.unmount();
+ const other=fixture();other.document.mockResolvedValue({...doc,name:'Archive/B.md',content:'# Untitled document\n\nLiteral authored title.'});render(<Documents api={other} room="!room" name="Archive/B.md"/>);await screen.findByRole('heading',{name:'Untitled document'});
+});
+
+it('loads history after the latest document has synchronized instead of showing a prior head',async()=>{
+ const api=fixture();let finish,synchronized=false;const fresh='c'.repeat(40),prior='b'.repeat(40);
+ api.document.mockImplementation(()=>new Promise(resolve=>{finish=()=>{synchronized=true;resolve({...doc,name:'A.md',content:'# New canonical document',commit:fresh})}}));
+ api.historyPage=vi.fn(async()=>({versions:[{commit:synchronized?fresh:prior,path:'A.md'}],next_cursor:null}));
+ render(<Documents api={api} room="!room" name="A.md" historyOpen/>);await waitFor(()=>expect(finish).toBeTypeOf('function'));await act(async()=>finish());
+ await screen.findByRole('heading',{name:'New canonical document'});await waitFor(()=>expect(document.querySelector('.history-row code')).toHaveTextContent(fresh.slice(0,10)));expect(document.querySelector('.history-row code')).not.toHaveTextContent(prior.slice(0,10));
 });
