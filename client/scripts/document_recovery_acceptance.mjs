@@ -137,18 +137,63 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     await bob.page.locator('.composer textarea').fill(sourceText);
     await bob.page.locator('.composer').getByRole('button',{name:/^Send/}).click();
     const sentResponse=await sent;assert.equal(sentResponse.status(),200);const event=(await sentResponse.json()).event_id;
+    const replyText='P071 thread source '+stamp;
+    await bob.page.locator('.timeline article').filter({hasText:sourceText}).getByRole('button',{name:'Reply',exact:true}).click();
+    const replied=bob.page.waitForResponse(r=>new URL(r.url()).pathname.includes('/send/m.room.message/')&&r.request().method()==='PUT');
+    await bob.page.locator('.composer textarea').fill(replyText);
+    await bob.page.locator('.composer').getByRole('button',{name:/^Send/}).click();
+    const replyResponse=await replied;assert.equal(replyResponse.status(),200);const reply=(await replyResponse.json()).event_id;
     await bob.page.getByLabel('Select message '+event,{exact:true}).check();
+    await bob.page.getByLabel('Select message '+reply,{exact:true}).check();
     const copied='p071/'+stamp+'/From-message.md';
     await bob.page.getByLabel('Document path from messages').fill(copied);
+    // Lose a genuine successful create acknowledgement; do not fake the result.
+    const copyPattern=url=>url.pathname==='/api/documents/from-messages';let firstSaved,firstPayload,acknowledgementError;
+    await bob.page.route(copyPattern,async route=>{
+      if(firstSaved)return route.continue();
+      try{firstPayload=route.request().postDataJSON();const response=await route.fetch();assert.equal(response.status(),200);
+        firstSaved=await response.json();assert.equal(firstSaved.status,'saved');
+      }catch(error){acknowledgementError=error;}
+      await route.abort('failed');
+    });
     await bob.page.getByRole('button',{name:'Create document from messages',exact:true}).click();
+    await expect(bob.page.locator('.message-document-form [role="status"]')).toContainText('Retry the same selection to confirm',{timeout:30000});
+    await expect(bob.page.getByLabel('Document path from messages')).toHaveValue(copied);
+    await expect(bob.page.getByLabel('Document path from messages')).toBeDisabled();
+    await bob.page.unroute(copyPattern);if(acknowledgementError)throw acknowledgementError;
+    const git=args=>execFileSync('git',['--git-dir=.local/documents.git',...args],{encoding:'utf8'});
+    const head=git(['rev-parse','refs/heads/main']);
+    const beforeHistory=git(['log','--format=%H','refs/heads/main','--',copied]);
+    const retryResponse=bob.page.waitForResponse(r=>new URL(r.url()).pathname==='/api/documents/from-messages'&&r.request().method()==='POST');
+    await bob.page.getByRole('button',{name:'Create document from messages',exact:true}).click();
+    const retried=await retryResponse;assert.equal(retried.status(),200);assert.deepEqual(retried.request().postDataJSON(),firstPayload);
+    assert.equal((await retried.json()).commit,firstSaved.commit);assert.equal(git(['rev-parse','refs/heads/main']),head);assert.equal(git(['log','--format=%H','refs/heads/main','--',copied]),beforeHistory);
     await expect(bob.page.locator('.page-eyebrow')).toContainText(copied,{timeout:30000});
     const source=(await read(bob.page,copied)).data;
-    assert.ok(source.content.includes(sourceText));
-    const sourceLink=bob.page.locator('.markdown-body').getByRole('link',{name:'Open source message',exact:true});
-    assert.equal(decodeURIComponent(await sourceLink.getAttribute('href')),'https://matrix.to/#/'+room+'/'+event);
+    assert.ok(source.content.includes(sourceText)&&source.content.includes(replyText));
+    const sourceLinks=bob.page.locator('.markdown-body').getByRole('link',{name:'Open source message',exact:true});
+    await expect(sourceLinks).toHaveCount(2);
+    for(const [index,id] of [event,reply].entries())assert.equal(decodeURIComponent(await sourceLinks.nth(index).getAttribute('href')),'https://matrix.to/#/'+room+'/'+id);
     const original=await request(bob.page,'/matrix/_matrix/client/v3/rooms/'+encodeURIComponent(room)+'/event/'+encodeURIComponent(event));
     assert.equal(original.status,200);assert.equal(original.data.content.body,sourceText);
     await bob.page.screenshot({path:evidenceDir+'/p071-message-document-source.png',fullPage:true});
+    // Normal clicks stay in this app. Block the portable external fallback so
+    // a regression never contacts matrix.to. Root and reply return to context.
+    await bob.page.route('https://matrix.to/**',route=>route.abort());
+    const origin=new URL(bob.page.url()).origin;
+    for(const [index,id] of [event,reply].entries()){
+      const sourceResponse=bob.page.waitForResponse(response=>decodeURIComponent(new URL(response.url()).pathname)==='/matrix/_matrix/client/v3/rooms/'+room+'/event/'+id&&response.request().method()==='GET');
+      await sourceLinks.nth(index).click();assert.equal((await sourceResponse).status(),200);
+      assert.equal(new URL(bob.page.url()).origin,origin);
+      const all=bob.page.getByRole('button',{name:'All messages',exact:true});await expect(all).toBeVisible({timeout:30000});
+      await expect(all.locator('..')).toContainText('Thread '+event.slice(0,10));
+      await expect(bob.page.locator('.timeline')).toContainText(sourceText,{timeout:30000});
+      await expect(bob.page.locator('.timeline')).toContainText(replyText,{timeout:30000});
+    }
+    await bob.page.screenshot({path:evidenceDir+'/p071-in-app-source-return.png',fullPage:true});
+    await bob.page.unroute('https://matrix.to/**');
+    console.log('PASS REAL DOCUMENT #71: lost create acknowledgement retries identical operation without extra Git commit; root/reply source links return in-app');
+
     const proofs=[{path:a,commit:resolvedA.commit,blob:resolvedA.blob,marker:resolved},{path:moved,commit:final.commit,blob:final.blob,marker:retryB}];
     const receipts=await request(bob.page,'/matrix/_matrix/client/v3/rooms/'+encodeURIComponent(room)+'/messages?dir=b');
     assert.equal(receipts.status,200);

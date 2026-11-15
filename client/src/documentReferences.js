@@ -11,3 +11,18 @@ export function documentVersion(event,agentId,synthetic=false,humanId=null,path=
   if(path!=='demo.md')return null;
   return /^(?:Saved demo\.md\nGit commit: |demo\.md at Git commit: )([a-f0-9]{40})(?=\n|$)/.exec(body)?.[1]||null;
 }
+
+// Canonical source links remain portable Markdown. Only the document's own
+// workspace can be opened in-app; the existing API still authorizes the read.
+export function documentSourceReference(href,room){
+ try{
+  if(typeof href!=='string'||typeof room!=='string'||!room.startsWith('!'))return null;
+  const url=new URL(href);
+  if(url.protocol!=='https:'||url.hostname!=='matrix.to'||url.port||url.username||url.password||url.pathname!=='/'||url.search||!url.hash.startsWith('#/')||url.hash.includes('?'))return null;
+  const parts=url.hash.slice(2).split('/');if(parts.length!==2)return null;
+  const [sourceRoom,event]=parts.map(decodeURIComponent);
+  if(['/','\\','?','#'].some(character=>event.includes(character)))return null;
+  if(sourceRoom!==room||!event.startsWith('$')||event.length<2||event.length>1024||/[\s\u0000-\u001f\u007f]/.test(event))return null;
+  return {room:sourceRoom,event};
+ }catch{return null;}
+}

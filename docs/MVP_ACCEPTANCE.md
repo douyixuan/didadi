@@ -136,3 +136,27 @@ main的五张PNG均已下载并实际查看，内容仅合成，无cookie/密码
 保留失败事实：Real 43683690935的新隔离断言通过，但旧错误密码测试截短服务端cooldown导致整轮失败。修复遵守完整retry_after_ms及7分钟上限，再要求真实401；未降低Synapse限流，不是产品Red→Green。PR正文否定句误含关闭关键词，GitHub在06:37提前关闭#70；该事件不是验收。实际接受在06:47后main gate成功并核对范围后记录，未倒签。
 
 公开Vercel仍是合成演示，不是本次真实后端验收环境。#41/#18分工和#12暂停不变；本次只增加一个完整叶，不因合并多个PR增加计数。
+
+
+## 多文档恢复局部真实回归
+
+2026-11-15，[PR102](https://github.com/douyixuan/didadi/pull/102)已合入，记录对象为测试head `051ef170240ff1ee87acbde1919b6edb0590a909`、main `003e97d2f78b1ad6f06b8e1534bf5beabad85239`。两者src/client/workflow差异为空；main另含独立交付的文档门禁。head的[Fast](https://github.com/douyixuan/didadi/actions/runs/43691052647)、[真实Matrix](https://github.com/douyixuan/didadi/actions/runs/43691052633)，main的[Fast](https://github.com/douyixuan/didadi/actions/runs/43691976382)、[真实Matrix及p0 gate](https://github.com/douyixuan/didadi/actions/runs/43691976363)均成功；[精确head独立审查](https://github.com/douyixuan/didadi/pull/102#issuecomment-6890906644)完成无发现，不是代用户approval。
+
+| 用户路径 | 实际观察 |
+| --- | --- |
+| 两人两文档 | Alice和Bob分别通过UI创建并保存A/B；修改A不改变B；刷新恢复经当前授权列表确认的选择 |
+| 冲突与网络失败 | 同一Git基线的重叠修改返回409，赢家正文/历史不变，败方草稿可刷新恢复；浏览器在传输前中止写请求不改变Git，刷新恢复后显式重试成功 |
+| 移动与导出 | 成功移动B后刷新重开目标路径，导出字节与Git正文一致，A不变；长目录中的A.md/B.md可区分，完整路径保留 |
+| 历史回看 | A的固定旧版本可读，正常点击历史面板内“返回最新”可恢复当前正文；未使用强制点击 |
+| 后端重启 | 重启隔离Workspace/Document API与Synapse后，新浏览器身份分别读取A/B，正文/blob与固定Git提交一致；Git作者及元数据回执对应真实写入者 |
+
+这是现有临时双用户、loopback真实Synapse/API/Git/Chromium流程。沿用现有owner设备，测试中暂授另一个既有成员现有50级写权限，finally恢复原power levels并核对；未创建额外账号、改产品权限模型或访问生产内容。Matrix回执不含新文档正文；原生引用/路径/写权限负向由同一真实入口执行。
+
+[17c52d7真实失败](https://github.com/douyixuan/didadi/actions/runs/43689235650)定位历史面板遮挡返回按钮；修复后真实流程通过。命名文档重载和长路径文件名均有确定性Red→Green；该版本标准前端191项、构建通过。截图为051ef17的1280×720桌面Chromium合成数据，均已实际查看；失败图来自17c52d7。不是物理iOS验收。
+
+- [历史遮挡修复前](../artifact/032-requirements-completion/p071-real-browser/history-before.png)
+- [历史返回修复后](../artifact/032-requirements-completion/p071-real-browser/history-after.png)
+- [文件名与移动重开](../artifact/032-requirements-completion/p071-real-browser/filenames-after.png)
+- [重启后固定内容](../artifact/032-requirements-completion/p071-real-browser/restart-after.png)
+
+**不关闭#71，不新增产品叶。** 003e版本的当前路径历史可回看，但`GitDocs.history(name)`仍按当前路径查询，未贯通移动前旧路径；稳定身份/路径演进继续保留#41/#18分工。该版本的消息来源已核对可移植Matrix permalink及真实事件，尚不是应用内返回讨论的交互验收；后续改动需单独验证。本节为003e版本记录，不代表后续候选状态。#72独立安装恢复尚未完成，P0保持2/4、全局2/16；未启动P1。Vercel仅为合成预览，不代表公开真实后端交付。

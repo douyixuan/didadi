@@ -16,7 +16,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {BlockEditor} from './BlockEditor';
 import {readMarkdown} from './readMarkdown';
-import {documentVersion} from './documentReferences';
+import {documentVersion,documentSourceReference} from './documentReferences';
 import {taskResult} from './taskResult';
 import {taskState} from './taskState';
 import {mergeMessages} from './messageHistory';
@@ -68,8 +68,20 @@ export function Documents(props){
   return <DocumentWorkspace key={context||'unknown'} {...props} localContext={context}/>;
 }
 
-function DocumentWorkspace({localContext,api,room,onSent,name='demo.md',externalBusy=false,mode='read',setMode=()=>{},historyOpen=false,onCloseHistory=()=>{},onMeta=()=>{},requestedVersion=null,onDiscussVersion=()=>{},canDiscussVersion=false,onUnavailable=()=>{}}) {
+function DocumentWorkspace({localContext,api,room,onSent,name='demo.md',externalBusy=false,mode='read',setMode=()=>{},historyOpen=false,onCloseHistory=()=>{},onMeta=()=>{},requestedVersion=null,onDiscussVersion=()=>{},canDiscussVersion=false,onUnavailable=()=>{},onOpenMessageSource=null}) {
   const localDrafts=useLocalDrafts(localContext);
+  const [sourceOpening,setSourceOpening]=useState(false),[sourceError,setSourceError]=useState('');
+  const sourceSequence=useRef(0);
+  async function followDocumentSource(event){
+    if(!onOpenMessageSource||event.defaultPrevented||event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;
+    const anchor=event.target.closest?.('a[href]');if(!anchor||!event.currentTarget.contains(anchor))return;
+    const reference=documentSourceReference(anchor.getAttribute('href'),room);if(!reference)return;
+    event.preventDefault();const sequence=++sourceSequence.current;setSourceOpening(true);setSourceError('');
+    try{await onOpenMessageSource(reference,()=>mounted.current&&sequence===sourceSequence.current);}
+    catch(error){if(mounted.current&&sequence===sourceSequence.current)setSourceError(errorText(error)+' Your document and drafts are kept. Use the source link to retry.');}
+    finally{if(mounted.current&&sequence===sourceSequence.current)setSourceOpening(false);}
+  }
+
   useEffect(()=>{localDrafts.refresh();},[localContext]);
   const [draftTransition,setDraftTransition]=useState(false),transitionLock=useRef(false);
   const [draftBase,setDraftBase]=useState(undefined),recoveryBase=useRef(null);
@@ -95,6 +107,7 @@ function DocumentWorkspace({localContext,api,room,onSent,name='demo.md',external
   const roomRef=useRef(room);roomRef.current=room;
   async function load(commit, preserveDraft=false) {
     if(directRequest.current||transitionLock.current)return;
+    sourceSequence.current++;setSourceOpening(false);setSourceError('');
     const sequence=++loadSequence.current;setReading(true);setError('');setReadRetry(null);setCancelledAction(null);
     try {const [doc,versions]=await Promise.all([api.document(roomRef.current,commit,...(name==='demo.md'?[]:[name])),api.history(roomRef.current,...(name==='demo.md'?[]:[name]))]);
       if(!mounted.current||sequence!==loadSequence.current)return;if(name!=='demo.md'&&!doc?.blob){const missing=new Error('Document is no longer available.');missing.status=404;throw missing;}if(preserveDraft&&draft!==(snapshot?.content||'')){recoveryBase.current=(draftBase===undefined?snapshot?.blob:draftBase);if(!await localDrafts.checkpoint(draft,recoveryBase.current))throw new Error('Cannot switch versions safely while local draft storage is unavailable. Your current draft is kept; export it before retrying.');if(!mounted.current||sequence!==loadSequence.current)return;setRecoveryDraft(draft);}setDraftBase(undefined);setSnapshot(doc);setUnresolvedResult(false);setDraft(doc.content||'');setEditorRevision(v=>v+1);setHistory(versions.commits);setHistorical(Boolean(commit));setConflict(false);setMergeConflict(null);setRemoteRecovery(null);setNotice('');}
@@ -183,6 +196,7 @@ function DocumentWorkspace({localContext,api,room,onSent,name='demo.md',external
     </div>
     {snapshot?.writable===false&&<p className="quiet-status" role="status">Read-only document. Room power level 50 is required to save.</p>}
     {directUncertain&&<p className="quiet-status" role="status">Editing is paused while this save is uncertain. Retry sends the exact original request. Your draft is kept.</p>}
+    {sourceOpening&&<p className="quiet-status" role="status">Opening source discussion…</p>}{sourceError&&<p className="quiet-status" role="alert">{sourceError}</p>}
     {historical&&<div className="state-banner historical-banner"><History size={17}/><span>You’re viewing an earlier version. Editing it may return a conflict.</span>{!historyOpen&&<button disabled={busy||draftTransition||reading||directUncertain} onClick={()=>load(undefined,true)}>Back to latest</button>}</div>}
     {error&&<div className="state-banner warning" role="alert"><AlertCircle size={18}/><div><strong>{remoteRecovery?'Git histories need operator reconciliation':conflict?'This document has a newer version':'Couldn’t complete the request'}</strong><p>{error}</p>{remoteRecovery&&<details><summary>Retained Git versions</summary><p>Your draft and both Git histories are kept. Export your draft if needed. The workspace operator must review and reconcile the histories before retrying. Retrying does not merge or overwrite them.</p><dl><dt>Local commit</dt><dd><code>{remoteRecovery.local_commit}</code></dd><dt>Remote commit</dt><dd><code>{remoteRecovery.remote_commit}</code></dd><dt>Common base</dt><dd><code>{remoteRecovery.merge_base||'No common base; manual investigation required'}</code></dd></dl></details>}</div>{conflict?<button onClick={()=>load(undefined,true)}>Load latest to merge</button>:<button onClick={()=>directUncertain?saveDirect(true):readRetry?load(readRetry.commit,readRetry.preserveDraft):snapshot?submit(lastCommand.current.action,lastCommand.current.repository):load()}>{remoteRecovery?'Retry after reconciliation':readRetry?.unsupportedResult?'Load latest':'Retry'}</button>}</div>}
     {mergeConflict!==null&&<details className="document-properties"><summary>Overlapping edit details · review only</summary><p>Conflict markers are not saved. Merge your draft with the latest version before saving.</p><textarea aria-label="Conflicting changes" readOnly value={mergeConflict}/></details>}
@@ -208,7 +222,7 @@ function DocumentWorkspace({localContext,api,room,onSent,name='demo.md',external
         <div className="page-byline"><span className="tiny-avatar">D</span><span>Shared workspace</span><span className="byline-dot"/><span>{api.session.synthetic?'Browser-only snapshot':'Stored in Git'}</span></div>
         {mode==='edit'?<><BlockEditor key={editorRevision} ref={editor} value={draft} onChange={editDraft} onComposingChange={setComposing} disabled={busy||draftTransition||reading||directUncertain}/>
           <div className="editor-foot"><span>{api.saveDocument?`${new TextEncoder().encode(draft).length} / 65536 UTF-8 bytes`:`${draft.length} / 6000 characters`} · Markdown-backed blocks</span><button onClick={()=>load(undefined,true)} disabled={busy||draftTransition||reading||directUncertain}>Load latest</button></div>
-        </>:<div className="markdown-body">{presentation.properties&&<details className="document-properties"><summary>Properties · Markdown front matter</summary><pre>{presentation.properties}</pre></details>}{draft?<ReactMarkdown remarkPlugins={[remarkGfm]}>{bodyMarkdown}</ReactMarkdown>:<div className="empty-document"><p>A quiet space for your first document.</p><button className="primary" onClick={()=>setMode('edit')}>Start writing</button></div>}</div>}
+        </>:<div className="markdown-body" onClick={followDocumentSource} aria-busy={sourceOpening}>{presentation.properties&&<details className="document-properties"><summary>Properties · Markdown front matter</summary><pre>{presentation.properties}</pre></details>}{draft?<ReactMarkdown remarkPlugins={[remarkGfm]}>{bodyMarkdown}</ReactMarkdown>:<div className="empty-document"><p>A quiet space for your first document.</p><button className="primary" onClick={()=>setMode('edit')}>Start writing</button></div>}</div>}
         <div className="document-bottom"><span><BookOpen size={14}/> {name}</span><button onClick={()=>onDiscussVersion(snapshot.commit)} disabled={busy||draftTransition||reading||!canDiscussVersion} title={canDiscussVersion?'Open the thread containing this version receipt':'No receipt for this version in the loaded discussion'}>View version discussion</button><button title="Download the current Markdown, including unsaved edits" onClick={()=>exportDocument(mode==='edit'?(editor.current?.markdown()??draft):draft)} disabled={busy||draftTransition||reading||composing}>Export Markdown</button><button onClick={()=>submit('read')} disabled={name!=='demo.md'||busy||draftTransition||reading||unresolvedResult||directUncertain}>Ask example Agent to read</button></div>
         {name!=='demo.md'&&<p className="quiet-status">Human edits and history use this document. Example Agent document actions currently target demo.md only.</p>}
         {name==='demo.md'&&sources.length>0&&<details className="document-properties"><summary>Read-only source repository</summary><p>Explicitly granted files at a fixed Git commit. Deterministic inventory; no LLM analysis.</p><label>Source file <select aria-label="Granted source file" value={source?JSON.stringify([source.repository,source.path,source.commit]):''} onChange={event=>setSourceChoice(event.target.value)} disabled={busy||draftTransition||reading}>{sources.map(item=><option key={JSON.stringify([item.repository,item.path,item.commit])} value={JSON.stringify([item.repository,item.path,item.commit])}>{item.repository} / {item.path}</option>)}</select></label><p>Source commit: <code>{source?.commit}</code></p><div className="document-bottom"><button disabled={busy||draftTransition||reading||composing||unresolvedResult||directUncertain} onClick={()=>submit('read',source)}>Ask Agent to read source</button><button disabled={busy||draftTransition||reading||composing||unresolvedResult||directUncertain||snapshot.writable===false||dirty||historical||recoveryDraft!==null} onClick={()=>submit('report',source)}>Replace document with file report</button></div>{(dirty||historical||recoveryDraft!==null)&&<p>Resolve and save any preserved draft, then return to the latest version before replacing this document. Earlier Git versions remain available.</p>}</details>}
@@ -265,6 +279,23 @@ export function App({connector=connect}) {
   if(markerActor.current?.api!==api||markerActor.current?.user!==api?.session?.userId)markerActor.current={api,user:api?.session?.userId};
   useEffect(()=>{lastRead.current.clear()},[api]);
   const roomCurrent=useRef(room);roomCurrent.current=room;
+  const sourceOwner=useRef(null),sourceNavigation=useRef(0);
+  const sourceAllowed=rooms.some(item=>item.id===documentRoom);
+  const nextSourceOwner={api,user:api?.session?.userId,documentRoom,document:activeDocument,room,filter,mode,historyOpen,panel,allowed:sourceAllowed};
+  if(!sourceOwner.current||Object.keys(nextSourceOwner).some(key=>sourceOwner.current[key]!==nextSourceOwner[key]))sourceOwner.current=nextSourceOwner;
+  async function openMessageSource(reference,isCurrent=()=>true){
+    const owner=sourceOwner.current,sequence=++sourceNavigation.current;
+    if(!owner?.api?.message||!owner.allowed||reference.room!==owner.documentRoom)throw Error('Source discussion is unavailable.');
+    try{
+      const event=await owner.api.message(reference.room,reference.event);
+      if(sourceOwner.current!==owner||sourceNavigation.current!==sequence||!isCurrent())return false;
+      if(event?.id!==reference.event||!event.content)throw Error('Source message is unavailable.');
+      const relation=event.content['m.relates_to'];
+      setRoom(reference.room);setPanel('discussion');setFilter(relation?.rel_type==='m.thread'&&typeof relation.event_id==='string'&&relation.event_id.startsWith('$')?relation.event_id:event.id);
+      return true;
+    }catch(error){if(sourceOwner.current!==owner||sourceNavigation.current!==sequence||!isCurrent())return false;throw error;}
+  }
+
   useEffect(()=>{if(room&&location.protocol.startsWith('http')){const url=new URL(location.href);url.searchParams.set('room',room);window.history.replaceState({},'',url);}},[room]);
 
   async function start(){setError('');try{const next=await connector();const list=await next.rooms();setApi(next);setAuthRequired(false);setRooms(list);const requested=new URLSearchParams(location.search).get('room');setRoom(list.some(r=>r.id===requested)?requested:(list.some(r=>r.id===next.session.initialRoom)?next.session.initialRoom:(list[0]?.id||'')));setOnline(true);}catch(e){setApi(null);setOnline(false);if(e.status===401)setAuthRequired(true);else{setAuthRequired(false);setError(errorText(e));}}}
@@ -444,7 +475,7 @@ export function App({connector=connect}) {
     {api.session.qa&&<div className="qa-banner">Visual regression capture · {api.session.qa} · isolated adapter</div>}
     {roomsError&&<div className="global-error" role="alert">Room list is reconnecting: {roomsError}</div>}
     {error&&<div className="global-error" role="alert"><AlertCircle size={16}/>{error}<button onClick={()=>setError('')} aria-label="Dismiss error"><X size={15}/></button></div>}
-    {selection.warning&&<div className="global-error" role="status">{selection.warning}</div>}<div className="content-layout">{activeDocument?<Documents onUnavailable={(name,status)=>{const protectedDraft=latestDocMeta.current.draftWorking||latestDocMeta.current.draftUnsafe;selection.deny(name,status,protectedDraft);setRequestedVersion(null);if(!protectedDraft)setMode('read');}} api={api} externalBusy={documentMoving} name={activeDocument} room={documentRoom} onSent={sent} mode={mode} setMode={setMode} historyOpen={historyOpen} onCloseHistory={()=>setHistoryOpen(false)} onMeta={setDocMeta} requestedVersion={requestedVersion} canDiscussVersion={Boolean(docMeta.commit)&&events.some(event=>documentVersion(event,api.session.agentId,api.session.synthetic,api.session.userId,activeDocument)===docMeta.commit)} onDiscussVersion={commit=>{const event=events.find(event=>documentVersion(event,api.session.agentId,api.session.synthetic,api.session.userId,activeDocument)===commit);if(event){setPanel('discussion');setFilter(event.content['m.relates_to']?.event_id||event.id)}}}/>:<section aria-label="Document selection"><p>{selection.ready?'No available document is selected.':'Loading the document list before restoring your selection…'}</p><button onClick={()=>{selection.retry();refreshDocuments();}}>Retry document list</button></section>}
+    {selection.warning&&<div className="global-error" role="status">{selection.warning}</div>}<div className="content-layout">{activeDocument?<Documents onOpenMessageSource={api.message?openMessageSource:null} onUnavailable={(name,status)=>{const protectedDraft=latestDocMeta.current.draftWorking||latestDocMeta.current.draftUnsafe;selection.deny(name,status,protectedDraft);setRequestedVersion(null);if(!protectedDraft)setMode('read');}} api={api} externalBusy={documentMoving} name={activeDocument} room={documentRoom} onSent={sent} mode={mode} setMode={setMode} historyOpen={historyOpen} onCloseHistory={()=>setHistoryOpen(false)} onMeta={setDocMeta} requestedVersion={requestedVersion} canDiscussVersion={Boolean(docMeta.commit)&&events.some(event=>documentVersion(event,api.session.agentId,api.session.synthetic,api.session.userId,activeDocument)===docMeta.commit)} onDiscussVersion={commit=>{const event=events.find(event=>documentVersion(event,api.session.agentId,api.session.synthetic,api.session.userId,activeDocument)===commit);if(event){setPanel('discussion');setFilter(event.content['m.relates_to']?.event_id||event.id)}}}/>:<section aria-label="Document selection"><p>{selection.ready?'No available document is selected.':'Loading the document list before restoring your selection…'}</p><button onClick={()=>{selection.retry();refreshDocuments();}}>Retry document list</button></section>}
       <aside className={'collaboration-panel '+(!panel?'panel-closed':'')} aria-label="Collaboration panel"><header className="panel-heading"><div><h2>{panel==='agent'?'Example Agent':'Discussion'}</h2><span>{selected?.name||'Room'}</span></div><button aria-label="Close collaboration panel" onClick={()=>setPanel(null)}><X size={18}/></button></header>
         <div className="panel-tabs"><button className={panel==='discussion'?'active':''} onClick={()=>setPanel('discussion')}>Messages</button><button className={panel==='agent'?'active':''} onClick={()=>setPanel('agent')}>Example Agent</button></div>
         {panel==='agent'&&!selected?.agentJoined&&<p role="status">The example Agent is not joined to this room. New rooms do not invite it unless you explicitly choose it.</p>}{panel==='agent'&&<div className="agent-disclosure"><Bot size={18}/><div><strong>Deterministic example</strong><p>Repeats messages and handles explicit Git requests. No LLM or intelligent editing is connected.</p></div></div>}
