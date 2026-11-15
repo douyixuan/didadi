@@ -984,3 +984,10 @@ it('preserves the requested source thread through discussion room initialization
  await waitFor(()=>expect(api.timeline).toHaveBeenLastCalledWith('!room'));expect(api.markRoomRead).not.toHaveBeenCalledWith('!room',expect.anything());
  const all=screen.getByRole('button',{name:'All messages',exact:true});expect(all.parentElement).toHaveTextContent('Thread $source');expect(within(screen.getByRole('navigation',{name:'Rooms'})).getByRole('button',{name:'Workspace',exact:true})).toHaveClass('room-selected');
 });
+
+it('ignores the old visible source link while another history version is loading',async()=>{
+ const api=documentSourceFixture();let finishVersion;api.document.mockImplementation(async(_room,commit)=>commit?new Promise(resolve=>{finishVersion=resolve}):({...doc,content:'# Source document\n\n[Open source message](https://matrix.to/#/%21room/%24source)'}));
+ render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Source document'});fireEvent.click(screen.getByRole('button',{name:'Version history',exact:true}));fireEvent.click(await screen.findByRole('button',{name:/Previous version/}));await waitFor(()=>expect(finishVersion).toBeTypeOf('function'));
+ fireEvent.click(screen.getByRole('link',{name:'Open source message',exact:true}));await act(async()=>finishVersion({...doc,content:'# Loaded history version'}));
+ expect(api.message).not.toHaveBeenCalled();expect(screen.getByRole('heading',{name:'Loaded history version'})).toBeInTheDocument();expect(screen.queryByRole('button',{name:'All messages',exact:true})).not.toBeInTheDocument();
+});

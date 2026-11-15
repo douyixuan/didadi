@@ -177,6 +177,36 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     const original=await request(bob.page,'/matrix/_matrix/client/v3/rooms/'+encodeURIComponent(room)+'/event/'+encodeURIComponent(event));
     assert.equal(original.status,200);assert.equal(original.data.content.body,sourceText);
     await bob.page.screenshot({path:evidenceDir+'/p071-message-document-source.png',fullPage:true});
+    // Keep source links in a second real Git version, then hold the older
+    // authorized snapshot while clicking the still-visible old page's link.
+    await bob.page.route('https://matrix.to/**',route=>route.abort());
+    await bob.page.getByRole('button',{name:'Edit',exact:true}).click();
+    await expect(editor(bob.page)).toContainText(sourceText,{timeout:30000});
+    await editor(bob.page).press('ControlOrMeta+End');await editor(bob.page).press('Enter');
+    const newerNote='P071 newer source version '+stamp;await editor(bob.page).pressSequentially(newerNote);
+    await expect(bob.page.getByText('Unsaved draft kept on this browser only.',{exact:false})).toBeVisible({timeout:30000});await save(bob.page);
+    await bob.page.getByRole('button',{name:'Read',exact:true}).click();await expect(sourceLinks).toHaveCount(2);
+    await bob.page.getByRole('button',{name:'Version history',exact:true}).click();
+    let ready,release,finished,entered=false;const held=new Promise(resolve=>{ready=resolve}),gate=new Promise(resolve=>{release=resolve}),done=new Promise(resolve=>{finished=resolve});
+    const versionPattern=url=>url.pathname==='/api/document'&&url.searchParams.get('path')===copied&&url.searchParams.get('commit')===source.commit;
+    await bob.page.route(versionPattern,async route=>{entered=true;let failure;
+      try{const response=await route.fetch();assert.equal(response.status(),200);const data=await response.json();assert.equal(data.commit,source.commit);assert.ok(data.content.includes(sourceText));ready(null);await gate;await route.fulfill({response});}
+      catch(error){failure=error;ready(error);await route.abort().catch(()=>{});}finally{finished(failure);}
+    });
+    let primaryFailure;
+    try{
+      await bob.page.getByRole('button',{name:/Previous version/}).first().click();
+      let timer;const failure=await Promise.race([held,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Historical snapshot hold was not reached')),30000)})]).finally(()=>clearTimeout(timer));if(failure)throw failure;
+      await expect(bob.page.locator('.markdown-body')).toHaveAttribute('aria-busy','true');
+      const localOrigin=new URL(bob.page.url()).origin;await sourceLinks.first().click();
+      await bob.page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+      assert.equal(new URL(bob.page.url()).origin,localOrigin);await expect(bob.page.locator('.page-eyebrow')).toContainText(copied);
+      await expect(bob.page.getByRole('button',{name:'All messages',exact:true})).toHaveCount(0);
+      await bob.page.screenshot({path:evidenceDir+'/p071-source-loading-guard.png',fullPage:true});
+    }catch(error){primaryFailure=error;throw error;}
+    finally{release();const failure=entered?await done:null;await bob.page.unroute(versionPattern);if(failure&&!primaryFailure)throw failure;}
+    await bob.page.getByRole('complementary',{name:'Version history'}).getByRole('button',{name:'Back to latest',exact:true}).click();
+    await expect(bob.page.locator('.markdown-body')).toContainText(newerNote,{timeout:30000});
     // Normal clicks stay in this app. Block the portable external fallback so
     // a regression never contacts matrix.to. Root and reply return to context.
     const joined=await request(bob.page,'/matrix/_matrix/client/v3/joined_rooms');assert.equal(joined.status,200);
@@ -190,7 +220,6 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
       if(path==='/api/rooms/read'&&request.method()==='POST'&&request.postDataJSON().room===room)sourceMarkers.push('workspace-read');
       if(decodeURIComponent(path)==='/matrix/_matrix/client/v3/rooms/'+room+'/read_markers')sourceMarkers.push('matrix-read');};
     bob.page.on('request',observeMarker);
-    await bob.page.route('https://matrix.to/**',route=>route.abort());
     const origin=new URL(bob.page.url()).origin;
     for(const [index,id] of [event,reply].entries()){
       const sourceResponse=bob.page.waitForResponse(response=>decodeURIComponent(new URL(response.url()).pathname)==='/matrix/_matrix/client/v3/rooms/'+room+'/event/'+id&&response.request().method()==='GET');
