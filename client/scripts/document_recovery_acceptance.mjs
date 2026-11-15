@@ -177,7 +177,15 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     const searchDialog=bob.page.getByRole('dialog');await searchDialog.getByRole('textbox',{name:'Search body text',exact:true}).fill(retryB);
     const searchResponse=bob.page.waitForResponse(response=>new URL(response.url()).pathname==='/api/search/documents'&&response.request().postDataJSON()?.query===retryB);
     await searchDialog.getByRole('button',{name:'Documents',exact:true}).click();const found=await searchResponse;assert.equal(found.status(),200);
-    const matched=(await found.json()).results.find(item=>item.name===moved&&item.excerpt.includes(retryB));assert.ok(matched);
+    let searchPage=await found.json();const searchCommit=searchPage.commit,seenSearchPages=new Set();
+    let matched=searchPage.results.find(item=>item.name===moved&&item.excerpt.includes(retryB));
+    while(!matched&&searchPage.next_path){
+      const after=searchPage.next_path;assert.ok(!seenSearchPages.has(after),'Search pagination must advance');seenSearchPages.add(after);assert.ok(seenSearchPages.size<=100,'Isolated acceptance fixture must stay bounded');
+      const nextSearch=bob.page.waitForResponse(response=>new URL(response.url()).pathname==='/api/search/documents'&&response.request().postDataJSON()?.query===retryB&&response.request().postDataJSON()?.after===after);
+      await searchDialog.getByRole('button',{name:'Load more results',exact:true}).click();const response=await nextSearch;assert.equal(response.status(),200);assert.equal(response.request().postDataJSON().commit,searchCommit);searchPage=await response.json();assert.equal(searchPage.commit,searchCommit);
+      matched=searchPage.results.find(item=>item.name===moved&&item.excerpt.includes(retryB));
+    }
+    assert.ok(matched,'Moved document must be found across the complete fixed-snapshot search');
     await searchDialog.getByRole('button',{name:moved+' · line '+matched.line,exact:true}).click();await expect(searchDialog).toHaveCount(0);await expect(bob.page.locator('.page-eyebrow')).toContainText(moved,{timeout:30000});
     await bob.page.getByRole('button',{name:'Version history',exact:true}).click();await expect(historyPanel.locator('.history-row')).toHaveCount(8,{timeout:30000});
     await historyPanel.getByRole('button',{name:'Load earlier versions',exact:true}).click();await expect(originalRow).toHaveCount(1,{timeout:30000});await originalRow.scrollIntoViewIfNeeded();
