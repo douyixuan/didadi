@@ -1,5 +1,5 @@
 import {it,expect} from 'vitest';
-import {documentVersion} from './documentReferences';
+import {documentVersion,documentSourceReference} from './documentReferences';
 const commit='a'.repeat(40);
 const event={sender:'@agent',content:{body:'Saved demo.md\nGit commit: '+commit+'\nBlob: '+'b'.repeat(40),'m.relates_to':{rel_type:'m.thread',event_id:'$request'},'org.didadi.task':{id:'$request'}}};
 it('accepts only a version receipt from the managed Agent and its task thread',()=>{
@@ -61,4 +61,9 @@ it('preserves browser-only synthetic direct-save version links',()=>{
  expect(documentVersion(sample,'sample-agent',true,'sample-user')).toBe('sample-123abc');
  expect(documentVersion({...sample,sender:'sample-other'},'sample-agent',true,'sample-user')).toBeNull();
  expect(documentVersion(sample,'sample-agent',false,'sample-user')).toBeNull();
+});
+
+it('accepts only a canonical source event in the document workspace',()=>{
+ expect(documentSourceReference('https://matrix.to/#/%21room/%24source','!room')).toEqual({room:'!room',event:'$source'});
+ for(const href of ['https://matrix.to/#/!other/$source','https://evil.invalid/#/!room/$source','http://matrix.to/#/!room/$source','https://user@matrix.to/#/!room/$source','https://matrix.to:8443/#/!room/$source','https://matrix.to/#/!room/$source/extra','https://matrix.to/#/!room/%ZZ','https://matrix.to/#/!room/$bad%0A','https://matrix.to/#/!room/$source?via=elsewhere','https://matrix.to/#/!room/$source%2Fother','https://matrix.to/#/!room/$source%3Fquery','https://matrix.to/#/!room/$source%5Cother','javascript:alert(1)'])expect(documentSourceReference(href,'!room')).toBeNull();
 });

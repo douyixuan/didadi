@@ -137,18 +137,115 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     await bob.page.locator('.composer textarea').fill(sourceText);
     await bob.page.locator('.composer').getByRole('button',{name:/^Send/}).click();
     const sentResponse=await sent;assert.equal(sentResponse.status(),200);const event=(await sentResponse.json()).event_id;
+    const replyText='P071 thread source '+stamp;
+    await bob.page.locator('.timeline article').filter({hasText:sourceText}).getByRole('button',{name:'Reply',exact:true}).click();
+    const replied=bob.page.waitForResponse(r=>new URL(r.url()).pathname.includes('/send/m.room.message/')&&r.request().method()==='PUT');
+    await bob.page.locator('.composer textarea').fill(replyText);
+    await bob.page.locator('.composer').getByRole('button',{name:/^Send/}).click();
+    const replyResponse=await replied;assert.equal(replyResponse.status(),200);const reply=(await replyResponse.json()).event_id;
     await bob.page.getByLabel('Select message '+event,{exact:true}).check();
+    await bob.page.getByLabel('Select message '+reply,{exact:true}).check();
     const copied='p071/'+stamp+'/From-message.md';
     await bob.page.getByLabel('Document path from messages').fill(copied);
+    // Lose a genuine successful create acknowledgement; do not fake the result.
+    const copyPattern=url=>url.pathname==='/api/documents/from-messages';let firstSaved,firstPayload,acknowledgementError;
+    await bob.page.route(copyPattern,async route=>{
+      if(firstSaved)return route.continue();
+      try{firstPayload=route.request().postDataJSON();const response=await route.fetch();assert.equal(response.status(),200);
+        firstSaved=await response.json();assert.equal(firstSaved.status,'saved');
+      }catch(error){acknowledgementError=error;}
+      await route.abort('failed');
+    });
     await bob.page.getByRole('button',{name:'Create document from messages',exact:true}).click();
+    await expect(bob.page.locator('.message-document-form [role="status"]')).toContainText('Retry the same selection to confirm',{timeout:30000});
+    await expect(bob.page.getByLabel('Document path from messages')).toHaveValue(copied);
+    await expect(bob.page.getByLabel('Document path from messages')).toBeDisabled();
+    await bob.page.unroute(copyPattern);if(acknowledgementError)throw acknowledgementError;
+    const git=args=>execFileSync('git',['--git-dir=.local/documents.git',...args],{encoding:'utf8'});
+    const head=git(['rev-parse','refs/heads/main']);
+    const beforeHistory=git(['log','--format=%H','refs/heads/main','--',copied]);
+    const retryResponse=bob.page.waitForResponse(r=>new URL(r.url()).pathname==='/api/documents/from-messages'&&r.request().method()==='POST');
+    await bob.page.getByRole('button',{name:'Create document from messages',exact:true}).click();
+    const retried=await retryResponse;assert.equal(retried.status(),200);assert.deepEqual(retried.request().postDataJSON(),firstPayload);
+    assert.equal((await retried.json()).commit,firstSaved.commit);assert.equal(git(['rev-parse','refs/heads/main']),head);assert.equal(git(['log','--format=%H','refs/heads/main','--',copied]),beforeHistory);
     await expect(bob.page.locator('.page-eyebrow')).toContainText(copied,{timeout:30000});
     const source=(await read(bob.page,copied)).data;
-    assert.ok(source.content.includes(sourceText));
-    const sourceLink=bob.page.locator('.markdown-body').getByRole('link',{name:'Open source message',exact:true});
-    assert.equal(decodeURIComponent(await sourceLink.getAttribute('href')),'https://matrix.to/#/'+room+'/'+event);
+    assert.ok(source.content.includes(sourceText)&&source.content.includes(replyText));
+    const sourceLinks=bob.page.locator('.markdown-body').getByRole('link',{name:'Open source message',exact:true});
+    await expect(sourceLinks).toHaveCount(2);
+    for(const [index,id] of [event,reply].entries())assert.equal(decodeURIComponent(await sourceLinks.nth(index).getAttribute('href')),'https://matrix.to/#/'+room+'/'+id);
     const original=await request(bob.page,'/matrix/_matrix/client/v3/rooms/'+encodeURIComponent(room)+'/event/'+encodeURIComponent(event));
     assert.equal(original.status,200);assert.equal(original.data.content.body,sourceText);
     await bob.page.screenshot({path:evidenceDir+'/p071-message-document-source.png',fullPage:true});
+    // Keep source links in a second real Git version, then hold the older
+    // authorized snapshot while clicking the still-visible old page's link.
+    await bob.page.route('https://matrix.to/**',route=>route.abort());
+    await bob.page.getByRole('button',{name:'Edit',exact:true}).click();
+    await expect(editor(bob.page)).toContainText(sourceText,{timeout:30000});
+    await editor(bob.page).press('ControlOrMeta+End');await editor(bob.page).press('Enter');
+    const newerNote='P071 newer source version '+stamp;await editor(bob.page).pressSequentially(newerNote);
+    await expect(bob.page.getByText('Unsaved draft kept on this browser only.',{exact:false})).toBeVisible({timeout:30000});await save(bob.page);
+    await bob.page.getByRole('button',{name:'Read',exact:true}).click();await expect(sourceLinks).toHaveCount(2);
+    const newerSource=(await read(bob.page,copied)).data;
+    assert.ok(newerSource.content.includes(newerNote));assert.notEqual(newerSource.blob,source.blob);
+    // The rich editor may insert at the heading or a body block depending on
+    // its active selection. Both belong to the read surface. Verify canonical
+    // Git text plus that entire surface, independent of presentation placement.
+    await expect(bob.page.locator('.document-surface')).toContainText(newerNote);
+    await bob.page.getByRole('button',{name:'Version history',exact:true}).click();
+    let ready,release,finished,entered=false;const held=new Promise(resolve=>{ready=resolve}),gate=new Promise(resolve=>{release=resolve}),done=new Promise(resolve=>{finished=resolve});
+    const versionPattern=url=>url.pathname==='/api/document'&&url.searchParams.get('path')===copied&&url.searchParams.get('commit')===source.commit;
+    await bob.page.route(versionPattern,async route=>{entered=true;let failure;
+      try{const response=await route.fetch();assert.equal(response.status(),200);const data=await response.json();assert.equal(data.commit,source.commit);assert.ok(data.content.includes(sourceText));ready(null);await gate;await route.fulfill({response});}
+      catch(error){failure=error;ready(error);await route.abort().catch(()=>{});}finally{finished(failure);}
+    });
+    let primaryFailure;
+    try{
+      await bob.page.getByRole('button',{name:/Previous version/}).first().click();
+      let timer;const failure=await Promise.race([held,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Historical snapshot hold was not reached')),30000)})]).finally(()=>clearTimeout(timer));if(failure)throw failure;
+      await expect(bob.page.locator('.markdown-body')).toHaveAttribute('aria-busy','true');
+      const localOrigin=new URL(bob.page.url()).origin;await sourceLinks.first().click();
+      await bob.page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+      assert.equal(new URL(bob.page.url()).origin,localOrigin);await expect(bob.page.locator('.page-eyebrow')).toContainText(copied);
+      await expect(bob.page.getByRole('button',{name:'All messages',exact:true})).toHaveCount(0);
+      await bob.page.screenshot({path:evidenceDir+'/p071-source-loading-guard.png',fullPage:true});
+    }catch(error){primaryFailure=error;throw error;}
+    finally{release();const failure=entered?await done:null;await bob.page.unroute(versionPattern);if(failure&&!primaryFailure)throw failure;}
+    await bob.page.getByRole('complementary',{name:'Version history'}).getByRole('button',{name:'Back to latest',exact:true}).click();
+    await expect(bob.page.locator('.document-surface')).toContainText(newerNote,{timeout:30000});
+    const latestSource=(await read(bob.page,copied)).data;assert.equal(latestSource.blob,newerSource.blob);assert.equal(latestSource.content,newerSource.content);
+    // Normal clicks stay in this app. Block the portable external fallback so
+    // a regression never contacts matrix.to. Root and reply return to context.
+    const joined=await request(bob.page,'/matrix/_matrix/client/v3/joined_rooms');assert.equal(joined.status,200);
+    const other=joined.data.joined_rooms.find(id=>id!==room);assert.ok(other,'Use an existing other joined room for source return');
+    await bob.page.goto('/?room='+encodeURIComponent(other));await expect(bob.page.locator('.page-eyebrow')).toContainText(copied,{timeout:30000});
+    await expect.poll(()=>new URL(bob.page.url()).searchParams.get('room')).toBe(other);
+    const otherLabel=await bob.page.locator('nav[aria-label="Rooms"] button.room-selected > span').first().evaluate(node=>node.firstChild.textContent);
+    const otherPanel=bob.page.locator('.collaboration-panel');if(await otherPanel.evaluate(node=>node.classList.contains('panel-closed')))await bob.page.getByRole('button',{name:'Discussion',exact:true}).click();
+    const roomDraft='P071 unsent other-room draft '+stamp;await bob.page.locator('.composer textarea').fill(roomDraft);
+    const sourceMarkers=[];const observeMarker=request=>{const path=new URL(request.url()).pathname;
+      if(path==='/api/rooms/read'&&request.method()==='POST'&&request.postDataJSON().room===room)sourceMarkers.push('workspace-read');
+      if(decodeURIComponent(path)==='/matrix/_matrix/client/v3/rooms/'+room+'/read_markers')sourceMarkers.push('matrix-read');};
+    bob.page.on('request',observeMarker);
+    const origin=new URL(bob.page.url()).origin;
+    for(const [index,id] of [event,reply].entries()){
+      const sourceResponse=bob.page.waitForResponse(response=>decodeURIComponent(new URL(response.url()).pathname)==='/matrix/_matrix/client/v3/rooms/'+room+'/event/'+id&&response.request().method()==='GET');
+      await sourceLinks.nth(index).click();assert.equal((await sourceResponse).status(),200);
+      assert.equal(new URL(bob.page.url()).origin,origin);
+      await expect.poll(()=>new URL(bob.page.url()).searchParams.get('room')).toBe(room);
+      const all=bob.page.getByRole('button',{name:'All messages',exact:true});await expect(all).toBeVisible({timeout:30000});
+      await expect(all.locator('..')).toContainText('Thread '+event.slice(0,10));
+      await expect(bob.page.locator('.timeline')).toContainText(sourceText,{timeout:30000});
+      await expect(bob.page.locator('.timeline')).toContainText(replyText,{timeout:30000});
+    }
+    await bob.page.screenshot({path:evidenceDir+'/p071-in-app-source-return.png',fullPage:true});
+    const returnRoom=bob.page.locator('nav[aria-label="Rooms"] button.room').filter({hasText:otherLabel});await expect(returnRoom).toHaveCount(1);await returnRoom.click();
+    await expect.poll(()=>new URL(bob.page.url()).searchParams.get('room')).toBe(other);await expect(bob.page.locator('.composer textarea')).toHaveValue(roomDraft);
+    await bob.page.screenshot({path:evidenceDir+'/p071-source-return-preserved-room-draft.png',fullPage:true});await bob.page.locator('.composer textarea').fill('');
+    assert.equal(sourceMarkers.length,0,'Source navigation must not mark the whole room read');bob.page.off('request',observeMarker);
+    await bob.page.unroute('https://matrix.to/**');
+    console.log('PASS REAL DOCUMENT #71: lost create acknowledgement retries identical operation without extra Git commit; root/reply source links return in-app');
+
     const proofs=[{path:a,commit:resolvedA.commit,blob:resolvedA.blob,marker:resolved},{path:moved,commit:final.commit,blob:final.blob,marker:retryB}];
     const receipts=await request(bob.page,'/matrix/_matrix/client/v3/rooms/'+encodeURIComponent(room)+'/messages?dir=b');
     assert.equal(receipts.status,200);

@@ -1,5 +1,5 @@
 import React from 'react';
-import {act,fireEvent,render,screen,waitFor} from '@testing-library/react';
+import {act,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
 import {describe,it,expect,vi} from 'vitest';
 vi.mock('./api',()=>({connect:vi.fn(),errorText:error=>error.message}));
 vi.mock('./BlockEditor',()=>({BlockEditor:React.forwardRef(function TestEditor({value,onChange,disabled},ref){React.useImperativeHandle(ref,()=>({markdown:()=>value}));return <textarea aria-label="Markdown document" disabled={disabled} value={value} onChange={e=>onChange(e.target.value)}/>})}));
@@ -887,4 +887,107 @@ it('keeps filenames distinguishable when document paths share a long directory',
  const a=await screen.findByRole('button',{name:folder+'/A.md',exact:true});const b=screen.getByRole('button',{name:folder+'/B.md',exact:true});
  expect(a.querySelector('strong')).toHaveTextContent(/^A.md$/);expect(b.querySelector('strong')).toHaveTextContent(/^B.md$/);
  expect(a).toHaveAttribute('title',folder+'/A.md');expect(a.querySelector('small')).toHaveTextContent(folder);
+});
+
+function documentSourceFixture(user='@user:local'){
+ const api=fixture();api.session.userId=user;api.session.liveMatrix=true;
+ api.document.mockResolvedValue({...doc,content:'# Source document\n\n[Open source message](https://matrix.to/#/%21room/%24source)'});
+ const source={id:'$source',sender:'@author:local',time:1,content:{msgtype:'m.text',body:'Actual source discussion'}};
+ api.message=vi.fn().mockResolvedValue(source);api.timeline.mockResolvedValue([source]);api.markRoomRead=vi.fn().mockResolvedValue({read:true});
+ return api;
+}
+it('opens a document source in its authorized discussion without leaving the app or marking the whole room read',async()=>{
+ const api=documentSourceFixture();render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Source document'});
+ fireEvent.click(screen.getByRole('link',{name:'Open source message',exact:true}));
+ await waitFor(()=>expect(api.message).toHaveBeenCalledWith('!room','$source'));
+ expect(await screen.findByRole('button',{name:'All messages',exact:true})).toBeInTheDocument();
+ expect(screen.getByText('Actual source discussion')).toBeInTheDocument();expect(api.send).not.toHaveBeenCalled();expect(api.markRoomRead).not.toHaveBeenCalled();
+});
+it('keeps the document on denied source access and allows a source-link retry',async()=>{
+ const api=documentSourceFixture();api.message.mockRejectedValueOnce(Object.assign(Error('Source access revoked'),{status:403}));
+ render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Source document'});
+ fireEvent.click(screen.getByRole('link',{name:'Open source message',exact:true}));await screen.findByText(/Source access revoked/);
+ expect(screen.getByRole('heading',{name:'Source document'})).toBeInTheDocument();expect(screen.queryByRole('button',{name:'All messages',exact:true})).not.toBeInTheDocument();
+ fireEvent.click(screen.getByRole('link',{name:'Open source message',exact:true}));await screen.findByRole('button',{name:'All messages',exact:true});expect(api.message).toHaveBeenCalledTimes(2);expect(api.send).not.toHaveBeenCalled();
+});
+it('does not apply a delayed source navigation after a room switch',async()=>{
+ const api=documentSourceFixture();let finish;
+ api.message.mockImplementation(()=>new Promise(resolve=>{finish=resolve}));api.rooms.mockResolvedValue([{id:'!room',name:'Workspace'},{id:'!other',name:'Other room'}]);api.timeline.mockResolvedValue([]);
+ render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Source document'});
+ fireEvent.click(screen.getByRole('link',{name:'Open source message',exact:true}));await waitFor(()=>expect(finish).toBeTypeOf('function'));
+ fireEvent.click(screen.getByRole('button',{name:'Other room',exact:true}));
+ await act(async()=>finish({id:'$source',content:{msgtype:'m.text',body:'Delayed private source'}}));
+ expect(screen.getByRole('button',{name:'Other room',exact:true})).toHaveClass('room-selected');expect(screen.queryByRole('button',{name:'All messages',exact:true})).not.toBeInTheDocument();expect(screen.queryByText('Delayed private source')).not.toBeInTheDocument();
+});
+it('does not show an old source failure after changing account adapters',async()=>{
+ const first=documentSourceFixture('@first:local');let rejectOld;first.message.mockImplementation(()=>new Promise((_resolve,reject)=>{rejectOld=reject}));
+ const view=render(<App connector={async()=>first}/>);await screen.findByRole('heading',{name:'Source document'});fireEvent.click(screen.getByRole('link',{name:'Open source message',exact:true}));await waitFor(()=>expect(rejectOld).toBeTypeOf('function'));
+ const next=documentSourceFixture('@second:local');next.document.mockResolvedValue({...doc,content:'# Second workspace'});
+ view.rerender(<App connector={async()=>next}/>);await screen.findByRole('heading',{name:'Second workspace'});
+ await act(async()=>rejectOld(Object.assign(Error('Old source failure'),{status:403})));
+ expect(screen.queryByText(/Old source failure/)).not.toBeInTheDocument();expect(screen.queryByRole('button',{name:'All messages',exact:true})).not.toBeInTheDocument();
+});
+
+it('ignores a source result after loading a different document version',async()=>{
+ const api=documentSourceFixture();let finish;api.message.mockImplementation(()=>new Promise(resolve=>{finish=resolve}));
+ api.document.mockImplementation(async(_room,commit)=>({...doc,content:commit?'# Historical source document':'# Source document\n\n[Open source message](https://matrix.to/#/%21room/%24source)'}));
+ render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Source document'});fireEvent.click(screen.getByRole('link',{name:'Open source message',exact:true}));await waitFor(()=>expect(finish).toBeTypeOf('function'));
+ fireEvent.click(screen.getByRole('button',{name:'Version history',exact:true}));fireEvent.click(await screen.findByRole('button',{name:/Previous version/}));await screen.findByRole('heading',{name:'Historical source document'});
+ await act(async()=>finish({id:'$source',content:{msgtype:'m.text',body:'Old version source'}}));
+ expect(screen.queryByRole('button',{name:'All messages',exact:true})).not.toBeInTheDocument();expect(screen.getByRole('heading',{name:'Historical source document'})).toBeInTheDocument();
+});
+
+it('does not navigate an old successful source into a new account',async()=>{
+ const first=documentSourceFixture('@first:local');let finish;first.message.mockImplementation(()=>new Promise(resolve=>{finish=resolve}));
+ const view=render(<App connector={async()=>first}/>);await screen.findByRole('heading',{name:'Source document'});fireEvent.click(screen.getByRole('link',{name:'Open source message',exact:true}));await waitFor(()=>expect(finish).toBeTypeOf('function'));
+ const next=documentSourceFixture('@second:local');next.document.mockResolvedValue({...doc,content:'# Second workspace'});next.timeline.mockResolvedValue([]);
+ view.rerender(<App connector={async()=>next}/>);await screen.findByRole('heading',{name:'Second workspace'});
+ await act(async()=>finish({id:'$source',content:{msgtype:'m.text',body:'Private first account source'}}));
+ expect(screen.queryByRole('button',{name:'All messages',exact:true})).not.toBeInTheDocument();expect(screen.queryByText('Private first account source')).not.toBeInTheDocument();expect(next.message).not.toHaveBeenCalled();
+});
+it('does not reopen a revoked source room from an earlier successful response',async()=>{
+ const api=documentSourceFixture();let finish;api.message.mockImplementation(()=>new Promise(resolve=>{finish=resolve}));
+ api.rooms.mockResolvedValueOnce([{id:'!room',name:'Workspace'},{id:'!safe',name:'Safe room'}]).mockResolvedValue([{id:'!safe',name:'Safe room'}]);
+ render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Source document'});fireEvent.click(screen.getByRole('link',{name:'Open source message',exact:true}));await waitFor(()=>expect(finish).toBeTypeOf('function'));
+ fireEvent.click(screen.getByRole('button',{name:'Refresh rooms',exact:true}));await waitFor(()=>expect(screen.getByRole('button',{name:'Safe room',exact:true})).toHaveClass('room-selected'));
+ await act(async()=>finish({id:'$source',content:{msgtype:'m.text',body:'Revoked source response'}}));
+ expect(screen.getByRole('button',{name:'Safe room',exact:true})).toHaveClass('room-selected');expect(screen.queryByRole('button',{name:'All messages',exact:true})).not.toBeInTheDocument();expect(screen.queryByText('Revoked source response')).not.toBeInTheDocument();
+});
+it('keeps a new editing draft when an old source request finishes',async()=>{
+ const api=documentSourceFixture();let finish;api.message.mockImplementation(()=>new Promise(resolve=>{finish=resolve}));
+ render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Source document'});fireEvent.click(screen.getByRole('link',{name:'Open source message',exact:true}));await waitFor(()=>expect(finish).toBeTypeOf('function'));
+ fireEvent.click(screen.getByRole('button',{name:'Edit',exact:true}));fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'New editing draft'}});
+ await act(async()=>finish({id:'$source',content:{msgtype:'m.text',body:'Old source result'}}));
+ expect(screen.getByLabelText('Markdown document')).toHaveValue('New editing draft');expect(screen.queryByRole('button',{name:'All messages',exact:true})).not.toBeInTheDocument();expect(api.send).not.toHaveBeenCalled();
+});
+
+it('returns a source reply to its parent discussion thread',async()=>{
+ const api=documentSourceFixture();const reply={id:'$source',sender:'@author:local',content:{msgtype:'m.text',body:'Source reply','m.relates_to':{rel_type:'m.thread',event_id:'$parent'}}};
+ api.message.mockResolvedValue(reply);api.timeline.mockResolvedValue([{id:'$parent',sender:'@author:local',content:{msgtype:'m.text',body:'Parent discussion'}},reply]);
+ render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Source document'});fireEvent.click(screen.getByRole('link',{name:'Open source message',exact:true}));
+ const all=await screen.findByRole('button',{name:'All messages',exact:true});expect(all.parentElement).toHaveTextContent('Thread $parent');expect(screen.getByText('Source reply')).toBeInTheDocument();expect(screen.getByText('Parent discussion')).toBeInTheDocument();
+});
+
+it('keeps a newly opened search in its room when an older source request finishes',async()=>{
+ const api=documentSourceFixture();let finish;api.message.mockImplementation(()=>new Promise(resolve=>{finish=resolve}));api.rooms.mockResolvedValue([{id:'!room',name:'Workspace'},{id:'!other',name:'Other room'}]);
+ api.searchMessages=vi.fn().mockResolvedValue({events:[],next_batch:null});api.searchDocuments=vi.fn().mockResolvedValue({documents:[]});
+ render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Source document'});fireEvent.click(screen.getByRole('button',{name:'Other room',exact:true}));fireEvent.click(screen.getByRole('link',{name:'Open source message',exact:true}));await waitFor(()=>expect(finish).toBeTypeOf('function'));
+ fireEvent.click(screen.getByRole('button',{name:'Open full-text search',exact:true}));await screen.findByRole('dialog',{name:'Search messages and document text'});
+ await act(async()=>finish({id:'$source',content:{msgtype:'m.text',body:'Old source'}}));
+ expect(screen.getByRole('button',{name:'Other room',exact:true})).toHaveClass('room-selected');expect(screen.getByRole('dialog',{name:'Search messages and document text'})).toBeInTheDocument();expect(screen.queryByRole('button',{name:'All messages',exact:true})).not.toBeInTheDocument();
+});
+
+it('preserves the requested source thread through discussion room initialization',async()=>{
+ const api=documentSourceFixture();api.rooms.mockResolvedValue([{id:'!room',name:'Workspace'},{id:'!other',name:'Other room'}]);
+ render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Source document'});fireEvent.click(screen.getByRole('button',{name:'Other room',exact:true}));await waitFor(()=>expect(screen.getByRole('button',{name:'Other room',exact:true})).toHaveClass('room-selected'));
+ await act(async()=>fireEvent.click(screen.getByRole('link',{name:'Open source message',exact:true})));
+ await waitFor(()=>expect(api.timeline).toHaveBeenLastCalledWith('!room'));expect(api.markRoomRead).not.toHaveBeenCalledWith('!room',expect.anything());
+ const all=screen.getByRole('button',{name:'All messages',exact:true});expect(all.parentElement).toHaveTextContent('Thread $source');expect(within(screen.getByRole('navigation',{name:'Rooms'})).getByRole('button',{name:'Workspace',exact:true})).toHaveClass('room-selected');
+});
+
+it('ignores the old visible source link while another history version is loading',async()=>{
+ const api=documentSourceFixture();let finishVersion;api.document.mockImplementation(async(_room,commit)=>commit?new Promise(resolve=>{finishVersion=resolve}):({...doc,content:'# Source document\n\n[Open source message](https://matrix.to/#/%21room/%24source)'}));
+ render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Source document'});fireEvent.click(screen.getByRole('button',{name:'Version history',exact:true}));fireEvent.click(await screen.findByRole('button',{name:/Previous version/}));await waitFor(()=>expect(finishVersion).toBeTypeOf('function'));
+ fireEvent.click(screen.getByRole('link',{name:'Open source message',exact:true}));await act(async()=>finishVersion({...doc,content:'# Loaded history version'}));
+ expect(api.message).not.toHaveBeenCalled();expect(screen.getByRole('heading',{name:'Loaded history version'})).toBeInTheDocument();expect(screen.queryByRole('button',{name:'All messages',exact:true})).not.toBeInTheDocument();
 });
