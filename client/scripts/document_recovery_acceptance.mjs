@@ -153,6 +153,8 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     const returnAction=historyPanel.getByRole('button',{name:'Back to latest',exact:true});const target=await returnAction.boundingBox();assert.ok(target&&target.height>=44&&target.x>=0&&target.x+target.width<=390&&target.y>=0&&target.y+target.height<=844);await expect(returnAction).toBeInViewport({ratio:1});
     await bob.page.screenshot({path:evidenceDir+'/p071-pre-move-paged-history-mobile.png',fullPage:true});
     await returnAction.click();await expect(historyPanel).toHaveCount(0);await expect(bob.page.locator('.markdown-body')).toContainText('History checkpoint 8',{timeout:30000});
+    const mobileExport=bob.page.getByRole('button',{name:'Export Markdown',exact:true});await mobileExport.scrollIntoViewIfNeeded();const exportTarget=await mobileExport.boundingBox();assert.ok(exportTarget&&exportTarget.height>=44&&exportTarget.width>=44);
+    const mobileDownload=bob.page.waitForEvent('download');await mobileExport.click();const mobileFile=await mobileDownload,mobileStream=await mobileFile.createReadStream(),mobileChunks=[];for await(const chunk of mobileStream)mobileChunks.push(chunk);assert.equal(Buffer.concat(mobileChunks).toString('utf8'),final.content);
     await bob.page.screenshot({path:evidenceDir+'/p071-history-mobile-returned-latest.png',fullPage:true});
     await bob.page.setViewportSize({width:1280,height:720});if(panelWasOpen)await bob.page.getByRole('button',{name:'Discussion',exact:true}).click();
     assert.equal((await read(bob.page,moved)).data.blob,final.blob);assert.equal((await read(bob.page,a)).data.blob,resolvedA.blob);

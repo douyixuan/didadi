@@ -1052,18 +1052,23 @@ it('ignores an earlier document history page after switching document and accoun
 });
 
 it('does not restore an earlier document response after history reauthorization denies access',async()=>{
- const api=fixture();let finish;const denied=Object.assign(new Error('Room access revoked'),{status:403});const unavailable=vi.fn();
- api.document.mockImplementation(()=>new Promise(resolve=>{finish=resolve}));api.historyPage=vi.fn().mockRejectedValue(denied);
- render(<Documents api={api} room="!room" name="Private.md" historyOpen onUnavailable={unavailable}/>);
- await waitFor(()=>expect(unavailable).toHaveBeenCalledWith('Private.md',403));
+ const api=fixture();let finish,rejectPage;const denied=Object.assign(new Error('Room access revoked'),{status:403});const unavailable=vi.fn();
+ api.document.mockResolvedValueOnce({...doc,name:'Private.md',content:'# Prior authorized document'}).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve}));
+ api.historyPage=vi.fn().mockResolvedValueOnce({versions:[{commit:doc.commit,path:'Private.md'}],next_cursor:'older'}).mockImplementationOnce(()=>new Promise((_resolve,reject)=>{rejectPage=reject}));
+ render(<Documents api={api} room="!room" name="Private.md" mode="edit" historyOpen onUnavailable={unavailable}/>);
+ await waitFor(()=>expect(screen.getByLabelText('Markdown document')).toHaveValue('# Prior authorized document'));
+ fireEvent.click(await screen.findByRole('button',{name:'Load earlier versions',exact:true}));await waitFor(()=>expect(rejectPage).toBeTypeOf('function'));
+ fireEvent.click(screen.getByRole('button',{name:'Load latest',exact:true}));await waitFor(()=>expect(finish).toBeTypeOf('function'));
+ await act(async()=>rejectPage(denied));await waitFor(()=>expect(unavailable).toHaveBeenCalledWith('Private.md',403));
  await act(async()=>finish({...doc,name:'Private.md',content:'# Revoked document must not reappear'}));
- expect(screen.queryByRole('heading',{name:'Revoked document must not reappear'})).not.toBeInTheDocument();
- expect(document.querySelectorAll('.history-row')).toHaveLength(0);
+ expect(screen.getByLabelText('Markdown document')).toHaveValue('# Prior authorized document');expect(document.querySelectorAll('.history-row')).toHaveLength(0);
 });
 it('does not restore an earlier history response after the document read denies access',async()=>{
  const api=fixture();let finish;const unavailable=vi.fn();
- api.document.mockRejectedValue(Object.assign(new Error('Room access revoked'),{status:403}));api.historyPage=vi.fn(()=>new Promise(resolve=>{finish=resolve}));
- render(<Documents api={api} room="!room" name="Private.md" historyOpen onUnavailable={unavailable}/>);
+ api.document.mockResolvedValueOnce({...doc,name:'Private.md',content:'# Prior authorized document'}).mockRejectedValueOnce(Object.assign(new Error('Room access revoked'),{status:403}));
+ api.historyPage=vi.fn(()=>new Promise(resolve=>{finish=resolve}));
+ render(<Documents api={api} room="!room" name="Private.md" mode="edit" historyOpen onUnavailable={unavailable}/>);
+ await waitFor(()=>expect(finish).toBeTypeOf('function'));fireEvent.click(screen.getByRole('button',{name:'Load latest',exact:true}));
  await waitFor(()=>expect(unavailable).toHaveBeenCalledWith('Private.md',403));
  await act(async()=>finish({versions:[{commit:doc.commit,path:'Private old name.md'}],next_cursor:'stale'}));
  expect(document.querySelectorAll('.history-row')).toHaveLength(0);expect(screen.queryByText('At Private old name.md')).not.toBeInTheDocument();
@@ -1112,6 +1117,14 @@ it('keeps editing mounted during IME composition in compact navigation',async()=
 });
 it('uses the named file as a presentation fallback without rewriting its Markdown',async()=>{
  const api=fixture(),body='Plain body without a heading.';api.document.mockResolvedValue({...doc,name:'Archive/B.md',content:body});
- const view=render(<Documents api={api} room="!room" name="Archive/B.md"/>);await screen.findByRole('heading',{name:'B.md'});fireEvent.click(screen.getByRole('button',{name:'Export Markdown'}));expect(downloadMarkdown).toHaveBeenLastCalledWith(body,'B.md');view.unmount();
+ const view=render(<Documents api={api} room="!room" name="Archive/B.md"/>);await screen.findByRole('heading',{name:'B.md'});expect(screen.queryByRole('button',{name:'Ask example Agent to read'})).not.toBeInTheDocument();fireEvent.click(screen.getByRole('button',{name:'Export Markdown'}));expect(downloadMarkdown).toHaveBeenLastCalledWith(body,'B.md');view.unmount();
  const other=fixture();other.document.mockResolvedValue({...doc,name:'Archive/B.md',content:'# Untitled document\n\nLiteral authored title.'});render(<Documents api={other} room="!room" name="Archive/B.md"/>);await screen.findByRole('heading',{name:'Untitled document'});
+});
+
+it('loads history after the latest document has synchronized instead of showing a prior head',async()=>{
+ const api=fixture();let finish,synchronized=false;const fresh='c'.repeat(40),prior='b'.repeat(40);
+ api.document.mockImplementation(()=>new Promise(resolve=>{finish=()=>{synchronized=true;resolve({...doc,name:'A.md',content:'# New canonical document',commit:fresh})}}));
+ api.historyPage=vi.fn(async()=>({versions:[{commit:synchronized?fresh:prior,path:'A.md'}],next_cursor:null}));
+ render(<Documents api={api} room="!room" name="A.md" historyOpen/>);await waitFor(()=>expect(finish).toBeTypeOf('function'));await act(async()=>finish());
+ await screen.findByRole('heading',{name:'New canonical document'});await waitFor(()=>expect(document.querySelector('.history-row code')).toHaveTextContent(fresh.slice(0,10)));expect(document.querySelector('.history-row code')).not.toHaveTextContent(prior.slice(0,10));
 });

@@ -244,6 +244,8 @@ class GitDocs:
         if type(limit) is not int or not 1 <= limit <= 20:
             raise ValueError('history page size must be between 1 and 20')
         with self._locked():
+            if cursor is None:
+                self._sync()
             current = self._ref(self.branch)
             head, start, path, creation = current, current, name, None
             if cursor is not None:

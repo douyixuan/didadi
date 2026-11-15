@@ -117,3 +117,15 @@ class DocumentHistoryTests(unittest.TestCase):
         ])
         self.assertNotIn(unrelated['commit'], [item['commit'] for item in versions])
         self.assertEqual(self.store.read('B.md'), 'same bytes')
+
+    def test_first_page_reflects_the_head_imported_during_synchronization(self):
+        from unittest.mock import patch
+        first = self.store.write('A.md', 'old canonical view')
+        advanced = self.store.write('A.md', 'new canonical view', first['blob'])
+        self.store._git('update-ref', self.store.branch, first['commit'], advanced['commit'])
+        def import_remote_head():
+            self.store._git('update-ref', self.store.branch, advanced['commit'], first['commit'])
+        with patch.object(self.store, '_sync', side_effect=import_remote_head):
+            page = self.store.history_page('A.md')
+        self.assertEqual(page['head'], advanced['commit'])
+        self.assertEqual(page['versions'][0], {'commit': advanced['commit'], 'path': 'A.md'})

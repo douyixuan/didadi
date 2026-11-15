@@ -281,3 +281,12 @@ class DocumentServiceTests(unittest.TestCase):
         self.assertEqual(revoked.exception.status, 403)
         self.joined = True
         self.assertEqual(self.service.history('!doc:local', 'A.md', page['next_cursor'])['versions'][-1]['commit'], first['commit'])
+
+    def test_history_divergence_is_a_typed_recoverable_error_not_a_fake_empty_page(self):
+        from src.gitdocs import RemoteDiverged
+        with patch.object(self.store, 'history_page', side_effect=RemoteDiverged('a'*40, 'b'*40, 'c'*40)):
+            with self.assertRaises(DocumentError) as failure:
+                self.service.history('!doc:local', 'A.md')
+        self.assertEqual(failure.exception.status, 503)
+        self.assertEqual(failure.exception.data['status'], 'remote_diverged')
+        self.assertEqual(failure.exception.data['recovery']['local_commit'], 'a'*40)
