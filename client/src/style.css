@@ -66,3 +66,6 @@ button:focus-visible,summary:focus-visible{outline:2px solid #41485f;outline-off
 .matrix-login button{width:100%;min-height:42px}.matrix-login .login-error{color:#a43f36;background:#fff0ed;padding:10px;border-radius:6px;font-size:12px}
 .matrix-login .login-notice{font-size:11px;color:#687085;line-height:1.6;margin:23px 0 0}
 .session-note{flex-wrap:wrap}.session-note .signout{width:100%;justify-content:flex-start;overflow-wrap:anywhere;word-break:break-word;white-space:normal;text-align:left;padding:6px 0;color:#4a537a;font-size:11px}
+
+/* Genuine Matrix per-room unread notification counter. */
+.room .room-unread{margin-left:auto;flex-shrink:0;min-width:19px;padding:2px 5px;border-radius:10px;background:#6573a8;color:#fff;font-size:10px;font-weight:600;text-align:center;overflow:visible}

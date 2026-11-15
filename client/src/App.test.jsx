@@ -46,6 +46,28 @@ describe('P0 real Matrix room membership visibility',()=>{
   });
 });
 
+describe('P0 ROOM-03 server-derived unread notifications',()=>{
+  it('shows only real room counts and acknowledges the selected room without reading another',async()=>{
+    const api=fixture();
+    api.session.liveMatrix=true;
+    api.markRoomRead=vi.fn().mockResolvedValue({read:true});
+    api.rooms.mockResolvedValue([
+      {id:'!room',name:'Workspace',agentJoined:true,unread:0},
+      {id:'!other',name:'Other room',agentJoined:false,unread:3},
+    ]);
+    api.timelinePage=vi.fn().mockResolvedValue({
+      events:[{id:'$visible',sender:'@bob:local',time:1,content:{msgtype:'m.text',body:'Read only this room'}}],
+      previousCursor:null,
+    });
+    render(<App connector={async()=>api}/>);
+    expect(await screen.findByLabelText('Unread messages in Other room')).toHaveTextContent('3');
+    expect(screen.queryByLabelText('Unread messages in Workspace')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'Discussion',exact:true}));
+    await waitFor(()=>expect(api.markRoomRead).toHaveBeenCalledWith('!room','$visible'));
+    expect(api.markRoomRead).not.toHaveBeenCalledWith('!other',expect.anything());
+  });
+});
+
 describe('P0 revoked-room race regressions',()=>{
   it('selects a newly joined room after starting with an empty room list',async()=>{
     const api=fixture();
@@ -824,4 +846,15 @@ it('queues an authoritative post-join room refresh behind an older in-flight sna
   await waitFor(()=>expect(screen.getByRole('button',{name:/New DM/})).toHaveClass('room-selected'));
   expect(api.rooms.mock.calls.length).toBeGreaterThanOrEqual(3);
   expect(api.joinRoom).toHaveBeenCalledWith('!invited');
+});
+it('does not acknowledge the main timeline while a thread is displayed',async()=>{
+ const api=fixture(),timers=new Map(),original=setInterval;const spy=vi.spyOn(globalThis,'setInterval').mockImplementation((fn,delay,...args)=>{if(delay===2000){timers.set(delay,fn);return 99999;}return original(fn,delay,...args)});
+ const root={id:'$root',sender:'@bob:local',content:{body:'Root'},time:1};api.session.liveMatrix=true;api.markRoomRead=vi.fn(async()=>({read:true}));api.timelinePage=vi.fn().mockResolvedValue({events:[root],previousCursor:null});api.threadPage=vi.fn(async()=>({root,events:[],previousCursor:null}));
+ try{render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Team handbook'});fireEvent.click(screen.getByRole('button',{name:'Discussion',exact:true}));await screen.findByText('Root');await waitFor(()=>expect(api.markRoomRead).toHaveBeenCalled());fireEvent.click(screen.getAllByRole('button',{name:'View thread',exact:true})[0]);await screen.findByText(/Thread history/);api.markRoomRead.mockClear();api.timelinePage.mockResolvedValue({events:[root,{...root,id:'$unseen',content:{body:'Unseen main message'}}],previousCursor:null});await act(async()=>{await timers.get(2000)()});expect(api.markRoomRead).not.toHaveBeenCalled();fireEvent.click(screen.getByRole('button',{name:'All messages'}));await waitFor(()=>expect(api.markRoomRead).toHaveBeenCalledWith('!room','$unseen'));}finally{spy.mockRestore();}
+});
+it('waits for the selected room timeline before acknowledging after a fast switch',async()=>{
+ const api=fixture();api.rooms.mockResolvedValue([{id:'!room',name:'First'},{id:'!other',name:'Second'}]);let finish;api.timelinePage=vi.fn(room=>room==='!room'?Promise.resolve({events:[{id:'$first',sender:'@a',content:{body:'First message'}}],previousCursor:null}):new Promise(r=>finish=r));api.markRoomRead=vi.fn(async()=>({read:true}));render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Team handbook'});fireEvent.click(screen.getByRole('button',{name:'Discussion',exact:true}));await waitFor(()=>expect(api.markRoomRead).toHaveBeenCalledWith('!room','$first'));api.markRoomRead.mockClear();fireEvent.click(screen.getByRole('button',{name:'Second',exact:true}));expect(api.markRoomRead).not.toHaveBeenCalled();await act(async()=>finish({events:[{id:'$second',sender:'@b',content:{body:'Second message'}}],previousCursor:null}));await waitFor(()=>expect(api.markRoomRead).toHaveBeenCalledWith('!other','$second'));expect(api.markRoomRead).not.toHaveBeenCalledWith('!other','$first');
+});
+it('does not acknowledge old identity events or let an old marker failure reset the new identity',async()=>{
+ const first=fixture(),next=fixture();first.session.userId='@first:test';next.session.userId='@second:test';const event={id:'$shared',sender:'@a',content:{body:'Shared event'}};let reject,load;first.timelinePage=vi.fn(async()=>({events:[event],previousCursor:null}));first.markRoomRead=vi.fn(()=>new Promise((_,r)=>reject=r));next.timelinePage=vi.fn(()=>new Promise(r=>load=r));next.markRoomRead=vi.fn(async()=>({read:true}));const view=render(<App connector={async()=>first}/>);await screen.findByRole('heading',{name:'Team handbook'});fireEvent.click(screen.getByRole('button',{name:'Discussion',exact:true}));await waitFor(()=>expect(first.markRoomRead).toHaveBeenCalled());view.rerender(<App connector={async()=>next}/>);await waitFor(()=>expect(next.timelinePage).toHaveBeenCalled());expect(next.markRoomRead).not.toHaveBeenCalled();await act(async()=>load({events:[event],previousCursor:null}));await waitFor(()=>expect(next.markRoomRead).toHaveBeenCalledTimes(1));await act(async()=>reject(Error('Old session failure')));fireEvent.click(screen.getByRole('button',{name:'Discussion',exact:true}));fireEvent.click(screen.getByRole('button',{name:'Discussion',exact:true}));expect(next.markRoomRead).toHaveBeenCalledTimes(1);
 });
