@@ -120,11 +120,11 @@ class StableProductGateTests(unittest.TestCase):
         original = Path.read_text
         roadmap = original(root/'ROADMAP.md')
         config = json.loads(original(root/'roadmap/_checks.json'))
-        self.assertEqual(validate(root), (16, 1))
+        self.assertEqual(validate(root), (16, 2))
         cases = [
-            {'ROADMAP.md': roadmap.replace('- [ ] [房间通信隔离](https://github.com/douyixuan/didadi/issues/70)\n', '')},
+            {'ROADMAP.md': roadmap.replace('- [x] [房间通信隔离](https://github.com/douyixuan/didadi/issues/70)\n', '')},
             {'ROADMAP.md': roadmap.replace('/issues/70)', '/issues/69)')},
-            {'ROADMAP.md': roadmap.replace('- [ ] [房间通信隔离]', '- [x] [房间通信隔离]')},
+            {'ROADMAP.md': roadmap.replace('- [ ] [多人文档协作]', '- [x] [多人文档协作]')},
             {'roadmap/README.md': original(root/'roadmap/README.md').replace('- 真实登录（待接入）', '')},
         ]
         no_proof = json.loads(json.dumps(config)); no_proof['accepted'] = {}
@@ -171,3 +171,26 @@ class StableProductGateTests(unittest.TestCase):
                 return changed if file == path else original(file, *args, **kwargs)
             with self.subTest(case=name), patch.object(Path, 'read_text', read):
                 with self.assertRaises(ValueError): validate(root)
+
+    def test_acceptance_is_bound_to_the_same_issue_and_evidence_section(self):
+        from unittest.mock import patch
+        root=Path(__file__).resolve().parents[1]
+        original=Path.read_text
+        config=json.loads(original(root/'roadmap/_checks.json'))
+        evidence=original(root/'docs/MVP_ACCEPTANCE.md')
+        proof=config['accepted']['69']
+        prefix,section=evidence.split('## 真实登录既有验收证据',1)
+        wrong_record=proof['record'].replace('/issues/69#','/issues/70#')
+        wrong_config=json.loads(json.dumps(config));wrong_config['accepted']['69']['record']=wrong_record
+        orphan=json.loads(json.dumps(config));orphan['accepted']['71']=dict(proof)
+        mutations=[
+            {'docs/MVP_ACCEPTANCE.md':prefix+'## 真实登录既有验收证据'+section.replace(proof['version'],'missing-version')},
+            {'roadmap/_checks.json':json.dumps(wrong_config),'docs/MVP_ACCEPTANCE.md':evidence.replace(proof['record'],wrong_record)},
+            {'roadmap/_checks.json':json.dumps(orphan)},
+        ]
+        for replacements in mutations:
+            def read(path,*args,**kwargs):
+                relative=str(path.relative_to(root)) if path.is_relative_to(root) else ''
+                return replacements[relative] if relative in replacements else original(path,*args,**kwargs)
+            with self.subTest(case=list(replacements)),patch.object(Path,'read_text',read):
+                with self.assertRaises(ValueError):validate(root)

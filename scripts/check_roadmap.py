@@ -214,6 +214,22 @@ def requirement_trace(text, requirements, legal_leaves):
     return records
 
 
+def scoped_evidence(root, reference):
+    """Read only the declared Markdown section, never borrow another leaf's proof."""
+    parsed=urlsplit(reference)
+    if parsed.scheme or not parsed.fragment:
+        raise ValueError('Stable acceptance needs a local, section-scoped evidence reference')
+    text=(root/unquote(parsed.path)).read_text()
+    headings=list(re.finditer(r'^(#{1,6})\s+(.+)$',text,re.M))
+    matches=[index for index,item in enumerate(headings) if slug(item[2])==unquote(parsed.fragment)]
+    if len(matches)!=1:
+        raise ValueError('Acceptance evidence section must be unambiguous')
+    index=matches[0];start=headings[index];end=len(text)
+    for item in headings[index+1:]:
+        if len(item[1])<=len(start[1]):end=item.start();break
+    return text[start.start():end]
+
+
 def validate_stable(root, config, require=None):
     path = root / config['roadmap']
     leaves = tree(path)
@@ -236,11 +252,14 @@ def validate_stable(root, config, require=None):
     for file, digest in config['historical_files'].items():
         if hashlib.sha256((root / file).read_bytes()).hexdigest() != digest:
             raise ValueError('Historical narrow evidence changed; review archive migration explicitly')
+    accepted=config.get('accepted',{})
+    if not isinstance(accepted,dict) or set(accepted)!={str(number) for number,checked in numbers.items() if checked}:
+        raise ValueError('Acceptance records must exactly match checked product leaves')
     for number, checked in numbers.items():
         if not checked:
             continue
         proof = config.get('accepted', {}).get(str(number))
-        if number != 69 or not proof:
+        if number not in {69, 70} or not proof:
             raise ValueError('No verified stable product acceptance for this checked issue')
         if proof.get('kind') != 'actual-user-flow' or not proof.get('scope'):
             raise ValueError('Real user-flow acceptance and bounded scope required')
@@ -249,7 +268,12 @@ def validate_stable(root, config, require=None):
                 raise ValueError('Exact tested and delivered versions required')
         for key in ('evidence', 'record', 'real_ci', 'main_ci'):
             local_link(root, root / 'baseline', proof.get(key))
-        text = (root / proof['evidence'].split('#')[0]).read_text()
+        if not re.fullmatch(rf'https://github\.com/douyixuan/didadi/issues/{number}#issuecomment-\d+',proof['record']):
+            raise ValueError('Acceptance record must belong to this exact product issue')
+        for key in ('real_ci','main_ci'):
+            if not re.fullmatch(r'https://github\.com/douyixuan/didadi/actions/runs/\d+',proof[key]):
+                raise ValueError('Acceptance CI must identify an exact repository workflow run')
+        text = scoped_evidence(root,proof['evidence'])
         if not all(proof[key] in text for key in ('version', 'main', 'record', 'real_ci', 'main_ci')):
             raise ValueError('Acceptance fields must match the retained real record')
     archived = root/'artifact/032-requirements-completion/historical-20261022.md'

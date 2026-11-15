@@ -7,7 +7,7 @@
 ### 身份与通信
 
 - [x] [登录会话退出](https://github.com/douyixuan/didadi/issues/69)
-- [ ] [房间通信隔离](https://github.com/douyixuan/didadi/issues/70)
+- [x] [房间通信隔离](https://github.com/douyixuan/didadi/issues/70)
 
 ### 文档与恢复
 
