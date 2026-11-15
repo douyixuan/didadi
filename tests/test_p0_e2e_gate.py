@@ -26,9 +26,11 @@ class P0RealE2EGateTests(unittest.TestCase):
         self.assertIn("\n  p0-real-e2e-gate:\n", self.workflow)
         gate = self.workflow.split("\n  p0-real-e2e-gate:\n", 1)[1]
         self.assertIn("if: ${{ always() }}", gate)
-        self.assertIn("needs: [matrix-smoke]", gate)
+        self.assertIn("needs: [change-scope, matrix-smoke, clean-room-release]", gate)
         self.assertIn("MATRIX_RESULT: ${{ needs.matrix-smoke.result }}", gate)
-        self.assertIn('if [ "$MATRIX_RESULT" != "success" ]; then', gate)
+        self.assertIn('python3 -m scripts.p0_ci_policy gate', gate)
+        self.assertIn('CLEAN_RESULT: ${{ needs.clean-room-release.result }}',gate)
+        self.assertIn('TRUSTED_PR:',gate)
 
 
 if __name__ == "__main__":

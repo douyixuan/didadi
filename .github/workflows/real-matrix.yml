@@ -8,17 +8,6 @@ on:
     branches: [main]
   push:
     branches: [main]
-    paths:
-      - 'src/**'
-      - 'client/**'
-      - 'scripts/**'
-      - 'tests/**'
-      - 'deploy/**'
-      - 'docker-compose*.yml'
-      - 'compose.yaml'
-      - 'requirements-runtime.txt'
-      - '.github/workflows/test.yml'
-      - '.github/workflows/real-matrix.yml'
   workflow_dispatch:
     inputs:
       allow_real_matrix:
@@ -34,6 +23,19 @@ on:
 permissions:
   contents: read
 jobs:
+  change-scope:
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.scope.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 -m scripts.p0_ci_policy scope
   git-docs-spike:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_real_matrix == true && inputs.approval_reference != '' }}
     runs-on: ubuntu-latest
@@ -73,10 +75,11 @@ jobs:
           if-no-files-found: error
       - run: npm --prefix client run build
   matrix-smoke:
+    needs: [change-scope]
     # Always exercise genuine, ephemeral Synapse/Git/browser on trusted first-party
     # code PRs and matching main pushes. Fork PRs never run this integration job.
     # Manual dispatch still requires explicit approval and a reference.
-    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.allow_real_matrix == true && inputs.approval_reference != '') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.draft == false) || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+    if: ${{ needs.change-scope.outputs.docs_only != 'true' && ((github.event_name == 'workflow_dispatch' && inputs.allow_real_matrix == true && inputs.approval_reference != '') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.draft == false) || (github.event_name == 'push' && github.ref == 'refs/heads/main')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -251,18 +254,52 @@ jobs:
       - name: Cleanup
         if: always()
         run: docker compose --profile test down -v
+  clean-room-release:
+    needs: [change-scope]
+    if: ${{ needs.change-scope.outputs.docs_only != 'true' && ((github.event_name == 'workflow_dispatch' && inputs.allow_real_matrix == true && inputs.approval_reference != '') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.draft == false) || (github.event_name == 'push' && github.ref == 'refs/heads/main')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Fresh checkout, retained restart and independent backup restore
+        run: python3 -m scripts.p072_clean_room --allow-real-matrix --approval-reference trusted-first-party-ci
+      - name: Preserve allowlisted clean-room diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p072-clean-room-evidence
+          path: |
+            .local/p072-report.json
+            .local/real-login-browser/*.png
+            .local/real-login-browser/git-proof.json
+            .local/real-login-browser/p071-git-proof.json
+          if-no-files-found: warn
+          retention-days: 14
   p0-real-e2e-gate:
     name: p0-real-e2e-gate
     if: ${{ always() }}
-    needs: [matrix-smoke]
+    needs: [change-scope, matrix-smoke, clean-room-release]
     runs-on: ubuntu-latest
     steps:
-      - name: Require completed genuine Matrix/browser/Git E2E
+      - uses: actions/checkout@v4
+      - name: Require genuine code acceptance or explicit documentation exemption
         env:
+          SCOPE_RESULT: ${{ needs.change-scope.result }}
+          DOCS_ONLY: ${{ needs.change-scope.outputs.docs_only }}
           MATRIX_RESULT: ${{ needs.matrix-smoke.result }}
+          CLEAN_RESULT: ${{ needs.clean-room-release.result }}
+          TRUSTED_PR: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
-          if [ "$MATRIX_RESULT" != "success" ]; then
-            echo "::error::Real Matrix integration did not succeed (result: $MATRIX_RESULT). Draft/fork/unapproved requests need a trusted maintainer-run E2E before merge."
+          if [ "$TRUSTED_PR" != "true" ]; then
+            echo "Fork changes require a trusted maintainer branch before merge."
             exit 1
           fi
-          echo "PASS: Real Synapse/Document API/Chromium/Git integration succeeded."
+          python3 -m scripts.p0_ci_policy gate

@@ -2,6 +2,24 @@
 
 This is a loopback development workspace with synthetic test identities and a deterministic Agent. No LLM, production account, production credential or public deployment is required. Git is the only document content/version store. A source archive needs no `.git` directory.
 
+## Single-command P0 acceptance (#72)
+
+Use a separate fresh Git checkout on a disposable Linux or macOS machine. Install Python 3.11+, Node.js 24, Git and Docker Compose v2 first. Start the local Docker daemon. The runner rejects remote Docker contexts, occupied loopback ports and existing `.local`, `client/node_modules` or `client/dist` paths. It does not stop an unknown service.
+
+After you obtain permission for isolated real tests, run this command from the checkout root:
+
+```sh
+python3 -m scripts.p072_clean_room --allow-real-matrix --approval-reference 'approved-isolated-P0-test'
+```
+
+The reference records permission. It does not grant permission. This command downloads public images and Node packages. It installs locked client dependencies and Playwright 1.56.1. It uses random Compose project names and only loopback ports 8008, 9000 and 8791.
+
+The runner creates real synthetic users on its own Synapse. It runs the existing #70/#71 HTTP and browser flows. It tests retained-volume restart. It then stops its own services and backs up four owned volumes and the private host files. It restores copies into different volumes and a separate host copy. The original volumes remain stopped during the restore test. The restored browser uses the original device cookies without another login. It reads both immutable Git documents and the original Matrix message, then tests private-room and unknown-session denial.
+
+Read `.local/p072-report.json` for the source SHA, stage exit codes and timings. Read `.local/p072-private.log` and `.local/p072-client-private.log` only on the test machine for command failures. These files can contain synthetic credentials. Do not upload them. The private session proof, databases and backup archives must not leave the test machine. CI uploads only the public report, allowlisted Git proof JSON and synthetic PNG files. `passed: true` means that this runner passed. It does not accept the complete #72 product leaf or enable branch protection.
+
+Cleanup removes only this run's random Compose projects and their volumes. It never erases another workspace to retry. The runner also repeats the command over its own state and requires a specific refusal, unchanged Git references and unchanged private cookie proof. This is a deliberate negative test, not permission to reuse user data. The private `.local` files remain for diagnostics. Use another fresh checkout for another run. The runner does not provide production backup, physical iOS/IME acceptance or a public backend. Read [#72](https://github.com/douyixuan/didadi/issues/72) for exact CI evidence and remaining policy work. The manual setup below remains available for development.
+
 ## Prerequisites and isolation
 
 Use Python 3.11+, Node.js 22+ (CI uses 24), Git with `--no-lazy-fetch` support, and Docker with Compose v2 `--wait` support. Run these preflight checks in the terminal you will use:
