@@ -16,7 +16,7 @@ from urllib.request import urlopen
 VOLUMES=('config','postgres','synapse','gateway')
 
 
-SAFE_REASONS={'Use a fresh checkout without .local, node_modules or dist','Missing documented prerequisite','Tracked or untracked source changes require a separate fresh checkout','Only a local Docker context is supported','A required loopback port is occupied','Generated namespace already exists','Command failed; read private local diagnostics','Owned client exited','Client health deadline exceeded','Refusing an unowned volume'}
+SAFE_REASONS={'PermissionError','TimeoutExpired','CalledProcessError','FileNotFoundError','Use a fresh checkout without .local, node_modules or dist','Missing documented prerequisite','Tracked or untracked source changes require a separate fresh checkout','Only a local Docker context is supported','A required loopback port is occupied','Generated namespace already exists','Command failed; read private local diagnostics','Owned client exited','Client health deadline exceeded','Refusing an unowned volume'}
 
 
 class Failure(Exception):
@@ -104,6 +104,12 @@ class CleanRoom:
         # Read-only checks precede all state changes and dependency installation.
         for tool in ('git','docker','node','npm'):
             if not shutil.which(tool):raise Failure(2,'Missing documented prerequisite')
+        if sys.version_info < (3,11):raise Failure(2,'Missing documented prerequisite')
+        node=subprocess.check_output(['node','--version'],text=True).strip()
+        if not re.fullmatch(r'v(?:2[4-9]|[3-9][0-9])\.[0-9]+\.[0-9]+',node):raise Failure(2,'Missing documented prerequisite')
+        subprocess.run(['git','--no-lazy-fetch','--version'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=True)
+        help_text=subprocess.check_output(['docker','compose','up','--help'],text=True)
+        if '--wait-timeout' not in help_text:raise Failure(2,'Missing documented prerequisite')
         dirty=subprocess.check_output(['git','-c','core.fsmonitor=false','-c','core.hooksPath=/dev/null','status','--porcelain'],cwd=self.root,text=True)
         if dirty:raise Failure(2,'Tracked or untracked source changes require a separate fresh checkout')
         endpoint=json.loads(subprocess.check_output(['docker','context','inspect'],text=True))[0]['Endpoints']['docker']['Host']
