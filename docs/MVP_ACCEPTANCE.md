@@ -208,7 +208,7 @@ main的五张PNG均已下载并实际查看，内容仅合成，无cookie/密码
 
 - 测试head：`44b3c67981527610223759f4445f7aff137e2143`，PR106。
 - 准确head Fast：[43722451148](https://github.com/douyixuan/didadi/actions/runs/43722451148)。真实CI：[43722451156](https://github.com/douyixuan/didadi/actions/runs/43722451156)，结果成功。
-- 合入main：`a0dd0b3ebd84a848f2866a998b657a6d2bcbfe46`，与head同tree `b2bfc245cbc6451a5f5e48f3ea93e64e1ccfe4b4`，main Fast：[43723745120](https://github.com/douyixuan/didadi/actions/runs/43723745120)，真实/恢复CI：[43723745091](https://github.com/douyixuan/didadi/actions/runs/43723745091)，结果待确认。
+- 合入main：`a0dd0b3ebd84a848f2866a998b657a6d2bcbfe46`，与head同tree `b2bfc245cbc6451a5f5e48f3ea93e64e1ccfe4b4`，main Fast：[43723745120](https://github.com/douyixuan/didadi/actions/runs/43723745120)，真实/恢复CI：[43723745091](https://github.com/douyixuan/didadi/actions/runs/43723745091)，结果成功。
 - 标准隔离Python122/122、React221/221及构建。[准确head Codex审查](https://github.com/douyixuan/didadi/pull/106#issuecomment-6895661781)完成无发现；CodeRabbit未知Cookie测试缺口经源码核实修正，不能把旧无Cookie负例冒充未知句柄负例。
 
 实际环境是新的GitHub runner与干净checkout，无既有.local/node_modules/dist。随机命名的Synapse/PostgreSQL/config/gateway四卷初始不存在，端口仅loopback。执行现有LOCAL_WORKSPACE的一条命令，复用真正#70/#71流程，不使用Vercel或注入假身份。
@@ -244,3 +244,10 @@ main的五张PNG均已下载并实际查看，内容仅合成，无cookie/密码
 已实际查看：[Alice恢复](../artifact/032-requirements-completion/p072-clean-room/restored-alice-44.png)、[Bob恢复且保持只读](../artifact/032-requirements-completion/p072-clean-room/restored-bob-44.png)。截图来自上述head的1280×720 Chromium，只有合成数据，不是物理设备验收。
 
 [现有Vercel预览](https://didadi.vercel.app/)仍是synthetic静态界面，和上述真实隔离后端分开。原始99需求不变，#41/#18和暂停事项不动。
+
+
+### 输入隔离补强与文档豁免实测
+
+证据分支首个纯Markdown/PNG head `c64cda7af20fdbf532141f7263432b0e17769836` 已实际验证：[Fast 43723991536](https://github.com/douyixuan/didadi/actions/runs/43723991536)成功，[豁免工作流43723991384](https://github.com/douyixuan/didadi/actions/runs/43723991384)中matrix-smoke与clean-room-release均skipped，聚合输出EXEMPT documentation only，不是实际E2E。后续本PR加入输入隔离代码，因此必须重新执行两条真实作业，不能沿用这个豁免。
+
+静态复核与纯虚构环境负例证明初版命令继承COMPOSE_FILE/COMPOSE_PROFILES，且没有固定Compose文件。补强固定仓库compose.yaml、--env-file /dev/null、明确本地context及子进程环境白名单。没有在任何真实服务/生产数据上复现或运行。新clean-room作业故意设置指向虚构不存在路径的COMPOSE_FILE和额外profile，要求入口忽略外部覆盖仍完成整个流程。该代码补强的准确CI另行记录，不能拿旧干净环境的成功代替。

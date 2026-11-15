@@ -74,7 +74,12 @@ class CleanRoom:
         self.source='didadi-p072-'+secrets.token_hex(8);self.restored=self.source+'-restore'
         self.owned=[];self.client=None;self.stages=[];self.passed=False;self.stage_name='preflight'
         self.created=False;self.backup=None;self.tracing=False
-        self.env={**os.environ,'MATRIX_HTTP_PORT':'8008','GATEWAY_HTTP_PORT':'9000','PYTHONUNBUFFERED':'1'}
+        allowed={'PATH','HOME','USER','LOGNAME','TMPDIR','TMP','TEMP','LANG','LC_ALL','LC_CTYPE',
+            'LD_LIBRARY_PATH','DYLD_LIBRARY_PATH','DYLD_FALLBACK_LIBRARY_PATH','DOCKER_CONFIG','DOCKER_CONTEXT',
+            'CI','GITHUB_ACTIONS','PLAYWRIGHT_BROWSERS_PATH'}
+        self.env={key:os.environ[key] for key in allowed if key in os.environ}
+        self.env.update({'MATRIX_HTTP_PORT':'8008','GATEWAY_HTTP_PORT':'9000','PYTHONUNBUFFERED':'1',
+                         'NPM_CONFIG_USERCONFIG':'/dev/null'})
 
     def check_fresh(self):
         for path in (self.local,self.root/'client/node_modules',self.root/'client/dist'):
@@ -113,7 +118,7 @@ class CleanRoom:
                 'stages':self.stages,'physical_ios_ime':'not-run','branch_protection':'not-changed-or-accepted'}
 
     def compose(self,project,*args):
-        return self.command(['docker','compose','-p',project,*args])
+        return self.command(['docker','compose','--env-file','/dev/null','-f',str(self.root/'compose.yaml'),'-p',project,*args])
 
     def prepare(self):
         self.check_fresh()
@@ -121,26 +126,30 @@ class CleanRoom:
         for tool in ('git','docker','node','npm'):
             if not shutil.which(tool):raise Failure(2,'Missing documented prerequisite')
         if sys.version_info < (3,11):raise Failure(2,'Missing documented prerequisite')
-        node=subprocess.check_output(['node','--version'],text=True).strip()
+        node=subprocess.check_output(['node','--version'],text=True,env=self.env).strip()
         if not re.fullmatch(r'v(?:2[4-9]|[3-9][0-9])\.[0-9]+\.[0-9]+',node):raise Failure(2,'Missing documented prerequisite')
-        subprocess.run(['git','--no-lazy-fetch','--version'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=True)
-        help_text=subprocess.check_output(['docker','compose','up','--help'],text=True)
+        subprocess.run(['git','--no-lazy-fetch','--version'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=True,env=self.env)
+        help_text=subprocess.check_output(['docker','compose','up','--help'],text=True,env=self.env)
         if '--wait-timeout' not in help_text:raise Failure(2,'Missing documented prerequisite')
-        dirty=subprocess.check_output(['git','-c','core.fsmonitor=false','-c','core.hooksPath=/dev/null','status','--porcelain'],cwd=self.root,text=True)
+        dirty=subprocess.check_output(['git','-c','core.fsmonitor=false','-c','core.hooksPath=/dev/null','status','--porcelain'],cwd=self.root,text=True,env=self.env)
         if dirty:raise Failure(2,'Tracked or untracked source changes require a separate fresh checkout')
-        endpoint=json.loads(subprocess.check_output(['docker','context','inspect'],text=True))[0]['Endpoints']['docker']['Host']
+        context=json.loads(subprocess.check_output(['docker','context','inspect'],text=True,env=self.env))[0]
+        endpoint=context['Endpoints']['docker']['Host']
         if os.environ.get('DOCKER_HOST') or not endpoint.startswith('unix://'):raise Failure(2,'Only a local Docker context is supported')
-        subprocess.run(['docker','info'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=True,timeout=30)
+        self.env['DOCKER_CONTEXT']=context['Name']
+        subprocess.run(['docker','info'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=True,timeout=30,env=self.env)
         for port in (8008,9000,8791):
             with socket.socket() as probe:
                 try:probe.bind(('127.0.0.1',port))
                 except OSError:raise Failure(2,'A required loopback port is occupied') from None
         # Exclusive mkdir refuses races and never reuses a private workspace.
         self.local.mkdir(mode=0o700);self.created=True
+        npmrc=self.local/'p072-empty-global-npmrc';npmrc.write_text('');npmrc.chmod(0o600)
+        self.env['NPM_CONFIG_GLOBALCONFIG']=str(npmrc)
         (self.local/'p072-owner.json').write_text(json.dumps({'source':self.source,'restore':self.restored}))
         for project in (self.source,self.restored):
             for volume in VOLUMES:
-                result=subprocess.run(['docker','volume','inspect',project+'_'+volume],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                result=subprocess.run(['docker','volume','inspect',project+'_'+volume],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,env=self.env)
                 if result.returncode==0:raise Failure(2,'Generated namespace already exists')
 
     def start_client(self):
