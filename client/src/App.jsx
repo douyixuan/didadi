@@ -279,9 +279,9 @@ export function App({connector=connect}) {
   if(markerActor.current?.api!==api||markerActor.current?.user!==api?.session?.userId)markerActor.current={api,user:api?.session?.userId};
   useEffect(()=>{lastRead.current.clear()},[api]);
   const roomCurrent=useRef(room);roomCurrent.current=room;
-  const sourceOwner=useRef(null),sourceNavigation=useRef(0);
+  const sourceOwner=useRef(null),sourceNavigation=useRef(0),pendingSourceNavigation=useRef(null);
   const sourceAllowed=rooms.some(item=>item.id===documentRoom);
-  const nextSourceOwner={api,user:api?.session?.userId,documentRoom,document:activeDocument,room,filter,mode,historyOpen,panel,allowed:sourceAllowed};
+  const nextSourceOwner={api,user:api?.session?.userId,documentRoom,document:activeDocument,room,filter,mode,historyOpen,panel,searchOpen,sourceOpen,peopleOpen,allowed:sourceAllowed};
   if(!sourceOwner.current||Object.keys(nextSourceOwner).some(key=>sourceOwner.current[key]!==nextSourceOwner[key]))sourceOwner.current=nextSourceOwner;
   async function openMessageSource(reference,isCurrent=()=>true){
     const owner=sourceOwner.current,sequence=++sourceNavigation.current;
@@ -291,7 +291,10 @@ export function App({connector=connect}) {
       if(sourceOwner.current!==owner||sourceNavigation.current!==sequence||!isCurrent())return false;
       if(event?.id!==reference.event||!event.content)throw Error('Source message is unavailable.');
       const relation=event.content['m.relates_to'];
-      setRoom(reference.room);setPanel('discussion');setFilter(relation?.rel_type==='m.thread'&&typeof relation.event_id==='string'&&relation.event_id.startsWith('$')?relation.event_id:event.id);
+      const root=relation?.rel_type==='m.thread'&&typeof relation.event_id==='string'&&relation.event_id.startsWith('$')?relation.event_id:event.id;
+      // Room initialization must preserve this actor's explicit source target.
+      pendingSourceNavigation.current=owner.room!==reference.room?{api:owner.api,user:owner.user,room:reference.room,root}:null;
+      setRoom(reference.room);setPanel('discussion');setFilter(root);
       return true;
     }catch(error){if(sourceOwner.current!==owner||sourceNavigation.current!==sequence||!isCurrent())return false;throw error;}
   }
@@ -374,8 +377,10 @@ export function App({connector=connect}) {
     try{await api.leaveRoom(room);await refreshRooms();}
     catch(error){setRoomsError('Unable to leave this room: '+errorText(error));}
   }
-  useEffect(()=>{if(!api||!room)return;let stopped=false,inFlight=false,initialized=false,olderBusy=false,revision=0,current=[],cursor=null;
-    setEvents([]);setReplyTo(null);setQuote(null);setFilter(null);setOlderCursor(null);setLoadingOlder(false);setHistoryError('');setHistoryNotice('');historyScroll.current=null;
+  useEffect(()=>{const sourceTarget=pendingSourceNavigation.current;pendingSourceNavigation.current=null;
+    if(!api||!room)return;let stopped=false,inFlight=false,initialized=false,olderBusy=false,revision=0,current=[],cursor=null;
+    const sourceFilter=sourceTarget?.api===api&&sourceTarget?.user===api.session.userId&&sourceTarget?.room===room?sourceTarget.root:null;
+    setEvents([]);setReplyTo(null);setQuote(null);setFilter(sourceFilter);setOlderCursor(null);setLoadingOlder(false);setHistoryError('');setHistoryNotice('');historyScroll.current=null;
     function evictInaccessibleRoom(){
       // Invalidate requests started before the membership denial.
       revision++;current=[];cursor=null;initialized=false;

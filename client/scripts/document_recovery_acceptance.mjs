@@ -179,18 +179,34 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     await bob.page.screenshot({path:evidenceDir+'/p071-message-document-source.png',fullPage:true});
     // Normal clicks stay in this app. Block the portable external fallback so
     // a regression never contacts matrix.to. Root and reply return to context.
+    const joined=await request(bob.page,'/matrix/_matrix/client/v3/joined_rooms');assert.equal(joined.status,200);
+    const other=joined.data.joined_rooms.find(id=>id!==room);assert.ok(other,'Use an existing other joined room for source return');
+    await bob.page.goto('/?room='+encodeURIComponent(other));await expect(bob.page.locator('.page-eyebrow')).toContainText(copied,{timeout:30000});
+    await expect.poll(()=>new URL(bob.page.url()).searchParams.get('room')).toBe(other);
+    const otherLabel=await bob.page.locator('nav[aria-label="Rooms"] button.room-selected > span').first().evaluate(node=>node.firstChild.textContent);
+    const otherPanel=bob.page.locator('.collaboration-panel');if(await otherPanel.evaluate(node=>node.classList.contains('panel-closed')))await bob.page.getByRole('button',{name:'Discussion',exact:true}).click();
+    const roomDraft='P071 unsent other-room draft '+stamp;await bob.page.locator('.composer textarea').fill(roomDraft);
+    const sourceMarkers=[];const observeMarker=request=>{const path=new URL(request.url()).pathname;
+      if(path==='/api/rooms/read'&&request.method()==='POST'&&request.postDataJSON().room===room)sourceMarkers.push('workspace-read');
+      if(decodeURIComponent(path)==='/matrix/_matrix/client/v3/rooms/'+room+'/read_markers')sourceMarkers.push('matrix-read');};
+    bob.page.on('request',observeMarker);
     await bob.page.route('https://matrix.to/**',route=>route.abort());
     const origin=new URL(bob.page.url()).origin;
     for(const [index,id] of [event,reply].entries()){
       const sourceResponse=bob.page.waitForResponse(response=>decodeURIComponent(new URL(response.url()).pathname)==='/matrix/_matrix/client/v3/rooms/'+room+'/event/'+id&&response.request().method()==='GET');
       await sourceLinks.nth(index).click();assert.equal((await sourceResponse).status(),200);
       assert.equal(new URL(bob.page.url()).origin,origin);
+      await expect.poll(()=>new URL(bob.page.url()).searchParams.get('room')).toBe(room);
       const all=bob.page.getByRole('button',{name:'All messages',exact:true});await expect(all).toBeVisible({timeout:30000});
       await expect(all.locator('..')).toContainText('Thread '+event.slice(0,10));
       await expect(bob.page.locator('.timeline')).toContainText(sourceText,{timeout:30000});
       await expect(bob.page.locator('.timeline')).toContainText(replyText,{timeout:30000});
     }
     await bob.page.screenshot({path:evidenceDir+'/p071-in-app-source-return.png',fullPage:true});
+    const returnRoom=bob.page.locator('nav[aria-label="Rooms"] button.room').filter({hasText:otherLabel});await expect(returnRoom).toHaveCount(1);await returnRoom.click();
+    await expect.poll(()=>new URL(bob.page.url()).searchParams.get('room')).toBe(other);await expect(bob.page.locator('.composer textarea')).toHaveValue(roomDraft);
+    await bob.page.screenshot({path:evidenceDir+'/p071-source-return-preserved-room-draft.png',fullPage:true});await bob.page.locator('.composer textarea').fill('');
+    assert.equal(sourceMarkers.length,0,'Source navigation must not mark the whole room read');bob.page.off('request',observeMarker);
     await bob.page.unroute('https://matrix.to/**');
     console.log('PASS REAL DOCUMENT #71: lost create acknowledgement retries identical operation without extra Git commit; root/reply source links return in-app');
 
