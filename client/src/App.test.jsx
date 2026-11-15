@@ -1118,8 +1118,8 @@ it('keeps editing mounted during IME composition in compact navigation',async()=
  }finally{window.matchMedia=previous;}
 });
 it('uses the named file as a presentation fallback without rewriting its Markdown',async()=>{
- const api=fixture(),body='Plain body without a heading.';api.document.mockResolvedValue({...doc,name:'Archive/B.md',content:body});
- const view=render(<Documents api={api} room="!room" name="Archive/B.md"/>);await screen.findByRole('heading',{name:'B.md'});expect(screen.queryByRole('button',{name:'Ask example Agent to read'})).not.toBeInTheDocument();fireEvent.click(screen.getByRole('button',{name:'Export Markdown'}));expect(downloadMarkdown).toHaveBeenLastCalledWith(body,'B.md');view.unmount();
+ const api=fixture(),body='Plain body without a heading.';api.documents=vi.fn().mockResolvedValue({documents:[{name:'Archive/B.md'}]});api.document.mockResolvedValue({...doc,name:'Archive/B.md',content:body});
+ const view=render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'B.md'});await waitFor(()=>expect(screen.getByRole('button',{name:'Archive/B.md, current document',exact:true}).querySelector('small')).toHaveTextContent(/^Archive$/));expect(screen.queryByRole('button',{name:'Ask example Agent to read'})).not.toBeInTheDocument();fireEvent.click(screen.getByRole('button',{name:'Export Markdown'}));expect(downloadMarkdown).toHaveBeenLastCalledWith(body,'B.md');view.unmount();
  const other=fixture();other.document.mockResolvedValue({...doc,name:'Archive/B.md',content:'# Untitled document\n\nLiteral authored title.'});render(<Documents api={other} room="!room" name="Archive/B.md"/>);await screen.findByRole('heading',{name:'Untitled document'});
 });
 

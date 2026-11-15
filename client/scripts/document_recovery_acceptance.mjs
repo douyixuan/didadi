@@ -157,6 +157,7 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     const mobileDownload=bob.page.waitForEvent('download');await mobileExport.click();const mobileFile=await mobileDownload,mobileStream=await mobileFile.createReadStream(),mobileChunks=[];for await(const chunk of mobileStream)mobileChunks.push(chunk);assert.equal(Buffer.concat(mobileChunks).toString('utf8'),final.content);
     await bob.page.screenshot({path:evidenceDir+'/p071-history-mobile-returned-latest.png',fullPage:true});
     await bob.page.setViewportSize({width:1280,height:720});if(panelWasOpen)await bob.page.getByRole('button',{name:'Discussion',exact:true}).click();
+    await expect(bob.page.getByRole('button',{name:moved+', current document',exact:true}).locator('small')).toHaveText(moved.slice(0,moved.lastIndexOf('/')));
     assert.equal((await read(bob.page,moved)).data.blob,final.blob);assert.equal((await read(bob.page,a)).data.blob,resolvedA.blob);
     console.log('PASS REAL DOCUMENT #71: bounded pre-move history, genuine failed-page retry, original-path read, current target preserved');
     // Existing fixed-version UI remains usable for A without changing B.
