@@ -858,3 +858,11 @@ it('waits for the selected room timeline before acknowledging after a fast switc
 it('does not acknowledge old identity events or let an old marker failure reset the new identity',async()=>{
  const first=fixture(),next=fixture();first.session.userId='@first:test';next.session.userId='@second:test';const event={id:'$shared',sender:'@a',content:{body:'Shared event'}};let reject,load;first.timelinePage=vi.fn(async()=>({events:[event],previousCursor:null}));first.markRoomRead=vi.fn(()=>new Promise((_,r)=>reject=r));next.timelinePage=vi.fn(()=>new Promise(r=>load=r));next.markRoomRead=vi.fn(async()=>({read:true}));const view=render(<App connector={async()=>first}/>);await screen.findByRole('heading',{name:'Team handbook'});fireEvent.click(screen.getByRole('button',{name:'Discussion',exact:true}));await waitFor(()=>expect(first.markRoomRead).toHaveBeenCalled());view.rerender(<App connector={async()=>next}/>);await waitFor(()=>expect(next.timelinePage).toHaveBeenCalled());expect(next.markRoomRead).not.toHaveBeenCalled();await act(async()=>load({events:[event],previousCursor:null}));await waitFor(()=>expect(next.markRoomRead).toHaveBeenCalledTimes(1));await act(async()=>reject(Error('Old session failure')));fireEvent.click(screen.getByRole('button',{name:'Discussion',exact:true}));fireEvent.click(screen.getByRole('button',{name:'Discussion',exact:true}));expect(next.markRoomRead).toHaveBeenCalledTimes(1);
 });
+
+// P071: a saved path is a scoped navigation preference, never an access grant.
+it('reopens the confirmed selected document after a frontend remount',async()=>{
+ localStorage.clear();
+ const api=fixture();api.documents=vi.fn().mockResolvedValue({documents:[{name:'demo.md'},{name:'Notes.md'}]});api.document=vi.fn(async(room,commit,name='demo.md')=>({...doc,name,content:name==='Notes.md'?'# Named notes':doc.content}));
+ const first=render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Team handbook'});fireEvent.click(screen.getByRole('button',{name:'Notes.md',exact:true}));await screen.findByRole('heading',{name:'Named notes'});first.unmount();api.document.mockClear();
+ render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Named notes'});expect(api.document.mock.calls.every(call=>call[2]==='Notes.md')).toBe(true);
+});

@@ -1,3 +1,4 @@
+import {verifyDocumentRecovery} from './document_recovery_acceptance.mjs';
 // Genuine browser acceptance against an isolated, running Synapse + Git workspace.
 // Invoke ONLY from the explicitly approved Real Matrix integration workflow.
 // Never use fixture credentials, Vercel preview, public accounts or a mocked server.
@@ -374,7 +375,7 @@ try {
   assert.equal(departedAgain.status, 403, 'Repeated leave cannot reacquire membership');
   console.log('PASS REAL ROOM #70: browser room leave, message eviction, non-member denial, denied stale reads');
 
-  await verifyRoomIsolation({alice,bob,accounts,request:browserRequest,evidenceDir});
+  await verifyRoomIsolation({alice,bob,accounts,request:browserRequest,evidenceDir,afterRevocation:({matrix,token})=>verifyDocumentRecovery({alice,bob,accounts,request:browserRequest,evidenceDir,matrix,token,returnPath:name})});
 
   // Wrong passwords are genuinely rejected; current-device logout must not
   // invalidate another browser's real Matrix session or shared Git document.

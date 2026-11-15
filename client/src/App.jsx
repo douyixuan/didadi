@@ -1,3 +1,4 @@
+import {useDocumentSelection} from './useDocumentSelection';
 import {DirectChatPreferences} from './DirectChatPreferences';
 import {RoomCreator} from './RoomCreator';
 import {RoomInvites} from './RoomInvites';
@@ -67,7 +68,7 @@ export function Documents(props){
   return <DocumentWorkspace key={context||'unknown'} {...props} localContext={context}/>;
 }
 
-function DocumentWorkspace({localContext,api,room,onSent,name='demo.md',externalBusy=false,mode='read',setMode=()=>{},historyOpen=false,onCloseHistory=()=>{},onMeta=()=>{},requestedVersion=null,onDiscussVersion=()=>{},canDiscussVersion=false}) {
+function DocumentWorkspace({localContext,api,room,onSent,name='demo.md',externalBusy=false,mode='read',setMode=()=>{},historyOpen=false,onCloseHistory=()=>{},onMeta=()=>{},requestedVersion=null,onDiscussVersion=()=>{},canDiscussVersion=false,onUnavailable=()=>{}}) {
   const localDrafts=useLocalDrafts(localContext);
   useEffect(()=>{localDrafts.refresh();},[localContext]);
   const [draftTransition,setDraftTransition]=useState(false),transitionLock=useRef(false);
@@ -96,8 +97,8 @@ function DocumentWorkspace({localContext,api,room,onSent,name='demo.md',external
     if(directRequest.current||transitionLock.current)return;
     const sequence=++loadSequence.current;setReading(true);setError('');setReadRetry(null);setCancelledAction(null);
     try {const [doc,versions]=await Promise.all([api.document(roomRef.current,commit,...(name==='demo.md'?[]:[name])),api.history(roomRef.current,...(name==='demo.md'?[]:[name]))]);
-      if(!mounted.current||sequence!==loadSequence.current)return;if(preserveDraft&&draft!==(snapshot?.content||'')){recoveryBase.current=(draftBase===undefined?snapshot?.blob:draftBase);if(!await localDrafts.checkpoint(draft,recoveryBase.current))throw new Error('Cannot switch versions safely while local draft storage is unavailable. Your current draft is kept; export it before retrying.');if(!mounted.current||sequence!==loadSequence.current)return;setRecoveryDraft(draft);}setDraftBase(undefined);setSnapshot(doc);setUnresolvedResult(false);setDraft(doc.content||'');setEditorRevision(v=>v+1);setHistory(versions.commits);setHistorical(Boolean(commit));setConflict(false);setMergeConflict(null);setRemoteRecovery(null);setNotice('');}
-    catch(e){if(sequence===loadSequence.current){setError(errorText(e));setRemoteRecovery(e.data?.status==='remote_diverged'?e.data.recovery:null);setReadRetry({commit,preserveDraft})}}
+      if(!mounted.current||sequence!==loadSequence.current)return;if(name!=='demo.md'&&!doc?.blob){const missing=new Error('Document is no longer available.');missing.status=404;throw missing;}if(preserveDraft&&draft!==(snapshot?.content||'')){recoveryBase.current=(draftBase===undefined?snapshot?.blob:draftBase);if(!await localDrafts.checkpoint(draft,recoveryBase.current))throw new Error('Cannot switch versions safely while local draft storage is unavailable. Your current draft is kept; export it before retrying.');if(!mounted.current||sequence!==loadSequence.current)return;setRecoveryDraft(draft);}setDraftBase(undefined);setSnapshot(doc);setUnresolvedResult(false);setDraft(doc.content||'');setEditorRevision(v=>v+1);setHistory(versions.commits);setHistorical(Boolean(commit));setConflict(false);setMergeConflict(null);setRemoteRecovery(null);setNotice('');}
+    catch(e){if(mounted.current&&sequence===loadSequence.current){if([401,403].includes(e.status)||(!commit&&e.status===404)){setSnapshot(old=>old?{...old,writable:false}:old);onUnavailable(name,e.status);}setError(errorText(e));setRemoteRecovery(e.data?.status==='remote_diverged'?e.data.recovery:null);setReadRetry({commit,preserveDraft})}}
     finally{if(sequence===loadSequence.current)setReading(false);}
   }
   useEffect(()=>{if(!room)return;mounted.current=true;load();return()=>{mounted.current=false};},[api,Boolean(room)]);
@@ -243,7 +244,9 @@ export function App({connector=connect}) {
   const loadOlderAction=useRef(null),historyScroll=useRef(null);
   const [tasks,setTasks]=useState([]),[online,setOnline]=useState(false);
   const [panel,setPanel]=useState(null),[mode,setMode]=useState('read'),[historyOpen,setHistoryOpen]=useState(false),[requestedVersion,setRequestedVersion]=useState(null);
-  const [documentNames,setDocumentNames]=useState([{name:'demo.md'}]),[activeDocument,setActiveDocument]=useState('demo.md'),[newDocumentName,setNewDocumentName]=useState(''),[documentCreating,setDocumentCreating]=useState(false),[documentsError,setDocumentsError]=useState('');
+  const documentRoom=api?.session?.documentRoom||api?.session?.initialRoom||room;
+  const selection=useDocumentSelection(api,documentRoom),activeDocument=selection.name,documentNames=selection.names,setActiveDocument=selection.choose,setDocumentNames=selection.setNames;
+  const [newDocumentName,setNewDocumentName]=useState(''),[documentCreating,setDocumentCreating]=useState(false),[documentsError,setDocumentsError]=useState('');
   const [moveName,setMoveName]=useState(''),[documentMoving,setDocumentMoving]=useState(false),[moveError,setMoveError]=useState('');
   const moveAttempt=useRef(null),moveLock=useRef(false);
   const [selectedMessages,setSelectedMessages]=useState([]),[messagesDocumentName,setMessagesDocumentName]=useState(''),[fromMessagesBusy,setFromMessagesBusy]=useState(false),[fromMessagesUncertain,setFromMessagesUncertain]=useState(false),[fromMessagesNotice,setFromMessagesNotice]=useState('');
@@ -264,7 +267,7 @@ export function App({connector=connect}) {
   const roomCurrent=useRef(room);roomCurrent.current=room;
   useEffect(()=>{if(room&&location.protocol.startsWith('http')){const url=new URL(location.href);url.searchParams.set('room',room);window.history.replaceState({},'',url);}},[room]);
 
-  async function start(){setError('');try{const next=await connector();const list=await next.rooms();setApi(next);setAuthRequired(false);setRooms(list);const requested=new URLSearchParams(location.search).get('room');setRoom(list.some(r=>r.id===requested)?requested:(list.some(r=>r.id===next.session.initialRoom)?next.session.initialRoom:(list[0]?.id||'')));setOnline(true);refreshDocuments(next);}catch(e){setApi(null);setOnline(false);if(e.status===401)setAuthRequired(true);else{setAuthRequired(false);setError(errorText(e));}}}
+  async function start(){setError('');try{const next=await connector();const list=await next.rooms();setApi(next);setAuthRequired(false);setRooms(list);const requested=new URLSearchParams(location.search).get('room');setRoom(list.some(r=>r.id===requested)?requested:(list.some(r=>r.id===next.session.initialRoom)?next.session.initialRoom:(list[0]?.id||'')));setOnline(true);}catch(e){setApi(null);setOnline(false);if(e.status===401)setAuthRequired(true);else{setAuthRequired(false);setError(errorText(e));}}}
   useEffect(()=>{start();},[connector]);
   useEffect(()=>{const expired=()=>{setApi(null);setAuthRequired(true);window.location.replace('/');};window.addEventListener('didadi-matrix-session-expired',expired);return()=>window.removeEventListener('didadi-matrix-session-expired',expired);},[]);
   async function signOut(){
@@ -278,12 +281,12 @@ export function App({connector=connect}) {
     }catch(error){setError(errorText(error));setSigningOut(false);}
   }
   async function refreshDocuments(current=api){
-    if(!current?.documents)return;
+    if(!current?.documents||current!==api)return;
     const sequence=++documentsSequence.current;
-    try{const result=await current.documents(current.session.documentRoom||current.session.initialRoom);if(sequence!==documentsSequence.current)return;setDocumentNames(result.documents);setDocumentsError('');}
-    catch(error){if(sequence!==documentsSequence.current)return;setDocumentsError(errorText(error)+' Document list could not be refreshed; your current document and drafts are kept.');}
+    try{const result=await current.documents(documentRoom);if(sequence!==documentsSequence.current||!selection.isCurrent())return;selection.acceptList(result.documents,latestDocMeta.current.draftWorking||latestDocMeta.current.draftUnsafe);setDocumentsError('');}
+    catch(error){if(sequence!==documentsSequence.current||!selection.isCurrent())return;if([401,403].includes(error.status))selection.deny(activeDocument,error.status,latestDocMeta.current.draftWorking||latestDocMeta.current.draftUnsafe);setDocumentsError(errorText(error)+' Document list could not be refreshed; your current document and drafts are kept.');}
   }
-  useEffect(()=>{if(api)refreshDocuments();},[api,docMeta.commit]);
+  useEffect(()=>{if(api)refreshDocuments();},[api,documentRoom,api?.session?.userId,docMeta.commit]);
   function openDocument(name){if(documentMoving||documentCreating||docMeta.busy||docMeta.reading||docMeta.composing||docMeta.draftWorking||docMeta.draftUnsafe)return;setRequestedVersion(null);setActiveDocument(name);setMode('read');setNavOpen(false);return true;}
   async function createDocument(event){event.preventDefault();if(fromMessagesBusy||documentMoving||documentCreateLock.current||!newDocumentName.trim()||docMeta.busy||docMeta.reading||docMeta.composing||docMeta.draftWorking||docMeta.draftUnsafe)return;
     documentCreateLock.current=true;setDocumentCreating(true);setDocumentsError('');const name=newDocumentName;
@@ -415,7 +418,6 @@ export function App({connector=connect}) {
   if(authRequired)return <SignIn onSignedIn={start}/>;
   if(!api)return <main className="startup"><BookOpen size={30}/><h1>Didadi</h1><p>{error||'Opening your workspace…'}</p>{error&&<button className="primary" onClick={start}>Retry connection</button>}<span>Local workspace · example Agent, no LLM</span></main>;
   const selected=rooms.find(r=>r.id===room);
-  const documentRoom=api.session.documentRoom||api.session.initialRoom||room;
   const displayed=!selected?[]:filter&&api?.threadPage?thread.events:events.filter(e=>!filter||e.id===filter||e.content['m.relates_to']?.event_id===filter);
   return <>{peopleOpen&&<RoomPeople key={room} api={api} room={room} name={selected?.name} onClose={()=>setPeopleOpen(false)}/>} {sourceOpen&&<SourceViewer key={room+JSON.stringify(sourceRequest)} api={api} room={room} reference={sourceRequest} onClose={()=>setSourceOpen(false)} onSent={sent}/>} {searchOpen&&<WorkspaceSearch api={api} room={room} documentRoom={documentRoom} initialQuery={search} onClose={()=>setSearchOpen(false)} onDocument={result=>{if(!openDocument(result.name))return false;setRequestedVersion({commit:result.commit});return true;}} onMessage={result=>{setRoom(result.room);setPanel('discussion');setFilter(result.content['m.relates_to']?.rel_type==='m.thread'?result.content['m.relates_to'].event_id:result.id);return true;}}/>}{api.session.synthetic&&<div className="preview-banner" role="note">Interactive UI preview · synthetic browser-only data · no Matrix/Git backend or LLM</div>}<div className="workspace"><aside className={'sidebar '+(navOpen?'nav-open':'')}>
     <div className="workspace-switch"><span className="workspace-logo"><BookOpen size={19}/></span><strong>Didadi</strong><ChevronDown size={15}/><span className="local-pill">{api.session.synthetic?'Preview':'Local'}</span></div>
@@ -428,7 +430,7 @@ export function App({connector=connect}) {
       {api.moveDocument&&<form className="new-room" onSubmit={moveDocument}><input aria-label="Move document to path" value={moveName} onChange={event=>setMoveName(event.target.value)} placeholder="Move or rename to.md" disabled={documentMoving}/><button aria-label="Move document" disabled={!moveName.trim()||documentCreating||(!moveAttempt.current&&(docMeta.busy||docMeta.reading||docMeta.composing||docMeta.draftWorking||docMeta.dirty||docMeta.recoveryPending||docMeta.historical||!docMeta.blob))}>Move</button></form>}
       {api.moveDocument&&docMeta.recoveryPending&&<p className="quiet-status">Restore or export and discard local recovery drafts before moving this document.</p>}
       {moveError&&<p role="alert">{moveError}</p>}
-      {documentsError&&<p role="alert">{documentsError}<button onClick={()=>refreshDocuments()}>Refresh documents</button></p>}
+      {documentsError&&<p role="alert">{documentsError}<button onClick={()=>{selection.retry();refreshDocuments()}}>Refresh documents</button></p>}
     </div>
     <div className="nav-section rooms-section"><div className="section-heading"><span>Rooms</span><button aria-label="Refresh rooms" onClick={refreshRooms}><RefreshCw size={13}/></button></div>
       <nav aria-label="Rooms">{rooms.filter(r=>r.name.toLowerCase().includes(search.toLowerCase())).map(r=><button className={'room '+(r.id===room?'room-selected':'')} key={r.id} onClick={()=>{setRoom(r.id);setNavOpen(false)}}><MessageSquare size={15}/><span>{r.name}{r.kind&&<small>{r.kind==='direct'?'Private conversation':r.kind==='channel'?'Channel':r.kind==='group'?'Group':'Room'} · {r.joinRule==='invite'?'invite only':r.joinRule||'unknown access'}{r.directForYou?' · Direct for you':''}</small>}</span>{api.session.liveMatrix&&r.unread===null&&<span aria-label={'Unread unavailable in '+r.name} title="Unread unavailable. Refresh rooms to retry.">?</span>}{r.unread>0&&<span className="room-unread" aria-label={'Unread messages in '+r.name}>{r.unread}</span>}</button>)}</nav>
@@ -442,7 +444,7 @@ export function App({connector=connect}) {
     {api.session.qa&&<div className="qa-banner">Visual regression capture · {api.session.qa} · isolated adapter</div>}
     {roomsError&&<div className="global-error" role="alert">Room list is reconnecting: {roomsError}</div>}
     {error&&<div className="global-error" role="alert"><AlertCircle size={16}/>{error}<button onClick={()=>setError('')} aria-label="Dismiss error"><X size={15}/></button></div>}
-    <div className="content-layout"><Documents api={api} externalBusy={documentMoving} name={activeDocument} room={documentRoom} onSent={sent} mode={mode} setMode={setMode} historyOpen={historyOpen} onCloseHistory={()=>setHistoryOpen(false)} onMeta={setDocMeta} requestedVersion={requestedVersion} canDiscussVersion={Boolean(docMeta.commit)&&events.some(event=>documentVersion(event,api.session.agentId,api.session.synthetic,api.session.userId,activeDocument)===docMeta.commit)} onDiscussVersion={commit=>{const event=events.find(event=>documentVersion(event,api.session.agentId,api.session.synthetic,api.session.userId,activeDocument)===commit);if(event){setPanel('discussion');setFilter(event.content['m.relates_to']?.event_id||event.id)}}}/>
+    {selection.warning&&<div className="global-error" role="status">{selection.warning}</div>}<div className="content-layout">{activeDocument?<Documents onUnavailable={(name,status)=>{const protectedDraft=latestDocMeta.current.draftWorking||latestDocMeta.current.draftUnsafe;selection.deny(name,status,protectedDraft);setRequestedVersion(null);if(!protectedDraft)setMode('read');}} api={api} externalBusy={documentMoving} name={activeDocument} room={documentRoom} onSent={sent} mode={mode} setMode={setMode} historyOpen={historyOpen} onCloseHistory={()=>setHistoryOpen(false)} onMeta={setDocMeta} requestedVersion={requestedVersion} canDiscussVersion={Boolean(docMeta.commit)&&events.some(event=>documentVersion(event,api.session.agentId,api.session.synthetic,api.session.userId,activeDocument)===docMeta.commit)} onDiscussVersion={commit=>{const event=events.find(event=>documentVersion(event,api.session.agentId,api.session.synthetic,api.session.userId,activeDocument)===commit);if(event){setPanel('discussion');setFilter(event.content['m.relates_to']?.event_id||event.id)}}}/>:<section aria-label="Document selection"><p>{selection.ready?'No available document is selected.':'Loading the document list before restoring your selection…'}</p><button onClick={()=>{selection.retry();refreshDocuments();}}>Retry document list</button></section>}
       <aside className={'collaboration-panel '+(!panel?'panel-closed':'')} aria-label="Collaboration panel"><header className="panel-heading"><div><h2>{panel==='agent'?'Example Agent':'Discussion'}</h2><span>{selected?.name||'Room'}</span></div><button aria-label="Close collaboration panel" onClick={()=>setPanel(null)}><X size={18}/></button></header>
         <div className="panel-tabs"><button className={panel==='discussion'?'active':''} onClick={()=>setPanel('discussion')}>Messages</button><button className={panel==='agent'?'active':''} onClick={()=>setPanel('agent')}>Example Agent</button></div>
         {panel==='agent'&&!selected?.agentJoined&&<p role="status">The example Agent is not joined to this room. New rooms do not invite it unless you explicitly choose it.</p>}{panel==='agent'&&<div className="agent-disclosure"><Bot size={18}/><div><strong>Deterministic example</strong><p>Repeats messages and handles explicit Git requests. No LLM or intelligent editing is connected.</p></div></div>}
