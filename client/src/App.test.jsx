@@ -858,3 +858,33 @@ it('waits for the selected room timeline before acknowledging after a fast switc
 it('does not acknowledge old identity events or let an old marker failure reset the new identity',async()=>{
  const first=fixture(),next=fixture();first.session.userId='@first:test';next.session.userId='@second:test';const event={id:'$shared',sender:'@a',content:{body:'Shared event'}};let reject,load;first.timelinePage=vi.fn(async()=>({events:[event],previousCursor:null}));first.markRoomRead=vi.fn(()=>new Promise((_,r)=>reject=r));next.timelinePage=vi.fn(()=>new Promise(r=>load=r));next.markRoomRead=vi.fn(async()=>({read:true}));const view=render(<App connector={async()=>first}/>);await screen.findByRole('heading',{name:'Team handbook'});fireEvent.click(screen.getByRole('button',{name:'Discussion',exact:true}));await waitFor(()=>expect(first.markRoomRead).toHaveBeenCalled());view.rerender(<App connector={async()=>next}/>);await waitFor(()=>expect(next.timelinePage).toHaveBeenCalled());expect(next.markRoomRead).not.toHaveBeenCalled();await act(async()=>load({events:[event],previousCursor:null}));await waitFor(()=>expect(next.markRoomRead).toHaveBeenCalledTimes(1));await act(async()=>reject(Error('Old session failure')));fireEvent.click(screen.getByRole('button',{name:'Discussion',exact:true}));fireEvent.click(screen.getByRole('button',{name:'Discussion',exact:true}));expect(next.markRoomRead).toHaveBeenCalledTimes(1);
 });
+
+// P071: a saved path is a scoped navigation preference, never an access grant.
+it('reopens the confirmed selected document after a frontend remount',async()=>{
+ localStorage.clear();
+ const api=fixture();api.documents=vi.fn().mockResolvedValue({documents:[{name:'demo.md'},{name:'Notes.md'}]});api.document=vi.fn(async(room,commit,name='demo.md')=>({...doc,name,content:name==='Notes.md'?'# Named notes':doc.content}));
+ const first=render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Team handbook'});fireEvent.click(screen.getByRole('button',{name:'Notes.md',exact:true}));await screen.findByRole('heading',{name:'Named notes'});first.unmount();api.document.mockClear();
+ render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Named notes'});expect(api.document.mock.calls.every(call=>call[2]==='Notes.md')).toBe(true);
+});
+
+it('keeps return-to-latest inside the open history panel and closes it on return',async()=>{
+ const api=fixture();api.document.mockImplementation(async(_room,commit)=>({...doc,content:commit?'# Earlier version':doc.content}));
+ render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Team handbook'});
+ fireEvent.click(screen.getByRole('button',{name:'Version history',exact:true}));
+ fireEvent.click(await screen.findByRole('button',{name:/Previous version/}));
+ await screen.findByRole('heading',{name:'Earlier version'});
+ const history=screen.getByRole('complementary',{name:'Version history'});
+ const back=screen.getByRole('button',{name:'Back to latest',exact:true});expect(history).toContainElement(back);
+ fireEvent.click(back);
+ await waitFor(()=>expect(screen.queryByRole('complementary',{name:'Version history'})).not.toBeInTheDocument());
+ await screen.findByRole('heading',{name:'Team handbook'});
+});
+
+it('keeps filenames distinguishable when document paths share a long directory',async()=>{
+ const api=fixture();const folder='a-very-long-shared-directory/another-long-directory';
+ api.documents=vi.fn().mockResolvedValue({documents:[{name:'demo.md'},{name:folder+'/A.md'},{name:folder+'/B.md'}]});
+ render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Team handbook'});
+ const a=await screen.findByRole('button',{name:folder+'/A.md',exact:true});const b=screen.getByRole('button',{name:folder+'/B.md',exact:true});
+ expect(a.querySelector('strong')).toHaveTextContent(/^A.md$/);expect(b.querySelector('strong')).toHaveTextContent(/^B.md$/);
+ expect(a).toHaveAttribute('title',folder+'/A.md');expect(a.querySelector('small')).toHaveTextContent(folder);
+});

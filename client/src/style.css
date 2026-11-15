@@ -69,3 +69,6 @@ button:focus-visible,summary:focus-visible{outline:2px solid #41485f;outline-off
 
 /* Genuine Matrix per-room unread notification counter. */
 .room .room-unread{margin-left:auto;flex-shrink:0;min-width:19px;padding:2px 5px;border-radius:10px;background:#6573a8;color:#fff;font-size:10px;font-weight:600;text-align:center;overflow:visible}
+
+/* Keep the historical return action in front of the open history pane. */
+.history-return-latest{width:100%;min-height:44px;margin-bottom:12px}

@@ -204,6 +204,10 @@ jobs:
             --url http://127.0.0.1:8791 \
             --credentials-file .local/smoke-passwords.json \
             --evidence-dir .local/real-login-browser
+          # Restart only this isolated Workspace/Document API with its private persisted state.
+          kill "$client_pid"
+          wait "$client_pid" 2>/dev/null || true
+          start_client
           # P0 #71: second real Matrix device pair; restarted Synapse retains
           # authenticated user state, Git history and the Document API.
           # Never expose the ephemeral login secrets to artifacts or logs.
@@ -234,6 +238,7 @@ jobs:
           path: |
             .local/real-login-browser/*.png
             .local/real-login-browser/git-proof.json
+            .local/real-login-browser/p071-git-proof.json
           if-no-files-found: warn
           retention-days: 14
       - name: Diagnostics

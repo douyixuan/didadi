@@ -1,3 +1,4 @@
+import {verifyPersistedDocuments} from './document_recovery_acceptance.mjs';
 // P0 #71: genuine two-user Matrix/Chromium/Git receipt navigation.
 // Isolated CI loopback only; credentials never appear in logs or artifacts.
 import assert from 'node:assert/strict';
@@ -96,6 +97,7 @@ try{
   await expect(bob.page.getByRole('complementary',{name:'Version history'})).toBeVisible({timeout:30000});
   await expect(bob.page.locator('.markdown-body')).toContainText(marker,{timeout:30000});
   await bob.page.screenshot({path:evidenceDir+'/cross-author-git-receipt.png',fullPage:true});
+  await verifyPersistedDocuments({alice,bob,request:call,evidenceDir});
   console.log('PASS REAL P0 #71 cross-user Matrix receipt -> browser Git version; commit '+saved.data.commit);
 }finally{
   for(const context of contexts)await context.close();

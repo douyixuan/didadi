@@ -4,7 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {expect} from '@playwright/test';
 import {loginCooldown} from './login_cooldown.mjs';
 
-export async function verifyRoomIsolation({alice,bob,accounts,request,evidenceDir,matrix='http://127.0.0.1:8008'}) {
+export async function verifyRoomIsolation({alice,bob,accounts,request,evidenceDir,matrix='http://127.0.0.1:8008',afterRevocation}) {
   alice.page.setDefaultTimeout(30000);bob.page.setDefaultTimeout(30000);
   assert.match(matrix,/^http:\/\/(127\.0\.0\.1|localhost):\d+$/,'Only isolated loopback Matrix is allowed');
   const stamp=randomUUID().replaceAll('-',''),secret='P070private'+stamp,forbiddenBodies=[secret];
@@ -183,6 +183,7 @@ export async function verifyRoomIsolation({alice,bob,accounts,request,evidenceDi
     await bob.page.screenshot({path:evidenceDir+'/p070-real-kick-eviction.png',fullPage:true});
     console.log('PASS REAL ROOM #70: actual kick, stale search eviction, denied history/thread/quote/file/search');
 
+    if(afterRevocation)await afterRevocation({matrix,token});
   }finally{
     if(token){const logout=await fetch(matrix+'/_matrix/client/v3/logout',{method:'POST',headers:{'Authorization':'Bearer '+token},body:'{}'});assert.equal(logout.status,200,'Creator test device logout failed');}
   }
