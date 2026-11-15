@@ -72,3 +72,67 @@ Phase0第四模块React+matrix-js-sdk文档/讨论/Agent任务视图已有真实
 - **未通过/不包含**：#70 的真实 DM/群组/频道、成员变更及未读语义；#71 草稿并发冲突、多文档 move/export 完整浏览器路径；#72 独立全新安装及恢复全链验收。物理中文 IME、公共 Demo/生产安全未验证；本地 SQLite 文件包含服务端明文 bearer token（mode 0600），只能用于隔离开发。P0 父项 #85 继续打开；#12 继续暂停，#18/PR #41 由原 owner 处理。
 
 **验收决议**：仅关闭子交付 [#69](https://github.com/douyixuan/didadi/issues/69) 并在 [#85](https://github.com/douyixuan/didadi/issues/85) 勾选其子项；其余 15 项维持未验收，不把源码、离线 CI 或本地体验误当公网发布。
+
+
+## 稳定产品叶验收口径（2026-11-12）
+
+历史快照，当前状态以根树及下方“房间通信隔离真实验收”为准。
+
+根ROADMAP只记录P0–P3的#69–#84共16个完整产品功能；仅#69已完整接受，当前为1/16。旧7项技术验收勾选保留在历史证据中，不迁移为新的完整产品通过。细项和长期范围保留于[原细化入口](../roadmap/README.md#完整需求与长期范围)，不因进度重组删除。
+
+本轮文档依据父任务提供的最新事实：main ce24dd9a，#95/#98已合并；#99 a86806c真实集成通过但未合并，不能当main交付。#70仍缺kick、跨房间及快速切账号负向完整验收；#71/#72未完成。未在本轮重新执行这些真实检查，也未据此新增勾选。[#69验收状态](https://github.com/douyixuan/didadi/issues/69)、[#70剩余范围](https://github.com/douyixuan/didadi/issues/70)及各关联issue保留原证据入口。
+
+本地细化文档中旧候选/历史leaf路径是历史口径，不可用来判定新的16叶验收；后续本地门禁迁移已将旧5份元数据与7项豁免按内容摘要归档保护，新门禁独立核对16个稳定issue、99项需求保留及#69真实记录，不继承旧豁免。#41/#18所有权与#12暂停不变；未启动服务或发布。
+
+
+## 真实登录既有验收证据
+
+| 验收字段 | 准确记录 |
+| --- | --- |
+| version | `4c6caf4f0f8eb62bb71c979b135da87b11f6b32c` |
+| main | `271f15a68fbc37356b3cb368943cb1871f9ce30c` |
+| record | `https://github.com/douyixuan/didadi/issues/69#issuecomment-6624096272` |
+| real_ci | `https://github.com/douyixuan/didadi/actions/runs/41587178841` |
+| main_ci | `https://github.com/douyixuan/didadi/actions/runs/41783890475` |
+
+
+#69引用[2026-11-04已合并验收记录](https://github.com/douyixuan/didadi/issues/69#issuecomment-6624096272)：测试head `4c6caf4f0f8eb62bb71c979b135da87b11f6b32c`，main `271f15a68fbc37356b3cb368943cb1871f9ce30c`，相同Git tree `1122c4489b0dfe2951c689d04bb099b66853a0d3`。[真实CI](https://github.com/douyixuan/didadi/actions/runs/41587178841)验证隔离Synapse/PostgreSQL、双非管理员登录、Chromium、401、会话/CSRF、隔离、刷新、后端重启及退出；[main CI](https://github.com/douyixuan/didadi/actions/runs/41783890475)成功。该评论当时要求等待验收台账合入再计叶；本轮父任务已明确当前稳定验收为仅#69。仅loopback原型范围，SQLite私有文件中的token明文限制保留，公开Beta未批准。本轮只核对已有记录，没有重新运行真实流程。
+
+门禁迁移本地验证：完整检查通过16叶/1项既有验收记录；13项离线回归通过，包含重复/缺失叶、误勾#70、缺失原需求、缺验收记录、错误准确版本和mock冒充真实验收的拒绝。HTTPS链接仅离线格式核对；#69记录已通过授权只读GitHub接口读取，真实CI未在本轮重跑。归档证据如需修改必须显式复核迁移，不能静默改变旧窄范围通过含义。
+
+
+## 房间通信隔离真实验收
+
+| 验收字段 | 准确记录 |
+| --- | --- |
+| version | `b69a8d63070333b7122998e21b0f950f550c5a7f` |
+| main | `2c119c42652df4f2cf0aaf4d7904cc64424df365` |
+| record | `https://github.com/douyixuan/didadi/issues/70#issuecomment-6890670784` |
+| real_ci | `https://github.com/douyixuan/didadi/actions/runs/43685215402` |
+| main_ci | `https://github.com/douyixuan/didadi/actions/runs/43686279507` |
+
+
+2026-11-15执行并核验真实隔离流程后，接受#70。当前完整产品叶为#69、#70，共2/16；P0为2/4，#71多人文档冲突/草稿/恢复与#72独立安装恢复仍未完成，P1尚未启动。范围追踪的“已映射”不表示实现或验收。
+
+- 测试head `b69a8d63070333b7122998e21b0f950f550c5a7f`，合并main `2c119c42652df4f2cf0aaf4d7904cc64424df365`，相同tree `d83cf0f7419b01988726d9df6652015af53155d7`。[正式验收记录](https://github.com/douyixuan/didadi/issues/70#issuecomment-6890670784)。
+- 精确head：[Fast](https://github.com/douyixuan/didadi/actions/runs/43685215437)、[真实CI](https://github.com/douyixuan/didadi/actions/runs/43685215402)成功；合并后main：[Fast](https://github.com/douyixuan/didadi/actions/runs/43686279441)、[真实CI与p0 gate](https://github.com/douyixuan/didadi/actions/runs/43686279507)成功。[Codex精确head审查](https://github.com/douyixuan/didadi/pull/100#issuecomment-6890347716)无发现，不是代用户approval。
+- 环境为CI临时loopback Synapse/PostgreSQL、Workspace/Document API、真实Git及1280×720 Chromium；两个隔离合成身份，无生产数据。执行入口为real_login_browser.mjs及其room_isolation_acceptance.mjs。不是mock返回、物理iOS或公网Beta。SQLite私有token文件的既有开发限制仍保留至#83。
+
+| 完整验收条件 | 实际操作与断言 |
+| --- | --- |
+| 双用户私聊、群组、频道与成员行为 | 真邀请/join、双向消息、leave、拒绝房间、People双身份、引用、字节一致附件、超过50项唯一历史及可见原生搜索 |
+| 撤权无旧内容泄漏 | 原生creator kick；持有真实成功history/Thread/search响应，踢出后释放，不回填旧内容；后续读取/引用/文件/搜索拒绝 |
+| 未读与导航刷新保持 | Synapse原生计数与read marker、同身份刷新，不以本地总消息数伪造未读 |
+| 房间与会话隔离 | 跨房间迟到分页/Thread；同一browser profile Bob→Alice→Bob及旧成功搜索迟到；旧引用/文件/历史不可访问 |
+
+main的五张PNG均已下载并实际查看，内容仅合成，无cookie/密码/token；最后一张是账号切换加载瞬间，证明清除旧内容，不冒充稳定加载完成。后续完成断言见真实日志。
+
+- [授权房间与附件](../artifact/032-requirements-completion/p070-real-browser/p070-authorized-room.png)
+- [真实搜索结果](../artifact/032-requirements-completion/p070-real-browser/p070-authorized-search.png)
+- [跨房间迟到响应](../artifact/032-requirements-completion/p070-real-browser/p070-cross-room-late-responses.png)
+- [真实踢出后界面](../artifact/032-requirements-completion/p070-real-browser/p070-real-kick-eviction.png)
+- [切账号瞬间隔离](../artifact/032-requirements-completion/p070-real-browser/p070-same-browser-account-isolation.png)
+
+保留失败事实：Real 43683690935的新隔离断言通过，但旧错误密码测试截短服务端cooldown导致整轮失败。修复遵守完整retry_after_ms及7分钟上限，再要求真实401；未降低Synapse限流，不是产品Red→Green。PR正文否定句误含关闭关键词，GitHub在06:37提前关闭#70；该事件不是验收。实际接受在06:47后main gate成功并核对范围后记录，未倒签。
+
+公开Vercel仍是合成演示，不是本次真实后端验收环境。#41/#18分工和#12暂停不变；本次只增加一个完整叶，不因合并多个PR增加计数。

@@ -1,0 +1,335 @@
+{
+  "source": "b7f8b28dd089de4b4cc2062c33fb9703f9afacc4",
+  "measurements": [
+    {
+      "state": "read",
+      "buttons": [
+        {
+          "name": "Toggle navigation",
+          "width": 44,
+          "height": 44
+        },
+        {
+          "name": "Search messages and documents",
+          "width": 232,
+          "height": 52
+        },
+        {
+          "name": "Browse version history",
+          "width": 232,
+          "height": 44
+        },
+        {
+          "name": "Open example Agent",
+          "width": 232,
+          "height": 44
+        },
+        {
+          "name": "Edit",
+          "width": 48.890625,
+          "height": 44
+        },
+        {
+          "name": "Discussion",
+          "width": 44,
+          "height": 44
+        },
+        {
+          "name": "View version discussion",
+          "width": 164.1875,
+          "height": 44
+        },
+        {
+          "name": "Export Markdown",
+          "width": 125.796875,
+          "height": 44
+        },
+        {
+          "name": "Ask example Agent to read",
+          "width": 182.03125,
+          "height": 44
+        }
+      ]
+    },
+    {
+      "state": "discussion",
+      "buttons": [
+        {
+          "name": "Toggle navigation",
+          "width": 44,
+          "height": 44
+        },
+        {
+          "name": "Search messages and documents",
+          "width": 232,
+          "height": 52
+        },
+        {
+          "name": "Browse version history",
+          "width": 232,
+          "height": 44
+        },
+        {
+          "name": "Open example Agent",
+          "width": 232,
+          "height": 44
+        },
+        {
+          "name": "Edit",
+          "width": 48.890625,
+          "height": 44
+        },
+        {
+          "name": "Discussion",
+          "width": 44,
+          "height": 44
+        },
+        {
+          "name": "View version discussion",
+          "width": 164.1875,
+          "height": 44
+        },
+        {
+          "name": "Export Markdown",
+          "width": 125.796875,
+          "height": 44
+        },
+        {
+          "name": "Ask example Agent to read",
+          "width": 182.03125,
+          "height": 44
+        },
+        {
+          "name": "Close collaboration panel",
+          "width": 44,
+          "height": 44
+        },
+        {
+          "name": "Mark loaded messages read",
+          "width": 170.046875,
+          "height": 44
+        },
+        {
+          "name": "Messages",
+          "width": 52.640625,
+          "height": 44
+        },
+        {
+          "name": "Example Agent",
+          "width": 78.171875,
+          "height": 44
+        },
+        {
+          "name": "Reply",
+          "width": 53.640625,
+          "height": 44
+        },
+        {
+          "name": "View thread",
+          "width": 92.015625,
+          "height": 44
+        },
+        {
+          "name": "Send",
+          "width": 65.53125,
+          "height": 44
+        }
+      ]
+    },
+    {
+      "state": "actions",
+      "buttons": [
+        {
+          "name": "Toggle navigation",
+          "width": 44,
+          "height": 44
+        },
+        {
+          "name": "Search messages and documents",
+          "width": 232,
+          "height": 52
+        },
+        {
+          "name": "Browse version history",
+          "width": 232,
+          "height": 44
+        },
+        {
+          "name": "Open example Agent",
+          "width": 232,
+          "height": 44
+        },
+        {
+          "name": "Edit",
+          "width": 48.890625,
+          "height": 44
+        },
+        {
+          "name": "Discussion",
+          "width": 44,
+          "height": 44
+        },
+        {
+          "name": "View version discussion",
+          "width": 164.1875,
+          "height": 44
+        },
+        {
+          "name": "Export Markdown",
+          "width": 125.796875,
+          "height": 44
+        },
+        {
+          "name": "Ask example Agent to read",
+          "width": 182.03125,
+          "height": 44
+        }
+      ]
+    },
+    {
+      "state": "search",
+      "buttons": [
+        {
+          "name": "Close search",
+          "width": 95.546875,
+          "height": 44
+        },
+        {
+          "name": "Search",
+          "width": 56.953125,
+          "height": 44
+        },
+        {
+          "name": "Messages",
+          "width": 162,
+          "height": 44
+        },
+        {
+          "name": "Documents",
+          "width": 162,
+          "height": 44
+        },
+        {
+          "name": "@fixture:invalid",
+          "width": 332,
+          "height": 44
+        },
+        {
+          "name": "Toggle navigation",
+          "width": 44,
+          "height": 44
+        },
+        {
+          "name": "Search messages and documents",
+          "width": 232,
+          "height": 52
+        },
+        {
+          "name": "Browse version history",
+          "width": 232,
+          "height": 44
+        },
+        {
+          "name": "Open example Agent",
+          "width": 232,
+          "height": 44
+        },
+        {
+          "name": "Edit",
+          "width": 48.890625,
+          "height": 44
+        },
+        {
+          "name": "Discussion",
+          "width": 44,
+          "height": 44
+        },
+        {
+          "name": "View version discussion",
+          "width": 164.1875,
+          "height": 44
+        },
+        {
+          "name": "Export Markdown",
+          "width": 125.796875,
+          "height": 44
+        },
+        {
+          "name": "Ask example Agent to read",
+          "width": 182.03125,
+          "height": 44
+        }
+      ]
+    },
+    {
+      "state": "edit",
+      "buttons": [
+        {
+          "name": "Exit editing",
+          "width": 44,
+          "height": 44
+        },
+        {
+          "name": "Save changes",
+          "width": 100.71875,
+          "height": 44
+        },
+        {
+          "name": "Bold",
+          "width": 44,
+          "height": 44
+        },
+        {
+          "name": "Italic",
+          "width": 44,
+          "height": 44
+        },
+        {
+          "name": "Bullet list",
+          "width": 44,
+          "height": 44
+        },
+        {
+          "name": "Undo edit",
+          "width": 44,
+          "height": 44
+        },
+        {
+          "name": "More formatting",
+          "width": 79.03125,
+          "height": 44
+        }
+      ]
+    }
+  ],
+  "proof": [
+    {
+      "name": "Escape dismisses actions and restores focus",
+      "passed": true
+    },
+    {
+      "name": "outside pointer dismisses actions",
+      "passed": true
+    },
+    {
+      "name": "exit returns previous thread context",
+      "passed": true
+    },
+    {
+      "name": "draft retained when resuming editing",
+      "passed": true
+    },
+    {
+      "name": "all measured visible buttons have at least 44x44 bounds",
+      "passed": true
+    },
+    {
+      "name": "landscape editing preserves focused document space",
+      "passed": true
+    },
+    {
+      "name": "desktop retains navigation and hides mobile action menu",
+      "passed": true
+    }
+  ]
+}

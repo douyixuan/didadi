@@ -1,0 +1,40 @@
+{
+  "source": "b7f8b28dd089de4b4cc2062c33fb9703f9afacc4",
+  "adapter": "existing workflowFixture, entries projected to client history.commits; one pre-write save failure",
+  "proof": [
+    {
+      "name": "created named document saves without changing demo",
+      "passed": true
+    },
+    {
+      "name": "move updates selected path without duplicating source",
+      "passed": true
+    },
+    {
+      "name": "post-move historical version uses the selected path",
+      "passed": true
+    },
+    {
+      "name": "failed save preserves draft and selected path",
+      "passed": true
+    },
+    {
+      "name": "save retry repeats the exact original request and path",
+      "passed": true
+    },
+    {
+      "name": "browser draft restores to demo after reload without named text crossing",
+      "passed": true
+    },
+    {
+      "name": "fixture explicitly lacks durable named repository",
+      "passed": true
+    }
+  ],
+  "limits": [
+    "in-memory synthetic document map resets on reload; named repository persistence NOT passed",
+    "demo.md local browser draft restore only",
+    "cross-rename pre-move historical revisions not supported by fixture and still a known product gap",
+    "no Git atomicity, permissions, real backend or identity acceptance"
+  ]
+}

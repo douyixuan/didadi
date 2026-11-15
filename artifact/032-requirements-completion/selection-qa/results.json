@@ -1,0 +1,22 @@
+{
+  "source": "777986c37d9d2e07618c9a0ad39e791144ff98eb",
+  "adapter": "static re-seeded synthetic named document; no Git/backend persistence",
+  "proof": [
+    {
+      "name": "confirmed named document selected after browser reload",
+      "passed": true
+    },
+    {
+      "name": "named draft restores under the same selected path",
+      "passed": true
+    },
+    {
+      "name": "unavailable remembered path falls back to confirmed demo without deleting named draft",
+      "passed": true
+    }
+  ],
+  "limits": [
+    "synthetic Chromium desktop, not iOS",
+    "no backend, authentication, authorization or Git durability acceptance"
+  ]
+}

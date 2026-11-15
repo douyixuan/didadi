@@ -1,0 +1,35 @@
+{
+  "source": "c58d3a157ea039403b28a550fb78ab4fa268c3c3",
+  "adapter": "workflowFixture plus deterministic search/marker/artifact errors, synthetic runtime reports and denial",
+  "proof": [
+    {
+      "name": "synthetic functional adapter only",
+      "passed": true
+    },
+    {
+      "name": "search retry returns full discussion context",
+      "passed": true
+    },
+    {
+      "name": "marker retry uses original boundary and keeps newer unread count",
+      "passed": true
+    },
+    {
+      "name": "artifact retry remains pinned",
+      "passed": true
+    },
+    {
+      "name": "native browser download has exact synthetic bytes",
+      "passed": true
+    },
+    {
+      "name": "denied download hides viewed content and offers retry",
+      "passed": true
+    }
+  ],
+  "limits": [
+    "synthetic in-memory API; no Matrix/Git/runtime/auth",
+    "native download verified only against synthetic Blob",
+    "no real revocation timing or historical task enumeration"
+  ]
+}
