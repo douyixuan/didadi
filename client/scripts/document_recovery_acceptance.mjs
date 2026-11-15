@@ -174,6 +174,10 @@ export async function verifyPersistedDocuments({alice,bob,request,evidenceDir}) 
   for(const doc of proof.documents){
     assert.match(doc.path,/^p071\/[a-f0-9]{32}\/(A\.md|Archive\/B\.md)$/);
     assert.match(doc.commit,/^[a-f0-9]{40}$/);assert.match(doc.blob,/^[a-f0-9]{40}$/);
+    const author=execFileSync('git',['--git-dir=.local/documents.git','show','-s','--format=%an',doc.commit],{encoding:'utf8'}).trim();
+    assert.equal(author,bob.session.userId,'Immutable Git commit must attribute the actual writer');
+    const subject=execFileSync('git',['--git-dir=.local/documents.git','show','-s','--format=%s',doc.commit],{encoding:'utf8'}).trim();
+    assert.ok(subject.startsWith('docs('+doc.path+'):'));
     const immutable=execFileSync('git',['--git-dir=.local/documents.git','show',doc.commit+':'+doc.path],{encoding:'utf8'});
     const blob=execFileSync('git',['--git-dir=.local/documents.git','rev-parse',doc.commit+':'+doc.path],{encoding:'utf8'}).trim();
     assert.equal(blob,doc.blob);assert.ok(immutable.includes(doc.marker));
