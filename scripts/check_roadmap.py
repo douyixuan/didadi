@@ -274,8 +274,9 @@ def validate_stable(root, config, require=None):
             if not re.fullmatch(r'https://github\.com/douyixuan/didadi/actions/runs/\d+',proof[key]):
                 raise ValueError('Acceptance CI must identify an exact repository workflow run')
         text = scoped_evidence(root,proof['evidence'])
-        if not all(proof[key] in text for key in ('version', 'main', 'record', 'real_ci', 'main_ci')):
-            raise ValueError('Acceptance fields must match the retained real record')
+        bindings=re.findall(r'^\| (version|main|record|real_ci|main_ci) \| `([^`]+)` \|$',text,re.M)
+        if len(bindings)!=5 or dict(bindings)!={key:proof[key] for key in ('version','main','record','real_ci','main_ci')}:
+            raise ValueError('Acceptance roles must match their labeled retained values')
     archived = root/'artifact/032-requirements-completion/historical-20261022.md'
     for file in (path, root/'roadmap/README.md', root/'roadmap/_template.md', root/'docs/PRODUCT_WORKFLOW.md', root/'docs/MVP_ACCEPTANCE.md', archived, *sorted((root/'roadmap').glob('*.md'))):
         for ref in re.findall(r'\[[^\]]*\]\(([^)]+)\)', file.read_text()):

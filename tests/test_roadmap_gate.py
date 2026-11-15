@@ -109,9 +109,6 @@ class RoadmapGateTests(unittest.TestCase):
         self.assertEqual(validate(self.root), (1, 0))
 
 
-if __name__ == '__main__':
-    unittest.main()
-
 class StableProductGateTests(unittest.TestCase):
     """Mutate reads only: never change the real repository during validation."""
     def test_stable_product_gate_and_negative_cases(self):
@@ -142,12 +139,19 @@ class StableProductGateTests(unittest.TestCase):
         cases.append({historical:broken,'roadmap/_checks.json':json.dumps(archive_config)})
         archive='artifact/032-requirements-completion/historical-20261022.md'
         cases.append({archive:original(root/archive).replace('### 今晚四目标实际对账','### Removed historical anchor')})
+        original_bytes=Path.read_bytes
         for replacements in cases:
+            def read_bytes(path,*args,**kwargs):
+                relative=str(path.relative_to(root)) if path.is_relative_to(root) else ''
+                return replacements[relative].encode() if relative in replacements else original_bytes(path,*args,**kwargs)
             def read(path, *args, **kwargs):
                 relative = str(path.relative_to(root)) if path.is_relative_to(root) else ''
                 return replacements[relative] if relative in replacements else original(path, *args, **kwargs)
-            with self.subTest(case=list(replacements)), patch.object(Path, 'read_text', read):
-                with self.assertRaises(ValueError): validate(root)
+            with self.subTest(case=list(replacements)), patch.object(Path, 'read_text', read),patch.object(Path,'read_bytes',read_bytes):
+                if historical in replacements or archive in replacements:
+                    with self.assertRaisesRegex(ValueError,'Broken heading anchor'):validate(root)
+                else:
+                    with self.assertRaises(ValueError):validate(root)
 
     def test_requirement_trace_rejects_missing_duplicate_and_illegal_leaf(self):
         from unittest.mock import patch
@@ -194,3 +198,18 @@ class StableProductGateTests(unittest.TestCase):
                 return replacements[relative] if relative in replacements else original(path,*args,**kwargs)
             with self.subTest(case=list(replacements)),patch.object(Path,'read_text',read):
                 with self.assertRaises(ValueError):validate(root)
+
+    def test_acceptance_roles_cannot_be_exchanged(self):
+        from unittest.mock import patch
+        root=Path(__file__).resolve().parents[1];original=Path.read_text
+        config=json.loads(original(root/'roadmap/_checks.json'))
+        for left,right in [('version','main'),('real_ci','main_ci')]:
+            changed=json.loads(json.dumps(config));proof=changed['accepted']['69'];proof[left],proof[right]=proof[right],proof[left]
+            def read(path,*args,**kwargs):
+                return json.dumps(changed) if path==root/'roadmap/_checks.json' else original(path,*args,**kwargs)
+            with self.subTest(roles=(left,right)),patch.object(Path,'read_text',read):
+                with self.assertRaisesRegex(ValueError,'roles'):validate(root)
+
+
+if __name__ == '__main__':
+    unittest.main()

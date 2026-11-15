@@ -47,7 +47,7 @@
 
 ## 可执行检查
 
-从仓库根执行 `python3 -m scripts.check_roadmap`；CI执行相同命令及其隔离回归，并用PR目标SHA或push前SHA作 `--baseline-ref` 检查历史豁免只能覆盖原基线已勾叶子；首个分支push/手动运行回退到与origin/main共同基线。checkout读取完整Git历史以支持多提交对比，不执行服务。检查根树结构、本地链接/锚点、功能元数据、叶子绑定和新增勾选门槛。不联网，不启动App，不创建身份，不代替产品负责人或真实验收。带 `--require-checkable <功能ID>` 可在准备勾选前严格验证该功能；阻塞实例应失败，不能关掉检查让它通过。
+从仓库根执行 `python3 -m scripts.check_roadmap`；CI执行相同命令及其隔离回归，并用PR目标SHA或push前SHA作 `--baseline-ref` 检查legacy模式历史豁免只能覆盖原基线已勾叶子；stable-products模式不使用该baseline参数，而以稳定issue、精确角色字段及归档摘要核验，不继承legacy豁免；首个分支push/手动运行回退到与origin/main共同基线。checkout读取完整Git历史以支持多提交对比，不执行服务。检查根树结构、本地链接/锚点、功能元数据、叶子绑定和新增勾选门槛。不联网，不启动App，不创建身份，不代替产品负责人或真实验收。带 `--require-checkable <功能ID>` 可在准备勾选前严格验证该功能；阻塞实例应失败，不能关掉检查让它通过。
 
 复制到其他App：复制本文件、模板、检查脚本及其测试；在本仓库 `_checks.json` 指定根文件、功能目录和历史勾选证据；新项目通常没有历史豁免。既有豁免只兼容接入时已勾叶子的原范围，不得通过增加豁免绕过实际验收；修改豁免必须独立核对原证据。先接入一项真实完整功能，逐项推进；禁止复制Didadi的版本、验收结果或历史豁免。根ROADMAP链接到 `roadmap/README.md`，不复制README中的旧功能列表形成第二棵树。
 

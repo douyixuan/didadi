@@ -87,12 +87,30 @@ Phase0第四模块React+matrix-js-sdk文档/讨论/Agent任务视图已有真实
 
 ## 真实登录既有验收证据
 
+| 验收字段 | 准确记录 |
+| --- | --- |
+| version | `4c6caf4f0f8eb62bb71c979b135da87b11f6b32c` |
+| main | `271f15a68fbc37356b3cb368943cb1871f9ce30c` |
+| record | `https://github.com/douyixuan/didadi/issues/69#issuecomment-6624096272` |
+| real_ci | `https://github.com/douyixuan/didadi/actions/runs/41587178841` |
+| main_ci | `https://github.com/douyixuan/didadi/actions/runs/41783890475` |
+
+
 #69引用[2026-11-04已合并验收记录](https://github.com/douyixuan/didadi/issues/69#issuecomment-6624096272)：测试head `4c6caf4f0f8eb62bb71c979b135da87b11f6b32c`，main `271f15a68fbc37356b3cb368943cb1871f9ce30c`，相同Git tree `1122c4489b0dfe2951c689d04bb099b66853a0d3`。[真实CI](https://github.com/douyixuan/didadi/actions/runs/41587178841)验证隔离Synapse/PostgreSQL、双非管理员登录、Chromium、401、会话/CSRF、隔离、刷新、后端重启及退出；[main CI](https://github.com/douyixuan/didadi/actions/runs/41783890475)成功。该评论当时要求等待验收台账合入再计叶；本轮父任务已明确当前稳定验收为仅#69。仅loopback原型范围，SQLite私有文件中的token明文限制保留，公开Beta未批准。本轮只核对已有记录，没有重新运行真实流程。
 
 门禁迁移本地验证：完整检查通过16叶/1项既有验收记录；13项离线回归通过，包含重复/缺失叶、误勾#70、缺失原需求、缺验收记录、错误准确版本和mock冒充真实验收的拒绝。HTTPS链接仅离线格式核对；#69记录已通过授权只读GitHub接口读取，真实CI未在本轮重跑。归档证据如需修改必须显式复核迁移，不能静默改变旧窄范围通过含义。
 
 
 ## 房间通信隔离真实验收
+
+| 验收字段 | 准确记录 |
+| --- | --- |
+| version | `b69a8d63070333b7122998e21b0f950f550c5a7f` |
+| main | `2c119c42652df4f2cf0aaf4d7904cc64424df365` |
+| record | `https://github.com/douyixuan/didadi/issues/70#issuecomment-6890670784` |
+| real_ci | `https://github.com/douyixuan/didadi/actions/runs/43685215402` |
+| main_ci | `https://github.com/douyixuan/didadi/actions/runs/43686279507` |
+
 
 2026-11-15执行并核验真实隔离流程后，接受#70。当前完整产品叶为#69、#70，共2/16；P0为2/4，#71多人文档冲突/草稿/恢复与#72独立安装恢复仍未完成，P1尚未启动。范围追踪的“已映射”不表示实现或验收。
 
