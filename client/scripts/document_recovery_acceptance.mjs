@@ -47,6 +47,7 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     await expect(alice.page.locator('.page-eyebrow')).toContainText(path,{timeout:30000});
     await edit(alice.page,body);await save(alice.page);
   }
+  let completed=false;
   const grant=await fetch(powerURL,{method:'PUT',headers,body:JSON.stringify(temporary)});assert.equal(grant.status,200);
   try{
     // Both paths are created and edited through the actual UI, never fixtures.
@@ -62,7 +63,7 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     const winnerDoc=(await read(alice.page,a)).data;
     const beforeConflict=await history(alice.page,a);
     assert.notEqual(common.blob,winnerDoc.blob);
-    await save(bob.page,409);
+    const failed=await save(bob.page,409);assert.equal(failed.status,'conflict');
     await expect(bob.page.getByText('This document has a newer version',{exact:true})).toBeVisible();
     await expect(editor(bob.page)).toContainText(loser);
     assert.deepEqual((await read(alice.page,a)).data,winnerDoc);
@@ -94,6 +95,7 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     await expect(bob.page.locator('.page-eyebrow')).toContainText(b,{timeout:30000});
     await bob.page.getByRole('button',{name:'Restore local draft',exact:true}).click();
     await expect(editor(bob.page)).toContainText(retryB);
+    await expect(bob.page.locator('body')).not.toContainText(loser);
     await save(bob.page);
     await bob.page.screenshot({path:evidenceDir+'/p071-recovered-network-draft.png',fullPage:true});
     // Confirmed move updates selection; reload must reopen the new path.
@@ -109,11 +111,12 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     const file=await download,stream=await file.createReadStream();const chunks=[];for await(const chunk of stream)chunks.push(chunk);
     assert.equal(Buffer.concat(chunks).toString('utf8'),final.content);
     await bob.page.screenshot({path:evidenceDir+'/p071-moved-reopened-exported.png',fullPage:true});
+    completed=true;
     console.log('PASS REAL DOCUMENT #71: two users, two UI documents, same-base conflict, isolated drafts after reload, network retry, confirmed move/reopen and exact export');
   }finally{
     const restore=await fetch(powerURL,{method:'PUT',headers,body:JSON.stringify(levels)});assert.equal(restore.status,200,'Original fixture power levels must be restored');
     const check=await fetch(powerURL,{headers});assert.equal(check.status,200);assert.deepEqual(await check.json(),levels);
-    await alice.page.reload();await bob.page.reload();
-    await open(alice.page,returnPath);await open(bob.page,returnPath);
+    // Retain the actual failure screen; do not replace it with cleanup navigation.
+    if(completed){await alice.page.reload();await bob.page.reload();await open(alice.page,returnPath);await open(bob.page,returnPath);}
   }
 }
