@@ -991,3 +991,80 @@ it('ignores the old visible source link while another history version is loading
  fireEvent.click(screen.getByRole('link',{name:'Open source message',exact:true}));await act(async()=>finishVersion({...doc,content:'# Loaded history version'}));
  expect(api.message).not.toHaveBeenCalled();expect(screen.getByRole('heading',{name:'Loaded history version'})).toBeInTheDocument();expect(screen.queryByRole('button',{name:'All messages',exact:true})).not.toBeInTheDocument();
 });
+
+describe('Git document history across moves',()=>{
+ it('reads an old version at its Git path but saves edits to the current document name',async()=>{
+  const api=fixture(),current='Archive/A.md',old='Notes/A.md',version='c'.repeat(40);
+  api.historyPage=vi.fn().mockResolvedValue({versions:[{commit:doc.commit,path:current},{commit:version,path:old}],next_cursor:null});
+  api.document.mockImplementation(async(_room,commit,name)=>({...doc,name,content:commit===version?'# Earlier A':'# Current A',blob:commit===version?'d'.repeat(40):doc.blob,commit:commit||doc.commit}));
+  api.saveDocument=vi.fn().mockResolvedValue({status:'saved',path:current,commit:doc.commit,blob:doc.blob});
+  render(<Documents api={api} room="!room" name={current} mode="edit" historyOpen/>);
+  await waitFor(()=>expect(screen.getByLabelText('Markdown document')).toHaveValue('# Current A'));
+  fireEvent.click(await screen.findByRole('button',{name:/Previous version/}));
+  await waitFor(()=>expect(api.document).toHaveBeenCalledWith('!room',version,old));
+  await waitFor(()=>expect(screen.getByLabelText('Markdown document')).toHaveValue('# Earlier A'));
+  fireEvent.change(screen.getByLabelText('Markdown document'),{target:{value:'# Explicitly restored A'}});
+  fireEvent.click(screen.getByRole('button',{name:'Save changes',exact:true}));
+  await waitFor(()=>expect(api.saveDocument).toHaveBeenCalledWith('!room','# Explicitly restored A','d'.repeat(40),expect.any(String),current));
+  expect(api.saveDocument.mock.calls.every(call=>call[4]===current)).toBe(true);
+ });
+ it('retains the document on paging failure and retries without duplicate versions',async()=>{
+  const api=fixture(),current='Archive/A.md',version='c'.repeat(40);
+  api.document.mockResolvedValue({...doc,name:current});
+  api.historyPage=vi.fn().mockResolvedValueOnce({versions:[{commit:doc.commit,path:current}],next_cursor:'page-two'})
+   .mockRejectedValueOnce(new Error('History temporarily unavailable'))
+   .mockResolvedValueOnce({versions:[{commit:doc.commit,path:current},{commit:version,path:'Notes/A.md'}],next_cursor:null});
+  render(<Documents api={api} room="!room" name={current} historyOpen/>);
+  await screen.findByRole('heading',{name:'Team handbook'});
+  fireEvent.click(await screen.findByRole('button',{name:'Load earlier versions',exact:true}));
+  expect(await screen.findByRole('alert')).toHaveTextContent('History temporarily unavailable');
+  expect(screen.getByRole('heading',{name:'Team handbook'})).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'Retry earlier versions',exact:true}));
+  await screen.findByRole('button',{name:/Previous version/});
+  expect(document.querySelectorAll('.history-row')).toHaveLength(2);
+  expect(api.historyPage).toHaveBeenLastCalledWith('!room',current,'page-two');
+ });
+ it('keeps a successfully loaded document readable when history alone is unavailable',async()=>{
+  const api=fixture();api.historyPage=vi.fn().mockRejectedValueOnce(new Error('History is offline')).mockResolvedValue({versions:[{commit:doc.commit,path:'demo.md'}],next_cursor:null});
+  render(<Documents api={api} room="!room" historyOpen/>);
+  await screen.findByRole('heading',{name:'Team handbook'});
+  expect(await screen.findByRole('alert')).toHaveTextContent('History is offline');
+  fireEvent.click(screen.getByRole('button',{name:'Restart history',exact:true}));
+  await waitFor(()=>expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+  expect(screen.getByRole('heading',{name:'Team handbook'})).toBeInTheDocument();
+ });
+});
+
+it('ignores an earlier document history page after switching document and account',async()=>{
+ const api=fixture(),other=fixture();other.session={...other.session,userId:'@other:local'};
+ let finish;api.document.mockResolvedValue({...doc,name:'A.md'});
+ api.historyPage=vi.fn().mockResolvedValueOnce({versions:[{commit:doc.commit,path:'A.md'}],next_cursor:'older'}).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve}));
+ other.document.mockResolvedValue({...doc,name:'B.md',content:'# Independent B'});
+ other.historyPage=vi.fn().mockResolvedValue({versions:[{commit:'e'.repeat(40),path:'B.md'}],next_cursor:null});
+ const view=render(<Documents api={api} room="!room" name="A.md" historyOpen/>);
+ await screen.findByRole('heading',{name:'Team handbook'});fireEvent.click(await screen.findByRole('button',{name:'Load earlier versions',exact:true}));
+ await waitFor(()=>expect(finish).toBeTypeOf('function'));
+ view.rerender(<Documents api={other} room="!other" name="B.md" historyOpen/>);
+ await screen.findByRole('heading',{name:'Independent B'});
+ await act(async()=>finish({versions:[{commit:'f'.repeat(40),path:'Private old A.md'}],next_cursor:null}));
+ expect(document.querySelectorAll('.history-row')).toHaveLength(1);expect(screen.queryByText('At Private old A.md')).not.toBeInTheDocument();
+ expect(screen.getByRole('heading',{name:'Independent B'})).toBeInTheDocument();
+});
+
+it('does not restore an earlier document response after history reauthorization denies access',async()=>{
+ const api=fixture();let finish;const denied=Object.assign(new Error('Room access revoked'),{status:403});const unavailable=vi.fn();
+ api.document.mockImplementation(()=>new Promise(resolve=>{finish=resolve}));api.historyPage=vi.fn().mockRejectedValue(denied);
+ render(<Documents api={api} room="!room" name="Private.md" historyOpen onUnavailable={unavailable}/>);
+ await waitFor(()=>expect(unavailable).toHaveBeenCalledWith('Private.md',403));
+ await act(async()=>finish({...doc,name:'Private.md',content:'# Revoked document must not reappear'}));
+ expect(screen.queryByRole('heading',{name:'Revoked document must not reappear'})).not.toBeInTheDocument();
+ expect(document.querySelectorAll('.history-row')).toHaveLength(0);
+});
+it('does not restore an earlier history response after the document read denies access',async()=>{
+ const api=fixture();let finish;const unavailable=vi.fn();
+ api.document.mockRejectedValue(Object.assign(new Error('Room access revoked'),{status:403}));api.historyPage=vi.fn(()=>new Promise(resolve=>{finish=resolve}));
+ render(<Documents api={api} room="!room" name="Private.md" historyOpen onUnavailable={unavailable}/>);
+ await waitFor(()=>expect(unavailable).toHaveBeenCalledWith('Private.md',403));
+ await act(async()=>finish({versions:[{commit:doc.commit,path:'Private old name.md'}],next_cursor:'stale'}));
+ expect(document.querySelectorAll('.history-row')).toHaveLength(0);expect(screen.queryByText('At Private old name.md')).not.toBeInTheDocument();
+});

@@ -264,3 +264,20 @@ class DocumentServiceTests(unittest.TestCase):
         with self.assertRaises(DocumentError) as missing:self.service.from_messages(payload)
         self.assertEqual(missing.exception.status,400)
         self.assertEqual(self.store.documents()['documents'],[])
+
+    def test_history_pages_reauthorize_every_request_and_keep_other_rooms_out(self):
+        first = self.store.write('A.md', 'first')
+        latest = first
+        for index in range(8):
+            latest = self.store.write('A.md', str(index), latest['blob'])
+        page = self.service.history('!doc:local', 'A.md')
+        self.assertIsNotNone(page['next_cursor'])
+        with self.assertRaises(DocumentError) as wrong:
+            self.service.history('!other:local', 'A.md', page['next_cursor'])
+        self.assertEqual(wrong.exception.status, 403)
+        self.joined = False
+        with self.assertRaises(DocumentError) as revoked:
+            self.service.history('!doc:local', 'A.md', page['next_cursor'])
+        self.assertEqual(revoked.exception.status, 403)
+        self.joined = True
+        self.assertEqual(self.service.history('!doc:local', 'A.md', page['next_cursor'])['versions'][-1]['commit'], first['commit'])

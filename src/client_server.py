@@ -498,8 +498,12 @@ def handler(workspace, dist, port, sessions=None):
                     if parsed.path == '/api/document':
                         result = current_workspace.documents.read(room, query.get('commit', [None])[0], query.get('path', ['demo.md'])[0])
                     elif parsed.path == '/api/history':
-                        current_workspace.documents.authorize(room)
-                        result = {'commits': current_workspace.docs.history(query.get('path', ['demo.md'])[0])}
+                        name = query.get('path', ['demo.md'])[0]
+                        if query.get('versions', [''])[0] == '1':
+                            result = current_workspace.documents.history(room, name, query.get('cursor', [None])[0])
+                        else:
+                            current_workspace.documents.authorize(room)
+                            result = {'commits': current_workspace.docs.history(name)}
                     else:
                         event_id = query.get('id', [''])[0]
                         current_workspace.api('GET', '/rooms/' + segment(room) + '/event/' + segment(event_id))

@@ -104,6 +104,9 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     await expect(bob.page.locator('body')).not.toContainText(loser);
     await save(bob.page);
     await bob.page.screenshot({path:evidenceDir+'/p071-recovered-network-draft.png',fullPage:true});
+    // Genuine UI versions exceed one bounded history page. Keep the recovered
+    // content marker so restart/export checks still refer to this document.
+    for(let index=0;index<9;index++){await edit(bob.page,retryB+'\n\nHistory checkpoint '+index);await save(bob.page);}
     // Confirmed move updates selection; reload must reopen the new path.
     await bob.page.getByRole('button',{name:'Read',exact:true}).click();
     await bob.page.getByLabel('Move document to path').fill(moved);
@@ -117,6 +120,34 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     const file=await download,stream=await file.createReadStream();const chunks=[];for await(const chunk of stream)chunks.push(chunk);
     assert.equal(Buffer.concat(chunks).toString('utf8'),final.content);
     await bob.page.screenshot({path:evidenceDir+'/p071-moved-reopened-exported.png',fullPage:true});
+    // Follow pre-move versions from the new document. A failed page keeps the
+    // current content; retry uses the same non-authorizing opaque position.
+    const originalBCommit=bHistory.data.commits[0];
+    await bob.page.getByRole('button',{name:'Version history',exact:true}).click();
+    const historyPanel=bob.page.getByRole('complementary',{name:'Version history'});
+    await expect(historyPanel.locator('.history-row')).toHaveCount(8,{timeout:30000});
+    const pagePattern=url=>url.pathname==='/api/history'&&url.searchParams.get('path')===moved&&url.searchParams.has('cursor');
+    let failedCursor;await bob.page.route(pagePattern,route=>{failedCursor=new URL(route.request().url()).searchParams.get('cursor');return route.abort('failed');});
+    await historyPanel.getByRole('button',{name:'Load earlier versions',exact:true}).click();
+    await expect(historyPanel.getByRole('alert')).toBeVisible();await expect(bob.page.locator('.markdown-body')).toContainText(retryB);
+    await bob.page.unroute(pagePattern);
+    const retriedPage=bob.page.waitForResponse(response=>pagePattern(new URL(response.url())));
+    await historyPanel.getByRole('button',{name:'Retry earlier versions',exact:true}).click();
+    const pageResponse=await retriedPage;assert.equal(pageResponse.status(),200);assert.equal(new URL(pageResponse.url()).searchParams.get('cursor'),failedCursor);
+    const older=(await pageResponse.json()).versions;assert.ok(older.some(item=>item.commit===originalBCommit&&item.path===b));assert.ok(older.every(item=>item.path!==a));
+    const originalRow=historyPanel.locator('.history-row').filter({hasText:originalBCommit.slice(0,10)});await expect(originalRow).toHaveCount(1);
+    await expect(originalRow).toContainText('At '+b);await originalRow.click();
+    await expect(bob.page.locator('.markdown-body')).toContainText(stableB,{timeout:30000});await expect(bob.page.locator('.page-eyebrow')).toContainText(moved);
+    await bob.page.screenshot({path:evidenceDir+'/p071-pre-move-paged-history.png',fullPage:true});
+    const collaboration=bob.page.locator('.collaboration-panel');const panelWasOpen=await collaboration.evaluate(node=>!node.classList.contains('panel-closed'));
+    if(panelWasOpen)await bob.page.getByRole('button',{name:'Discussion',exact:true}).click();
+    await bob.page.setViewportSize({width:390,height:844});
+    const returnAction=historyPanel.getByRole('button',{name:'Back to latest',exact:true});const target=await returnAction.boundingBox();assert.ok(target&&target.height>=44&&target.x>=0&&target.x+target.width<=390);
+    await bob.page.screenshot({path:evidenceDir+'/p071-pre-move-paged-history-mobile.png',fullPage:true});
+    await bob.page.setViewportSize({width:1280,height:720});if(panelWasOpen)await bob.page.getByRole('button',{name:'Discussion',exact:true}).click();
+    await historyPanel.getByRole('button',{name:'Back to latest',exact:true}).click();await expect(bob.page.locator('.markdown-body')).toContainText('History checkpoint 8',{timeout:30000});
+    assert.equal((await read(bob.page,moved)).data.blob,final.blob);assert.equal((await read(bob.page,a)).data.blob,resolvedA.blob);
+    console.log('PASS REAL DOCUMENT #71: bounded pre-move history, genuine failed-page retry, original-path read, current target preserved');
     // Existing fixed-version UI remains usable for A without changing B.
     await open(bob.page,a);
     await bob.page.getByRole('button',{name:'Version history',exact:true}).click();
