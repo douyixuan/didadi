@@ -29,6 +29,7 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
       await page.getByRole('button',{name:path,exact:true}).click();
     }
     await expect(page.locator('.page-eyebrow')).toContainText(path,{timeout:30000});
+    await expect(page.getByRole('button',{name:path+', current document',exact:true}).locator('strong')).toHaveText(path.split('/').at(-1));
     await expect(page.locator('.document-statusbar')).toContainText('All changes saved',{timeout:30000});
   }
   async function edit(page,text){
@@ -48,6 +49,7 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     await page.getByLabel('New document path').fill(path);
     await page.getByRole('button',{name:'Create document',exact:true}).click();
     await expect(page.locator('.page-eyebrow')).toContainText(path,{timeout:30000});
+    await expect(page.getByRole('button',{name:path+', current document',exact:true}).locator('strong')).toHaveText(path.split('/').at(-1));
     await edit(page,body);await save(page);
   }
   let completed=false;

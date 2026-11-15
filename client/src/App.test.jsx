@@ -879,3 +879,12 @@ it('keeps return-to-latest inside the open history panel and closes it on return
  await waitFor(()=>expect(screen.queryByRole('complementary',{name:'Version history'})).not.toBeInTheDocument());
  await screen.findByRole('heading',{name:'Team handbook'});
 });
+
+it('keeps filenames distinguishable when document paths share a long directory',async()=>{
+ const api=fixture();const folder='a-very-long-shared-directory/another-long-directory';
+ api.documents=vi.fn().mockResolvedValue({documents:[{name:'demo.md'},{name:folder+'/A.md'},{name:folder+'/B.md'}]});
+ render(<App connector={async()=>api}/>);await screen.findByRole('heading',{name:'Team handbook'});
+ const a=await screen.findByRole('button',{name:folder+'/A.md',exact:true});const b=screen.getByRole('button',{name:folder+'/B.md',exact:true});
+ expect(a.querySelector('strong')).toHaveTextContent(/^A.md$/);expect(b.querySelector('strong')).toHaveTextContent(/^B.md$/);
+ expect(a).toHaveAttribute('title',folder+'/A.md');expect(a.querySelector('small')).toHaveTextContent(folder);
+});
