@@ -188,10 +188,10 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     await bob.page.getByRole('button',{name:'Read',exact:true}).click();await expect(sourceLinks).toHaveCount(2);
     const newerSource=(await read(bob.page,copied)).data;
     assert.ok(newerSource.content.includes(newerNote));assert.notEqual(newerSource.blob,source.blob);
-    // Crepe inserted this text in the first heading; Read renders that heading
-    // as the document title, outside markdown-body. Check the actual saved text
-    // and its matching UI region rather than mistaking title layout for loss.
-    await expect(bob.page.locator('.document-title')).toContainText(newerNote);
+    // The rich editor may insert at the heading or a body block depending on
+    // its active selection. Both belong to the read surface. Verify canonical
+    // Git text plus that entire surface, independent of presentation placement.
+    await expect(bob.page.locator('.document-surface')).toContainText(newerNote);
     await bob.page.getByRole('button',{name:'Version history',exact:true}).click();
     let ready,release,finished,entered=false;const held=new Promise(resolve=>{ready=resolve}),gate=new Promise(resolve=>{release=resolve}),done=new Promise(resolve=>{finished=resolve});
     const versionPattern=url=>url.pathname==='/api/document'&&url.searchParams.get('path')===copied&&url.searchParams.get('commit')===source.commit;
@@ -212,7 +212,7 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     }catch(error){primaryFailure=error;throw error;}
     finally{release();const failure=entered?await done:null;await bob.page.unroute(versionPattern);if(failure&&!primaryFailure)throw failure;}
     await bob.page.getByRole('complementary',{name:'Version history'}).getByRole('button',{name:'Back to latest',exact:true}).click();
-    await expect(bob.page.locator('.document-title')).toContainText(newerNote,{timeout:30000});
+    await expect(bob.page.locator('.document-surface')).toContainText(newerNote,{timeout:30000});
     const latestSource=(await read(bob.page,copied)).data;assert.equal(latestSource.blob,newerSource.blob);assert.equal(latestSource.content,newerSource.content);
     // Normal clicks stay in this app. Block the portable external fallback so
     // a regression never contacts matrix.to. Root and reply return to context.
