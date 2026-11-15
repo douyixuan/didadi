@@ -170,6 +170,20 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     await expect(bob.page.locator('.markdown-body')).toContainText(resolved);
     await expect(bob.page.getByRole('complementary',{name:'Version history'})).toHaveCount(0);
     await bob.page.screenshot({path:evidenceDir+'/p071-history-return-accessible.png',fullPage:true});
+    // Search opens a fixed-version document on a new component. History must
+    // initialize on that entry path, not only after a latest-version read.
+    await bob.page.getByRole('button',{name:'Open full-text search',exact:true}).click();
+    const searchDialog=bob.page.getByRole('dialog');await searchDialog.getByRole('textbox',{name:'Search body text',exact:true}).fill(retryB);
+    const searchResponse=bob.page.waitForResponse(response=>new URL(response.url()).pathname==='/api/search/documents'&&response.request().postDataJSON()?.query===retryB);
+    await searchDialog.getByRole('button',{name:'Documents',exact:true}).click();const found=await searchResponse;assert.equal(found.status(),200);
+    const matched=(await found.json()).results.find(item=>item.name===moved&&item.excerpt.includes(retryB));assert.ok(matched);
+    await searchDialog.getByRole('button',{name:moved+' · line '+matched.line,exact:true}).click();await expect(searchDialog).toHaveCount(0);await expect(bob.page.locator('.page-eyebrow')).toContainText(moved,{timeout:30000});
+    await bob.page.getByRole('button',{name:'Version history',exact:true}).click();await expect(historyPanel.locator('.history-row')).toHaveCount(8,{timeout:30000});
+    await historyPanel.getByRole('button',{name:'Load earlier versions',exact:true}).click();await expect(originalRow).toHaveCount(1,{timeout:30000});await originalRow.scrollIntoViewIfNeeded();
+    await bob.page.screenshot({path:evidenceDir+'/p071-search-fixed-version-history.png',fullPage:true});
+    await historyPanel.getByRole('button',{name:'Back to latest',exact:true}).click();await expect(bob.page.locator('.markdown-body')).toContainText('History checkpoint 8',{timeout:30000});
+    assert.equal((await read(bob.page,moved)).data.blob,final.blob);
+    console.log('PASS REAL DOCUMENT #71: genuine body search fixed-version entry initializes paged pre-move history');
     // Actual selected message -> Git document with a native source permalink.
     await bob.page.goto('/?room='+encodeURIComponent(room));
     const panel=bob.page.locator('.collaboration-panel');
