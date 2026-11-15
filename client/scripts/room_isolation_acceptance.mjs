@@ -163,7 +163,7 @@ export async function verifyRoomIsolation({alice,bob,accounts,request,evidenceDi
     await denied(bob.page,v3(room)+'/send/m.room.message/'+randomUUID(),{msgtype:'m.text',body:'denied after kick','m.relates_to':{'m.in_reply_to':{'event_id':root}}},'PUT');
     await bob.page.screenshot({path:evidenceDir+'/p070-real-kick-eviction.png',fullPage:true});
     console.log('PASS REAL ROOM #70: actual kick, stale search eviction, denied history/thread/quote/file/search');
-  
+
   }finally{
     if(token){const logout=await fetch(matrix+'/_matrix/client/v3/logout',{method:'POST',headers:{'Authorization':'Bearer '+token},body:'{}'});assert.equal(logout.status,200,'Creator test device logout failed');}
   }
