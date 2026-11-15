@@ -142,10 +142,11 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     const collaboration=bob.page.locator('.collaboration-panel');const panelWasOpen=await collaboration.evaluate(node=>!node.classList.contains('panel-closed'));
     if(panelWasOpen)await bob.page.getByRole('button',{name:'Discussion',exact:true}).click();
     await bob.page.setViewportSize({width:390,height:844});
-    const returnAction=historyPanel.getByRole('button',{name:'Back to latest',exact:true});const target=await returnAction.boundingBox();assert.ok(target&&target.height>=44&&target.x>=0&&target.x+target.width<=390);
+    const returnAction=historyPanel.getByRole('button',{name:'Back to latest',exact:true});const target=await returnAction.boundingBox();assert.ok(target&&target.height>=44&&target.x>=0&&target.x+target.width<=390&&target.y>=0&&target.y+target.height<=844);await expect(returnAction).toBeInViewport({ratio:1});
     await bob.page.screenshot({path:evidenceDir+'/p071-pre-move-paged-history-mobile.png',fullPage:true});
+    await returnAction.click();await expect(historyPanel).toHaveCount(0);await expect(bob.page.locator('.markdown-body')).toContainText('History checkpoint 8',{timeout:30000});
+    await bob.page.screenshot({path:evidenceDir+'/p071-history-mobile-returned-latest.png',fullPage:true});
     await bob.page.setViewportSize({width:1280,height:720});if(panelWasOpen)await bob.page.getByRole('button',{name:'Discussion',exact:true}).click();
-    await historyPanel.getByRole('button',{name:'Back to latest',exact:true}).click();await expect(bob.page.locator('.markdown-body')).toContainText('History checkpoint 8',{timeout:30000});
     assert.equal((await read(bob.page,moved)).data.blob,final.blob);assert.equal((await read(bob.page,a)).data.blob,resolvedA.blob);
     console.log('PASS REAL DOCUMENT #71: bounded pre-move history, genuine failed-page retry, original-path read, current target preserved');
     // Existing fixed-version UI remains usable for A without changing B.
@@ -208,6 +209,23 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     const original=await request(bob.page,'/matrix/_matrix/client/v3/rooms/'+encodeURIComponent(room)+'/event/'+encodeURIComponent(event));
     assert.equal(original.status,200);assert.equal(original.data.content.body,sourceText);
     await bob.page.screenshot({path:evidenceDir+'/p071-message-document-source.png',fullPage:true});
+    // Existing non-overlap merge is part of the human collaboration review,
+    // not a newly implemented product feature. Edit distinct real block headings
+    // from the same immutable base in the two actual browser sessions.
+    await alice.page.reload();await open(alice.page,copied);
+    await alice.page.getByRole('button',{name:'Edit',exact:true}).click();
+    await bob.page.getByRole('button',{name:'Edit',exact:true}).click();
+    await editor(alice.page).locator('h2').filter({hasText:/^Message 1$/}).fill('Message 1 — Alice reviewed');
+    await editor(bob.page).locator('h2').filter({hasText:/^Message 2$/}).fill('Message 2 — Bob reviewed');
+    await expect(alice.page.getByText('Unsaved draft kept on this browser only.',{exact:false})).toBeVisible();
+    await expect(bob.page.getByText('Unsaved draft kept on this browser only.',{exact:false})).toBeVisible();
+    await save(alice.page,200,source.blob);const cleanMerge=await save(bob.page,200,source.blob);assert.equal(cleanMerge.merged,true);
+    const versionBase=(await read(bob.page,copied)).data;
+    assert.ok(versionBase.content.includes('Message 1 — Alice reviewed')&&versionBase.content.includes('Message 2 — Bob reviewed'));
+    assert.ok(versionBase.content.includes(sourceText)&&versionBase.content.includes(replyText));
+    await bob.page.getByRole('button',{name:'Read',exact:true}).click();await expect(sourceLinks).toHaveCount(2);
+    await bob.page.screenshot({path:evidenceDir+'/p071-clean-nonoverlap-merge.png',fullPage:true});
+    console.log('PASS REAL DOCUMENT #71: distinct block edits from one base preserve both users through actual non-overlap Git merge');
     // Keep source links in a second real Git version, then hold the older
     // authorized snapshot while clicking the still-visible old page's link.
     await bob.page.route('https://matrix.to/**',route=>route.abort());
@@ -218,16 +236,16 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     await expect(bob.page.getByText('Unsaved draft kept on this browser only.',{exact:false})).toBeVisible({timeout:30000});await save(bob.page);
     await bob.page.getByRole('button',{name:'Read',exact:true}).click();await expect(sourceLinks).toHaveCount(2);
     const newerSource=(await read(bob.page,copied)).data;
-    assert.ok(newerSource.content.includes(newerNote));assert.notEqual(newerSource.blob,source.blob);
+    assert.ok(newerSource.content.includes(newerNote));assert.notEqual(newerSource.blob,versionBase.blob);
     // The rich editor may insert at the heading or a body block depending on
     // its active selection. Both belong to the read surface. Verify canonical
     // Git text plus that entire surface, independent of presentation placement.
     await expect(bob.page.locator('.document-surface')).toContainText(newerNote);
     await bob.page.getByRole('button',{name:'Version history',exact:true}).click();
     let ready,release,finished,entered=false;const held=new Promise(resolve=>{ready=resolve}),gate=new Promise(resolve=>{release=resolve}),done=new Promise(resolve=>{finished=resolve});
-    const versionPattern=url=>url.pathname==='/api/document'&&url.searchParams.get('path')===copied&&url.searchParams.get('commit')===source.commit;
+    const versionPattern=url=>url.pathname==='/api/document'&&url.searchParams.get('path')===copied&&url.searchParams.get('commit')===versionBase.commit;
     await bob.page.route(versionPattern,async route=>{entered=true;let failure;
-      try{const response=await route.fetch();assert.equal(response.status(),200);const data=await response.json();assert.equal(data.commit,source.commit);assert.ok(data.content.includes(sourceText));ready(null);await gate;await route.fulfill({response});}
+      try{const response=await route.fetch();assert.equal(response.status(),200);const data=await response.json();assert.equal(data.commit,versionBase.commit);assert.ok(data.content.includes(sourceText));ready(null);await gate;await route.fulfill({response});}
       catch(error){failure=error;ready(error);await route.abort().catch(()=>{});}finally{finished(failure);}
     });
     let primaryFailure;
