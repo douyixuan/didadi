@@ -11,7 +11,7 @@
 
 ### 文档与恢复
 
-- [ ] [多人文档协作](https://github.com/douyixuan/didadi/issues/71)
+- [x] [多人文档协作](https://github.com/douyixuan/didadi/issues/71)
 - [ ] [安装流程自验](https://github.com/douyixuan/didadi/issues/72)
 
 ## Agent成员协作

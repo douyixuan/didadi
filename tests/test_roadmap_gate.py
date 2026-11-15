@@ -117,11 +117,11 @@ class StableProductGateTests(unittest.TestCase):
         original = Path.read_text
         roadmap = original(root/'ROADMAP.md')
         config = json.loads(original(root/'roadmap/_checks.json'))
-        self.assertEqual(validate(root), (16, 2))
+        self.assertEqual(validate(root), (16, 3))
         cases = [
             {'ROADMAP.md': roadmap.replace('- [x] [房间通信隔离](https://github.com/douyixuan/didadi/issues/70)\n', '')},
             {'ROADMAP.md': roadmap.replace('/issues/70)', '/issues/69)')},
-            {'ROADMAP.md': roadmap.replace('- [ ] [多人文档协作]', '- [x] [多人文档协作]')},
+            {'ROADMAP.md': roadmap.replace('- [ ] [安装流程自验]', '- [x] [安装流程自验]')},
             {'roadmap/README.md': original(root/'roadmap/README.md').replace('- 真实登录（待接入）', '')},
         ]
         legacy_active=json.loads(json.dumps(config));legacy_active['features']={'fake':{'review':{'status':'passed','version':'not-a-sha'}}}

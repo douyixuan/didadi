@@ -160,3 +160,43 @@ main的五张PNG均已下载并实际查看，内容仅合成，无cookie/密码
 - [重启后固定内容](../artifact/032-requirements-completion/p071-real-browser/restart-after.png)
 
 **不关闭#71，不新增产品叶。** 003e版本的当前路径历史可回看，但`GitDocs.history(name)`仍按当前路径查询，未贯通移动前旧路径；独立#41/#18的身份、授权及操作幂等设计不在本轮修改；其未合并不等于路径历史必需等待ADR，当前路径历史仍是需要修复的实现缺口。该版本的消息来源已核对可移植Matrix permalink及真实事件，尚不是应用内返回讨论的交互验收；后续改动需单独验证。本节为003e版本记录，不代表后续候选状态。#72独立安装恢复尚未完成，P0保持2/4、全局2/16；未启动P1。Vercel仅为合成预览，不代表公开真实后端交付。
+
+
+## 多人文档协作真实验收
+
+| 验收字段 | 准确记录 |
+| --- | --- |
+| version | `b9d13cd5067b022bd5ce179620b1e5d82e2d5e83` |
+| main | `8f9923b6810e63c0561c266bb6141fdecdf26ae5` |
+| record | `https://github.com/douyixuan/didadi/issues/71#issuecomment-6894570132` |
+| real_ci | `https://github.com/douyixuan/didadi/actions/runs/43713648426` |
+| main_ci | `https://github.com/douyixuan/didadi/actions/runs/43714823601` |
+
+2026-11-15，执行者在准确主线真实验收成功后接受 #71。当前完整产品叶为 #69、#70、#71，共 3/16，P0 为 3/4。#72 独立安装与备份恢复仍未完成，P1 尚未开始。多个 PR 只计同一个完整产品叶。
+
+- [PR104](https://github.com/douyixuan/didadi/pull/104) head 与 main 的 Git tree 均为 `3d9ee98fc9f15f02efc84f094a438fdf2706593c`。head [Fast](https://github.com/douyixuan/didadi/actions/runs/43713648437) 和上表真实 CI 成功。main [Fast](https://github.com/douyixuan/didadi/actions/runs/43714823607) 和上表真实 CI 成功，包含 `p0-real-e2e-gate`。
+- [准确 head 的 Codex 审查](https://github.com/douyixuan/didadi/pull/104#issuecomment-6894296220)完成，无发现。CodeRabbit/Codex 的同步顺序和固定搜索入口问题有确定性 Red→Green 及真实回归。没有代用户执行 GitHub approval。
+- 环境是 CI 临时 loopback Synapse/PostgreSQL、Workspace/Document API、实际 Git 与 Chromium。两个账号和所有正文均为合成数据。标准离线 Python 112/112、React 221/221 与构建成功，但不代替真实流程。
+
+| 完整路径 | 实际观察与断言 |
+| --- | --- |
+| 两用户与两文档 | 真实登录、同房间通信后，Alice/Bob 通过 UI 创建 A/B，列表、打开、编辑、切换和保存走真实 API。修改 A 不改变 B 的正文/blob/历史。实际 Git 作者及可读提交标题对应写入者。 |
+| 失败与并发恢复 | 同基线重叠修改返回 409，赢家不变，败方草稿经刷新恢复。不同段落的真实并发写入保留双方内容。实际中止网络写入后 Git 不变，草稿保留并显式重试。 |
+| 移动与完整历史 | 移动 B 后刷新重开并逐字节导出。超过八条历史可分页，实际中止页请求后用原位置重试，可读移动前的原路径。搜索固定版本入口也能加载历史。 |
+| 来源与重试 | 选择根消息/回复创建 Git 文档。创建回执丢失后重试不多写提交。点击来源在应用内回到准确消息/Thread，保留房间草稿。 |
+| 授权与元数据 | 回执递归解码后不含正文。跨房间读取、无授权写入和路径穿越失败，HEAD/路径/正文不变。临时测试写权限在 finally 恢复。 |
+| 重启后真实回读 | 重启隔离后端及 Synapse。新浏览器中的两个用户分别打开 A/B，正文/blob 与不可变 Git 对象一致。 |
+| 手机自验 | 390px Chromium 从紧凑导航进入历史，打开更多工具、滚动旧版本、正常点击返回并下载。固定头部和 44px 操作可达。不是物理 iPhone/键盘/IME 验收。 |
+
+执行入口：`client/scripts/real_login_browser.mjs`、`document_recovery_acceptance.mjs`、`cross_user_receipt_browser.mjs` 和 `scripts/real_login_smoke.py`。复现环境与真实执行步骤保留在现有 `.github/workflows/real-matrix.yml`。head 的 credential-free artifact 为 `14161881863`，14 天后可能过期。下列 PNG 已下载并实际查看，内容仅合成，无密码、Cookie、token 或用户数据库。
+
+- [改前手机历史](../artifact/032-requirements-completion/p071-real-browser/history-mobile-before-815.png)：旧 head `81540738`，历史控制曾随内容滚出屏幕，不能作为最终通过图。
+- [改后手机历史](../artifact/032-requirements-completion/p071-real-browser/history-mobile-b9.png)、[手机阅读与导出](../artifact/032-requirements-completion/p071-real-browser/read-mobile-b9.png)、[更多工具](../artifact/032-requirements-completion/p071-real-browser/more-mobile-b9.png)：最终 head `b9d13cd5`。
+- [搜索固定版本历史](../artifact/032-requirements-completion/p071-real-browser/search-history-b9.png)、[冲突草稿](../artifact/032-requirements-completion/p071-real-browser/conflict-draft-b9.png)、[真实非重叠合并](../artifact/032-requirements-completion/p071-real-browser/merge-b9.png)、[重启回读](../artifact/032-requirements-completion/p071-real-browser/restart-b9.png)：最终 head。合并图只显示可见区域，双方内容完整性由实际 Git 断言证明。
+- [main 手机阅读](../artifact/032-requirements-completion/p071-real-browser/read-mobile-main8f.png)、[main 重启回读](../artifact/032-requirements-completion/p071-real-browser/restart-main8f.png)：合并后 `8f9923b6` 的真实 CI，均实际查看。
+
+保留失败边界：固定搜索版本没有历史、迟到授权响应恢复旧内容及同步顺序问题由回归复现后修复。真实 UI 截图暴露了历史返回不可达和长路径挤压导航，修复后重新实际操作。旧 Real `43712156484` 在文档流程前因测试过早读 URL 而查询旧私聊，属于 harness 竞态，不是产品越权 Red。修正通过实际创建回执 ID/type 关联 URL/选中项，保留 Matrix 原生类型断言。最终 head 和 main 均重新通过。
+
+关联 #3/#14/#15/#16 已核对。当前流程验证人类直接保存、元数据回执、作者、冲突和非重叠合并，但没有自动关闭它们的全部多进程/远端/旧格式崩溃/幂等条款。实时协作未交付，稳定文档身份属于 #77。本次历史只跟随应用产生的字节一致移动，不承诺任意外部编辑加重命名识别。99 项原需求与长期范围保持原文，映射不等于通过。
+
+[现有 Vercel 预览](https://didadi.vercel.app/)是合成静态界面，不是上述真实后端或公开 Beta。GitHub 已确认 `8f9923b6` 的 Production 部署成功。既有私有 SQLite token 明文限制仍保留至安全工作，不能据此发布真实多租户后端。#41/#18 归属和 #12 暂停不变。
