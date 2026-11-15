@@ -82,7 +82,7 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     await editor(bob.page).fill(resolved);
     await bob.page.getByRole('button',{name:'I reviewed and merged latest Git text',exact:true}).click();
     await save(bob.page);
-    assert.ok((await read(alice.page,a)).data.content.includes(resolved));
+    const resolvedA=(await read(alice.page,a)).data;assert.ok(resolvedA.content.includes(resolved));
     assert.ok((await read(alice.page,b)).data.content.includes(stableB));
     // Abort before transport: no backend write is fabricated or hidden.
     await open(bob.page,b);await edit(bob.page,retryB);
@@ -114,14 +114,14 @@ export async function verifyDocumentRecovery({alice,bob,accounts,request,evidenc
     const file=await download,stream=await file.createReadStream();const chunks=[];for await(const chunk of stream)chunks.push(chunk);
     assert.equal(Buffer.concat(chunks).toString('utf8'),final.content);
     await bob.page.screenshot({path:evidenceDir+'/p071-moved-reopened-exported.png',fullPage:true});
-    const finalA=(await read(alice.page,a)).data;
-    const proofs=[{path:a,commit:finalA.commit,blob:finalA.blob,marker:resolved},{path:moved,commit:final.commit,blob:final.blob,marker:retryB}];
+    const proofs=[{path:a,commit:resolvedA.commit,blob:resolvedA.blob,marker:resolved},{path:moved,commit:final.commit,blob:final.blob,marker:retryB}];
     const receipts=await request(bob.page,'/matrix/_matrix/client/v3/rooms/'+encodeURIComponent(room)+'/messages?dir=b');
     assert.equal(receipts.status,200);
     for(const proof of proofs){
       const receipt=receipts.data.chunk.find(event=>event.content?.['org.didadi.document.commit']?.commit===proof.commit);
       assert.ok(receipt,'Final real Git version must have a Matrix receipt');
       assert.equal(receipt.content['org.didadi.document.commit'].author,accounts[1][0]);
+      assert.equal(receipt.content['org.didadi.document.commit'].path,proof.path);
       for(const text of [base,winner,loser,stableB,resolved,retryB])assert.ok(!JSON.stringify(receipt).includes(text),'Receipt must not contain document text');
     }
     await writeFile(evidenceDir+'/p071-git-proof.json',JSON.stringify({documents:proofs},null,2),{mode:0o600});
