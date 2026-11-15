@@ -49,3 +49,12 @@
 ### ddd 每日执行
 
 每日从 #85 第一个未通过的子任务（目前 **#70**）读取需求；先添加一条失败测试并记录 Red，做最小修改到 Green，再核验 offline + real + main。#71 和 #72 同理。将测试 ID 对应到 PR 与子 Issue；更新 #85 的勾选与叶子数只在完整验收后进行。不为测试计划本身增加叶子。
+
+
+## #72 clean-room 与门禁候选
+
+单命令入口为 `python3 -m scripts.p072_clean_room --allow-real-matrix --approval-reference approved-isolated-P0-test`。它仅支持独立干净 checkout 和本机 Unix Docker context。本机当前任务不运行真实服务，真实执行使用 GitHub 临时 runner。失败的公开报告只保留阶段、命令名称、退出码和耗时，私有原始日志不上传。
+
+CI 为所有 PR/main push 生成稳定状态。白名单内纯 Markdown/PNG 文档变更明确标记 docs-only exemption，不创建账号或服务，不声称真实验收。任何代码、工作流、测试、需求元数据或代码改名为文档的变更必须跑既有 matrix-smoke 与独立 clean-room-release。代码 PR 处于 draft、来自 fork 或缺少手动许可时，真实门禁不放行。离线两个 job 始终执行，`p0-offline-gate` 必须同时观察到成功。
+
+拟配置的 main 必需状态是 `p0-offline-gate` 与 `p0-real-e2e-gate`，strict 为 true。尚未修改保护设置。2026-11-15 对 main `8f9923b6` 的只读结果仍为 protected=false、enforcement=off。必须先取得安全配置的适用确认和管理员权限，再核实当前完整设置后应用最小规则。不得凭 CI 绿色假定强制规则已生效，不得覆盖未知的其他保护策略。#72、P0 退出和 P1 启动仍不成立。
