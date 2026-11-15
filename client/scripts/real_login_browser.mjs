@@ -5,6 +5,8 @@ import assert from 'node:assert/strict';
 import {readFile, mkdir, writeFile} from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
 import {chromium, expect} from '@playwright/test';
+import {loginCooldown} from './login_cooldown.mjs';
+import {verifyRoomIsolation} from './room_isolation_acceptance.mjs';
 
 function option(name, fallback = null) {
   const index = process.argv.indexOf(name);
@@ -372,6 +374,8 @@ try {
   assert.equal(departedAgain.status, 403, 'Repeated leave cannot reacquire membership');
   console.log('PASS REAL ROOM #70: browser room leave, message eviction, non-member denial, denied stale reads');
 
+  await verifyRoomIsolation({alice,bob,accounts,request:browserRequest,evidenceDir});
+
   // Wrong passwords are genuinely rejected; current-device logout must not
   // invalidate another browser's real Matrix session or shared Git document.
   const invalid = await browser.newContext({baseURL: base});
@@ -384,7 +388,7 @@ try {
   // logins from this same loopback IP. Synapse can temporarily reply 429
   // (rc_login.address); that is NOT proof an incorrect password was rejected.
   // Retry only after the reported cooldown and require an actual 401.
-  let invalidPasswordRejected = false;
+  let invalidPasswordRejected = false;const invalidLoginStarted=Date.now();
   for (let attempt = 0; attempt < 4; attempt++) {
     await invalidPage.getByLabel('Password').fill('wrong-browser-password');
     const loginResponse = invalidPage.waitForResponse(response =>
@@ -395,9 +399,7 @@ try {
     if (response.status() === 429) {
       if (attempt === 3) throw new Error('Matrix login limiter did not recover after bounded retries');
       const body = await response.json().catch(() => ({}));
-      const reported = Number(body.retry_after_ms);
-      const pause = Number.isFinite(reported) && reported > 0
-        ? Math.min(45000, Math.max(1500, reported + 500)) : 12000;
+      const pause=loginCooldown(body,Date.now()-invalidLoginStarted);
       console.log('Real Matrix login rate-limited; retrying invalid-password check after cooldown');
       await invalidPage.waitForTimeout(pause);
       continue;
