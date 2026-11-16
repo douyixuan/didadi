@@ -107,4 +107,21 @@ class CleanRoomTests(unittest.TestCase):
             with self.subTest(args=args),self.assertRaises(Failure):gate_result(*args)
 
 
+class ComposeIsolationTests(unittest.TestCase):
+    def test_external_compose_files_and_dotenv_cannot_select_unknown_resources(self):
+        import os
+        with tempfile.TemporaryDirectory() as temporary,patch.dict(os.environ,{'COMPOSE_FILE':'/fictional/compose.yaml','COMPOSE_PROFILES':'fictional','UNRELATED_API_KEY':'fictional-only','PATH':'/fictional-bin'},clear=True):
+            root=Path(temporary);runner=CleanRoom(root,'a'*40)
+            self.assertFalse('COMPOSE_FILE' in runner.env)
+            self.assertFalse('COMPOSE_PROFILES' in runner.env)
+            self.assertFalse('UNRELATED_API_KEY' in runner.env)
+            self.assertEqual(runner.env['PATH'],'/fictional-bin')
+            with patch.object(runner,'command') as command:
+                runner.compose(runner.source,'up','-d')
+            args=command.call_args.args[0]
+            self.assertEqual(args[args.index('-f')+1],str(root.resolve()/'compose.yaml'))
+            self.assertEqual(args[args.index('--env-file')+1],'/dev/null')
+            self.assertEqual(args[args.index('-p')+1],runner.source)
+
+
 if __name__=='__main__':unittest.main()

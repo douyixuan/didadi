@@ -270,6 +270,9 @@ jobs:
         with:
           node-version: '24'
       - name: Fresh checkout, retained restart and independent backup restore
+        env:
+          COMPOSE_FILE: /p072-fictional-override/compose.yaml
+          COMPOSE_PROFILES: p072-unrequested-profile
         run: python3 -m scripts.p072_clean_room --allow-real-matrix --approval-reference trusted-first-party-ci
       - name: Preserve allowlisted clean-room diagnostics
         if: always()

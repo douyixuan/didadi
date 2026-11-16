@@ -12,7 +12,7 @@ After you obtain permission for isolated real tests, run this command from the c
 python3 -m scripts.p072_clean_room --allow-real-matrix --approval-reference 'approved-isolated-P0-test'
 ```
 
-The reference records permission. It does not grant permission. This command downloads public images and Node packages. It installs locked client dependencies and Playwright 1.56.1. It uses random Compose project names and only loopback ports 8008, 9000 and 8791.
+The reference records permission. It does not grant permission. This command downloads public images and Node packages. It installs locked client dependencies and Playwright 1.56.1. It uses random Compose project names and only loopback ports 8008, 9000 and 8791. It fixes the repository Compose file, ignores default environment files and pins the verified local Docker context. Child processes receive only required runtime variables, not unrelated provider keys or external Compose overrides.
 
 The runner creates real synthetic users on its own Synapse. It runs the existing #70/#71 HTTP and browser flows. It tests retained-volume restart. It then stops its own services and backs up four owned volumes and the private host files. It restores copies into different volumes and a separate host copy. The original volumes remain stopped during the restore test. The restored browser uses the original device cookies without another login. It reads both immutable Git documents and the original Matrix message, then tests private-room and unknown-session denial.
 

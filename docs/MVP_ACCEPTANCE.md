@@ -200,3 +200,54 @@ main的五张PNG均已下载并实际查看，内容仅合成，无cookie/密码
 关联 #3/#14/#15/#16 已核对。当前流程验证人类直接保存、元数据回执、作者、冲突和非重叠合并，但没有自动关闭它们的全部多进程/远端/旧格式崩溃/幂等条款。实时协作未交付，稳定文档身份属于 #77。本次历史只跟随应用产生的字节一致移动，不承诺任意外部编辑加重命名识别。99 项原需求与长期范围保持原文，映射不等于通过。
 
 [现有 Vercel 预览](https://didadi.vercel.app/)是合成静态界面，不是上述真实后端或公开 Beta。GitHub 已确认 `8f9923b6` 的 Production 部署成功。既有私有 SQLite token 明文限制仍保留至安全工作，不能据此发布真实多租户后端。#41/#18 归属和 #12 暂停不变。
+
+
+## #72 独立安装恢复真实交付（未整叶验收）
+
+产品计数仍为3/16、P0 3/4。单命令、独立恢复与诊断已经执行，分支保护尚未启用，不能据此关闭#72或进入P1。
+
+- 测试head：`44b3c67981527610223759f4445f7aff137e2143`，PR106。
+- 准确head Fast：[43722451148](https://github.com/douyixuan/didadi/actions/runs/43722451148)。真实CI：[43722451156](https://github.com/douyixuan/didadi/actions/runs/43722451156)，结果成功。
+- 合入main：`a0dd0b3ebd84a848f2866a998b657a6d2bcbfe46`，与head同tree `b2bfc245cbc6451a5f5e48f3ea93e64e1ccfe4b4`，main Fast：[43723745120](https://github.com/douyixuan/didadi/actions/runs/43723745120)，真实/恢复CI：[43723745091](https://github.com/douyixuan/didadi/actions/runs/43723745091)，结果成功。
+- 标准隔离Python122/122、React221/221及构建。[准确head Codex审查](https://github.com/douyixuan/didadi/pull/106#issuecomment-6895661781)完成无发现；CodeRabbit未知Cookie测试缺口经源码核实修正，不能把旧无Cookie负例冒充未知句柄负例。
+
+实际环境是新的GitHub runner与干净checkout，无既有.local/node_modules/dist。随机命名的Synapse/PostgreSQL/config/gateway四卷初始不存在，端口仅loopback。执行现有LOCAL_WORKSPACE的一条命令，复用真正#70/#71流程，不使用Vercel或注入假身份。
+
+| 验证阶段 | 实际边界 |
+| --- | --- |
+| 干净启动与真实用户 | 明确前置条件和拒绝已有状态，安装锁定依赖，创建临时非管理员账号，通过服务健康检查 |
+| 保留卷重启 | 重建自有容器并保留卷，原用户、消息及任务证据存在 |
+| 双用户/双文档 | 真HTTP/Chromium登录、消息、拒绝授权、元数据回执、文档保存、冲突草稿及重启回读 |
+| 独立备份恢复 | 停止源服务，备份四卷和主机状态。恢复至不同卷与文件副本，逐文件核对归档字节。源卷保持停止，不用原卷启动恢复服务 |
+| 原设备与隔离 | 不重新登录，使用原始设备Cookie恢复两个用户，校验原消息及不可变A/B Git正文、私有房间403和CSRF隔离。分别验证缺少Cookie和合法随机未知Cookie的401 |
+| 实际失败诊断 | 再次对本次自有状态执行入口，子命令必须失败并返回指定preflight原因，Git引用/私有设备证明指纹不变。公开只保留阶段、源码位置、固定错误类别和退出码，完整私有日志不上传 |
+| 清理 | 只清理本次独有命名空间；没有删除未知卷、生产内容或其他用户工作区 |
+
+报告passed描述本runner，accepted固定false，物理iOS/IME和生产备份均未验收。原始Cookie、数据库、日志和归档不进入artifact allowlist。允许交付的PNG均为合成数据，并由执行者实际查看。
+
+此处保留代码恢复证据；纯文档豁免另外验证，不把其绿色状态称为真实E2E。main规则只读结果为protected=false/enforcement=off。拟要求p0-offline-gate与p0-real-e2e-gate（实际App ID15368），strict=true、管理员也受约束，禁止强推/删除。没有应用设置；需适用确认、写权限和应用前完整只读复核。不新增审批人数、推送成员、凭据或费用。
+
+准确head公开报告（artifact `14165665583`，不是整叶接受记录）：
+
+| 实际阶段 | 退出码 | 秒 |
+| --- | --- | --- |
+| preflight | 0 | 0.71 |
+| clean-start-and-real-users | 0 | 73.37 |
+| retained-volume-restart | 0 | 22.84 |
+| real-http-and-two-browser-documents | 0 | 390.44 |
+| independent-four-volume-and-host-restore | 0 | 84.83 |
+| reject-state-reuse-without-side-effects | 0 | 0.07 |
+| owned-resource-cleanup | 0 | 11.35 |
+
+重复执行负例的子进程实际退出1，state_unchanged=true。原始报告仅含白名单字段，未复制私有日志、Cookie、数据库或备份归档。
+
+已实际查看：[Alice恢复](../artifact/032-requirements-completion/p072-clean-room/restored-alice-44.png)、[Bob恢复且保持只读](../artifact/032-requirements-completion/p072-clean-room/restored-bob-44.png)。截图来自上述head的1280×720 Chromium，只有合成数据，不是物理设备验收。
+
+[现有Vercel预览](https://didadi.vercel.app/)仍是synthetic静态界面，和上述真实隔离后端分开。原始99需求不变，#41/#18和暂停事项不动。
+
+
+### 输入隔离补强与文档豁免实测
+
+证据分支首个纯Markdown/PNG head `c64cda7af20fdbf532141f7263432b0e17769836` 已实际验证：[Fast 43723991536](https://github.com/douyixuan/didadi/actions/runs/43723991536)成功，[豁免工作流43723991384](https://github.com/douyixuan/didadi/actions/runs/43723991384)中matrix-smoke与clean-room-release均skipped，聚合输出EXEMPT documentation only，不是实际E2E。后续本PR加入输入隔离代码，因此必须重新执行两条真实作业，不能沿用这个豁免。
+
+静态复核与纯虚构环境负例证明初版命令继承COMPOSE_FILE/COMPOSE_PROFILES，且没有固定Compose文件。补强固定仓库compose.yaml、--env-file /dev/null、明确本地context及子进程环境白名单。没有在任何真实服务/生产数据上复现或运行。新clean-room作业故意设置指向虚构不存在路径的COMPOSE_FILE和额外profile，要求入口忽略外部覆盖仍完成整个流程。该代码补强的准确CI另行记录，不能拿旧干净环境的成功代替。
